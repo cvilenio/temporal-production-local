@@ -1,0 +1,35 @@
+[project]
+name = "temporal-demo"
+version = "0.0.0"
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[dependency-groups]
+orders-service = [
+    "asyncpg>=0.29.0",
+    "fastapi==0.111.0",
+    "httpx>=0.27.0",
+    "pydantic-settings>=2.14.0",
+    "pydantic==2.7.1",
+    "sqlalchemy[asyncio]>=2.0.30,<3",
+    "temporalio>=1.26,<1.27",
+    "uvicorn==0.29.0",
+]
+retail-demo-console = [
+  "asyncpg>=0.29.0",
+  "docker>=7.1.0",
+  "fastapi>=0.111.0",
+  "httpx>=0.27.0",
+  "jinja2>=3.1.4",
+  "pydantic-settings>=2.2.1",
+  "uvicorn[standard]>=0.29.0",
+]
+mock-api = [
+  "fastapi==0.111.0",
+  "uvicorn==0.29.0",
+  "pydantic==2.7.1",
+]
+dev = ["ruff", "pytest", "pytest-asyncio"]
+
+[tool.uv]
+default-groups = ["orders-service", "retail-demo-console", "mock-api", "dev"]

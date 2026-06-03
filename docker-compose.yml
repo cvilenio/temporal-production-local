@@ -1,0 +1,436 @@
+# =============================================================================
+# Ziggymart Retail Demo — Docker Compose
+# =============================================================================
+#
+# Startup dependency chain:
+#
+#   postgresql ──► temporal-admin-tools (schema init, one-shot)
+#                         │
+#                         ▼
+#                      temporal (server)
+#                    ┌────┴─────────────────────────────┐
+#                    │                                  │
+#          temporal-create-namespace          temporal-ui ──► ui-proxy
+#                    │
+#          temporal-search-attributes
+#
+#   orders-db ──► orders-service ──► orders-workflow-worker
+#              │         │           orders-activity-worker
+#              │         └─────────► retail-demo-console
+#              │
+#   mock-api ──┘ (consumed by workers; no upstream deps)
+#
+#   Dev admin UIs (non-critical):
+#     pgweb-orders   → orders-db
+#     pgweb-temporal → postgresql
+#
+# =============================================================================
+
+services:
+
+  # ===========================================================================
+  # TEMPORAL CLUSTER — PERSISTENCE
+  # Postgres instance used exclusively by the Temporal server for workflow
+  # state, history, and visibility storage.
+  # ===========================================================================
+
+  postgresql:
+    image: postgres:${POSTGRESQL_VERSION}
+    container_name: temporal-postgresql
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+    ports:
+      - "5432:5432"
+    networks:
+      - temporal-network
+    volumes:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  # ===========================================================================
+  # TEMPORAL CLUSTER — SCHEMA BOOTSTRAP  (one-shot)
+  # Runs setup-postgres.sh to apply Temporal's DB schema via tctl/admin-tools.
+  # Completes and exits; temporal server waits on service_completed_successfully.
+  # ===========================================================================
+
+  temporal-admin-tools:
+    image: temporalio/admin-tools:${TEMPORAL_ADMINTOOLS_VERSION}
+    container_name: temporal-admin-tools
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=postgresql
+      - SQL_PASSWORD=temporal
+    networks:
+      - temporal-network
+    volumes:
+      - ./compose/scripts:/scripts
+    entrypoint: ["/bin/sh"]
+    command: /scripts/setup-postgres.sh
+    restart: on-failure:6
+
+  # ===========================================================================
+  # TEMPORAL CLUSTER — SERVER
+  # Core Temporal service: frontend, history, matching, and worker services.
+  # Exposes gRPC API on port 7233 (used by SDK clients and workers).
+  # ===========================================================================
+
+  temporal:
+    image: temporalio/server:${TEMPORAL_VERSION}
+    container_name: temporal
+    depends_on:
+      temporal-admin-tools:
+        condition: service_completed_successfully
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=postgresql
+      - BIND_ON_IP=0.0.0.0
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+    networks:
+      - temporal-network
+    ports:
+      - "7233:7233"
+    volumes:
+      - ./compose/dynamicconfig:/etc/temporal/config/dynamicconfig
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "7233"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 30s
+
+  # ===========================================================================
+  # TEMPORAL CLUSTER — NAMESPACE BOOTSTRAP  (one-shot)
+  # Creates the "ziggymart" namespace, then registers the custom search
+  # attributes (OrderId, TraceId, OrderStatus) required by the demo workflows.
+  # Both containers exit after completion.
+  # ===========================================================================
+
+  temporal-create-namespace:
+    image: temporalio/admin-tools:${TEMPORAL_ADMINTOOLS_VERSION}
+    container_name: temporal-create-namespace
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - DEFAULT_NAMESPACE=ziggymart
+    networks:
+      - temporal-network
+    volumes:
+      - ./compose/scripts:/scripts
+    entrypoint: ["/bin/sh"]
+    command: /scripts/create-namespace.sh
+    restart: on-failure:5
+
+  temporal-search-attributes:
+    image: temporalio/admin-tools:${TEMPORAL_ADMINTOOLS_VERSION}
+    container_name: temporal-search-attributes
+    depends_on:
+      temporal-create-namespace:
+        condition: service_completed_successfully
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    networks:
+      - temporal-network
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        until temporal operator search-attribute list --namespace ziggymart; do
+          echo "Waiting for namespace ziggymart..."; sleep 2;
+        done;
+        temporal operator search-attribute create --name OrderId     --type Text    --namespace ziggymart || true;
+        temporal operator search-attribute create --name TraceId     --type Text    --namespace ziggymart || true;
+        temporal operator search-attribute create --name OrderStatus --type Keyword --namespace ziggymart || true;
+    restart: on-failure:5
+
+  # ===========================================================================
+  # TEMPORAL CLUSTER — WEB UI
+  # temporal-ui: official Temporal Web UI (port 8082 → container 8080).
+  # ui-proxy:    nginx reverse proxy in front of the UI (port 8081).
+  # ===========================================================================
+
+  temporal-ui:
+    image: temporalio/ui:${TEMPORAL_UI_VERSION}
+    container_name: temporal-ui
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000,http://localhost:5174
+      - TEMPORAL_CSRF_COOKIE_INSECURE=true
+    networks:
+      - temporal-network
+    ports:
+      - "8082:8080"
+
+  ui-proxy:
+    image: nginx:alpine
+    container_name: temporal-ui-proxy
+    depends_on:
+      - temporal-ui
+    networks:
+      - temporal-network
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./compose/deployment/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+
+  # ===========================================================================
+  # APPLICATION — DATA STORE
+  # Postgres instance for the Ziggymart orders application (separate from
+  # the Temporal cluster DB above). Exposed on host port 5433 to avoid
+  # collision with temporal-postgresql on 5432.
+  # ===========================================================================
+
+  orders-db:
+    image: postgres:16
+    container_name: orders-db
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: orders_db
+    ports:
+      - "5433:5432"
+    networks:
+      - temporal-network
+    volumes:
+      - orders-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d orders_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+
+  # ===========================================================================
+  # APPLICATION — EXTERNAL SERVICE SIMULATOR
+  # Simulates downstream APIs (inventory, shipping, payment) with configurable
+  # latency and hang behaviour, used by activity workers during demos.
+  # Port 8001 → container 8000.
+  # ===========================================================================
+
+  mock-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP: mock-api
+        APP_MODULE: main:app
+        APP_PORT: "8000"
+    container_name: mock-api
+    environment:
+      - MOCK_SHIPPING_HANG_MS=15000
+      - MOCK_INVENTORY_LATENCY_MS=2000
+      - MOCK_SHIPPING_LATENCY_MS=1500
+      - MOCK_PAYMENT_LATENCY_MS=2000
+    networks:
+      - temporal-network
+    ports:
+      - "8001:8000"
+
+  # ===========================================================================
+  # APPLICATION — ORDERS API SERVICE
+  # FastAPI service that exposes the orders REST API and issues Temporal
+  # workflow signals/starts. Port 8002 → container 8000.
+  # ===========================================================================
+
+  orders-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP: orders-service
+        APP_MODULE: main:app
+        APP_PORT: "8000"
+    container_name: orders-service
+    depends_on:
+      temporal:
+        condition: service_healthy
+      orders-db:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_NAMESPACE=ziggymart
+      - DATABASE_URL=postgresql+asyncpg://admin:password@orders-db:5432/orders_db
+    networks:
+      - temporal-network
+    ports:
+      - "8002:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+
+  # ===========================================================================
+  # APPLICATION — TEMPORAL WORKERS
+  # Workflows and Activities run in dedicated worker processes to allow
+  # independent scaling and prevent blocking activities from starving workflow
+  # orchestration.
+  #
+  #   orders-workflow-worker  polls orders-workflow-task-queue → hosts OrderWorkflow
+  #   orders-activity-worker  polls orders-activity-task-queue → hosts all activities
+  #
+  # Both workers share the same Docker image; --role selects the task queue.
+  # ===========================================================================
+
+  orders-workflow-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP: orders-service
+        APP_MODULE: main:app
+        APP_PORT: "8000"
+    container_name: orders-workflow-worker
+    command: ["python", "worker.py", "--role", "workflow"]
+    depends_on:
+      temporal:
+        condition: service_healthy
+      orders-db:
+        condition: service_healthy
+      orders-service:
+        condition: service_healthy
+      mock-api:
+        condition: service_started
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_NAMESPACE=ziggymart
+      - DATABASE_URL=postgresql+asyncpg://admin:password@orders-db:5432/orders_db
+      - MOCK_API_URL=http://mock-api:8000
+      - ORDERS_SERVICE_URL=http://orders-service:8000
+      - PYTHONUNBUFFERED=1
+    networks:
+      - temporal-network
+
+  orders-activity-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP: orders-service
+        APP_MODULE: main:app
+        APP_PORT: "8000"
+    container_name: orders-activity-worker
+    command: ["python", "worker.py", "--role", "activity"]
+    depends_on:
+      temporal:
+        condition: service_healthy
+      orders-db:
+        condition: service_healthy
+      orders-service:
+        condition: service_healthy
+      mock-api:
+        condition: service_started
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_NAMESPACE=ziggymart
+      - DATABASE_URL=postgresql+asyncpg://admin:password@orders-db:5432/orders_db
+      - MOCK_API_URL=http://mock-api:8000
+      - ORDERS_SERVICE_URL=http://orders-service:8000
+      - PYTHONUNBUFFERED=1
+    networks:
+      - temporal-network
+
+  # ===========================================================================
+  # APPLICATION — DEMO CONSOLE
+  # FastAPI + HTMX dashboard for driving and observing the retail demo.
+  # Mounts the Docker socket (read-only) to stream container logs in-browser.
+  # Port 8086.
+  # ===========================================================================
+
+  retail-demo-console:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP: retail-demo-console
+        APP_MODULE: app.main:app
+        APP_PORT: "8086"
+    container_name: retail-demo-console
+    depends_on:
+      orders-db:
+        condition: service_healthy
+      orders-service:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://admin:password@orders-db:5432/orders_db
+      - ORDERS_SERVICE_URL=http://orders-service:8000
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - PORT=8086
+      - LOG_BUFFER_SIZE=500
+      - MESSAGE_POLL_INTERVAL_SECONDS=3
+      - ORDERS_SERVICE_TIMEOUT_SECONDS=60
+    networks:
+      - temporal-network
+    ports:
+      - "8086:8086"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8086/healthz').read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+
+  # ===========================================================================
+  # DEV ADMIN UIs  (non-critical — convenience tools only)
+  # pgweb instances for browsing both Postgres databases from a browser.
+  # These have no upstream dependents and can be omitted in production.
+  # ===========================================================================
+
+  pgweb-orders:   # orders-db browser  →  http://localhost:8083
+    image: sosedoff/pgweb
+    container_name: pgweb-orders
+    depends_on:
+      - orders-db
+    environment:
+      - DATABASE_URL=postgres://admin:password@orders-db:5432/orders_db?sslmode=disable
+    networks:
+      - temporal-network
+    ports:
+      - "8083:8081"
+    restart: always
+
+  pgweb-temporal:   # temporal DB browser  →  http://localhost:8084
+    image: sosedoff/pgweb
+    container_name: pgweb-temporal
+    depends_on:
+      - postgresql
+    environment:
+      - DATABASE_URL=postgres://temporal:temporal@postgresql:5432/temporal?sslmode=disable
+    networks:
+      - temporal-network
+    ports:
+      - "8084:8081"
+    restart: always
+
+# =============================================================================
+# NETWORKS & VOLUMES
+# =============================================================================
+
+networks:
+  temporal-network:
+    driver: bridge
+    name: temporal-network
+
+volumes:
+  orders-db-data:

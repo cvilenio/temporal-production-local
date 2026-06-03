@@ -1,0 +1,67 @@
+SCENARIOS = {
+    "happy_path": {
+        "label": "Happy Path",
+        "description": "A normal successful order.",
+        "features": [],
+        "default_quantity": 0,
+        "payload": {
+            "item_id": "ITEM-001",
+            "quantity": 1,
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "address": "123 Main St, Springfield",
+            "amount": 49.99,
+        },
+    },
+    "inventory_flaky": {
+        "label": "Inventory Flaky (Temporal Retry)",
+        "description": "Inventory service returns transient 503s on first two attempts; Temporal's retry policy automatically retries and the third attempt succeeds. Workflow continues to completion.",
+        "features": ["retry policy"],
+        "default_quantity": 0,
+        "payload": {
+            "item_id": "ITEM-INV-FLAKY",
+            "quantity": 1,
+            "user_id": "00000000-0000-0000-0000-000000000008",
+            "address": "88 Steady Way, Boston MA",
+            "amount": 49.99,
+        },
+    },
+    "shipping_ghost": {
+        "label": "Shipping Timeout Recovery - After Verification",
+        "description": "Shipping API hangs on first call; Temporal's activity timeout fires. The label was actually created, so read-after-write verification finds it and the workflow continues.",
+        "features": ["timeout", "branching"],
+        "default_quantity": 0,
+        "payload": {
+            "item_id": "ITEM-SHIP-GHOST",
+            "quantity": 1,
+            "user_id": "00000000-0000-0000-0000-000000000004",
+            "address": "7 Ghost Rd, Salem MA",
+            "amount": 29.99,
+        },
+    },
+    "shipping_flaky": {
+        "label": "Shipping Timeout Recovery - After Retry",
+        "description": "Shipping API hangs on first call; Temporal times out. Verification finds no label, so workflow retries the create and it succeeds on the second attempt.",
+        "features": ["timeout", "retry multiple", "branching"],
+        "default_quantity": 0,
+        "payload": {
+            "item_id": "ITEM-SHIP-FLAKY",
+            "quantity": 1,
+            "user_id": "00000000-0000-0000-0000-000000000007",
+            "address": "42 Flaky Way, Austin TX",
+            "amount": 29.99,
+        },
+    },
+    "shipping_unrecoverable": {
+        "label": "Shipping Timeout Unrecoverable",
+        "description": "Shipping API hangs twice with no label created; Temporal times out both attempts, verification finds nothing both times, workflow runs saga (release inventory) and cancels.",
+        "features": ["timeout", "retry multiple", "compensation", "branching"],
+        "default_quantity": 0,
+        "payload": {
+            "item_id": "ITEM-SHIP-LOST",
+            "quantity": 1,
+            "user_id": "00000000-0000-0000-0000-000000000005",
+            "address": "9 Lost Ln, Phoenix AZ",
+            "amount": 29.99,
+        },
+    },
+}

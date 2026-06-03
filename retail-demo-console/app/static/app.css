@@ -1,0 +1,96 @@
+/* Minimal custom CSS on top of Tailwind */
+
+body {
+    background-color: #0b0d14;
+    color: #e6e8ef;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: #1f2430;
+    border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #333948;
+}
+
+/* Base styles for dark theme panels */
+.panel {
+    background-color: #11141d;
+    border: 1px solid #1f2430;
+}
+
+/* Accent borders */
+.accent-border {
+    border-left: 3px solid #7c5cff;
+}
+
+/* Number input arrows removal */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+input[type="number"] {
+    -moz-appearance: textfield;
+}
+
+/* Badge colors */
+.pill-info {
+    @apply bg-info/20 text-info border border-info/30 shadow-inner shadow-info/10;
+}
+.pill-success {
+    @apply bg-success/20 text-success border border-success/30 shadow-inner shadow-success/10;
+}
+.pill-warn {
+    @apply bg-warn/20 text-warn border border-warn/30 shadow-inner shadow-warn/10;
+}
+.pill-error {
+    @apply bg-error/20 text-error border border-error/30 shadow-inner shadow-error/10;
+}
+.pill-default {
+    @apply bg-borderSubtle text-textMuted border border-borderSubtle/50;
+}
+.pill-warn {
+    color: #f0b429;
+    background-color: rgba(240, 180, 41, 0.1);
+}
+.pill-error {
+    color: #ff6b6b;
+    background-color: rgba(255, 107, 107, 0.1);
+}
+.pill-default {
+    color: #8a90a2;
+    background-color: rgba(138, 144, 162, 0.1);
+}
+
+.pill-timeout {
+    color: #f0b429;
+    background-color: rgba(240, 180, 41, 0.1);
+    border: 1px solid rgba(240, 180, 41, 0.2);
+}
+
+.pill-retry {
+    color: #6aa9ff;
+    background-color: rgba(106, 169, 255, 0.1);
+    border: 1px solid rgba(106, 169, 255, 0.2);
+}
+
+.pill-compensation {
+    color: #ff6b6b;
+    background-color: rgba(255, 107, 107, 0.1);
+    border: 1px solid rgba(255, 107, 107, 0.2);
+}
+
+.pill-branching {
+    color: #7c5cff;
+    background-color: rgba(124, 92, 255, 0.1);
+    border: 1px solid rgba(124, 92, 255, 0.2);
+}
