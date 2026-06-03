@@ -1,0 +1,458 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div x-data="archApp()" class="h-full overflow-auto relative">
+
+  <!-- Page Header -->
+  <header class="max-w-6xl mx-auto p-8">
+    <div class="flex justify-between items-start">
+      <div>
+        <h2 class="text-2xl font-semibold tracking-tight">Live Architecture</h2>
+        <p class="text-textMuted mt-1">Reference Architecture for the Demo with live status from the services.</p>
+      </div>
+      <div class="text-sm text-textMuted" x-show="lastUpdated">
+        Updated <span x-text="fmtRelTime(lastUpdated)"></span>
+      </div>
+    </div>
+
+    <!-- Legend -->
+    <div class="flex gap-4 text-xs mt-6 items-center flex-wrap">
+      <div class="text-textMuted uppercase tracking-wider font-semibold mr-2">Status:</div>
+
+      <div class="flex items-center gap-1.5">
+        <div class="w-2.5 h-2.5 rounded-full bg-success"></div>Healthy
+      </div>
+      <div class="flex items-center gap-1.5">
+        <div class="w-2.5 h-2.5 rounded-full bg-info animate-pulse"></div>Starting
+      </div>
+      <div class="flex items-center gap-1.5">
+        <div class="w-2.5 h-2.5 rounded-full bg-warn"></div>Degraded
+      </div>
+      <div class="flex items-center gap-1.5">
+        <div class="w-2.5 h-2.5 rounded-full bg-warn animate-pulse"></div>Restarting
+      </div>
+      <div class="flex items-center gap-1.5">
+        <div class="w-2.5 h-2.5 rounded-full bg-error"></div>Down
+      </div>
+      <div class="flex items-center gap-1.5">
+        <div class="w-2.5 h-2.5 rounded-full bg-borderSubtle"></div>Paused / Unknown
+      </div>
+    </div>
+  </header>
+
+  <!-- Diagram Canvas -->
+  <section class="relative max-w-5xl mx-auto h-[480px]">
+
+    <!-- Temporal Cloud Boundary Box (absolute) — reactive border -->
+    <div x-data="{ open: false }"
+      class="absolute top-[40px] left-[684px] w-[340px] h-[380px] rounded-2xl border-2 bg-info/[0.02] transition-colors"
+      :class="{
+           'border-success/70':             temporalCloudStatus() === 'healthy',
+           'border-info/70 animate-pulse':  temporalCloudStatus() === 'starting',
+           'border-warn/70':                ['degraded','restarting'].includes(temporalCloudStatus()),
+           'border-error/70':               temporalCloudStatus() === 'down',
+           'border-borderSubtle':           ['paused','unknown'].includes(temporalCloudStatus())
+         }">
+
+      <!-- Left-anchored identity chip -->
+      <div
+        class="absolute -top-3 left-4 z-10 bg-bgMain px-2 flex items-center gap-1.5 text-info text-xs font-semibold tracking-wider whitespace-nowrap">
+        <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round"
+            d="M2.25 15a4.5 4.5 0 0 0 4.5 4.5H18a3.75 3.75 0 0 0 1.332-7.257 3 3 0 0 0-3.758-3.848 5.25 5.25 0 0 0-10.233 2.33A4.502 4.502 0 0 0 2.25 15Z" />
+        </svg>
+        TEMPORAL CLOUD
+      </div>
+
+      <!-- Right-anchored status chip (hoverable for tooltip) -->
+      <div
+        class="absolute -top-3 right-4 z-10 bg-bgMain px-2 flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+        @mouseenter="showTooltip('__temporal_cloud__', $event)" @mousemove="moveTooltip($event)"
+        @mouseleave="hideTooltip()">
+        <div class="w-2 h-2 rounded-full" :class="dotClass(temporalCloudStatus())"></div>
+        <span class="text-[10px] uppercase tracking-wider text-textMuted capitalize"
+          x-text="temporalCloudStatus()"></span>
+      </div>
+
+
+      <!-- Caption inside boundary -->
+      <p class="absolute top-5 left-6 right-6 text-[11px] text-textMuted/60 italic leading-snug z-10">
+        Managed by Temporal — a single namespace endpoint (<span
+          class="font-mono not-italic text-textMuted/80">your-ns.tmprl.cloud:7233</span>); internal topology is opaque
+        to the customer.
+      </p>
+
+      <!-- Temporal logo watermark -->
+      <img src="/static/Temporal_Symbol_light.svg" alt="" aria-hidden="true" x-show="!open"
+        x-transition:enter="transition-opacity ease-out duration-200" x-transition:enter-start="opacity-0"
+        x-transition:enter-end="opacity-50" x-transition:leave="transition-opacity ease-in duration-150"
+        x-transition:leave-start="opacity-50" x-transition:leave-end="opacity-0"
+        class="absolute inset-0 m-auto w-[75%] h-[75%] object-contain pointer-events-none select-none" />
+
+      <!-- Collapsible internals — positioned below caption, grows downward, no collision -->
+      <div class="absolute top-[90px] left-6 right-6 z-10">
+        <button @click="open = !open"
+          class="text-xs font-medium text-textMuted hover:text-textPrimary flex items-center gap-1.5 transition-colors">
+          <svg class="w-3.5 h-3.5 shrink-0 transition-transform duration-200" :class="open ? 'rotate-90' : ''"
+            fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+          </svg>
+          <span
+            x-text="open ? 'Hide components of simulated Temporal Cloud' : 'Components of simulated Temporal Cloud (3)'"></span>
+        </button>
+        <div x-show="open" x-transition.opacity.duration.150ms class="mt-3">
+          <p class="text-[10px] text-textMuted/60 italic mb-2">
+            These containers simulate what Temporal Cloud provides in this local demo:
+          </p>
+          <div class="flex flex-col gap-2 bg-bgPanel/50 border border-borderSubtle rounded-md p-2">
+            <template x-for="key in ['temporal', 'postgresql', 'temporal-ui']">
+              <template x-if="services[key]">
+                <div @mouseenter="showTooltip(key, $event)" @mousemove="moveTooltip($event)" @mouseleave="hideTooltip()"
+                  class="flex items-center gap-3 bg-bgPanel border border-borderSubtle rounded px-3 py-1.5 cursor-pointer hover:bg-white/[0.02] transition-colors"
+                  :class="nodeBorderClass(key)">
+                  <div x-html="getIcon(services[key].icon_key)" class="w-4 h-4 shrink-0" :class="nodeIconClass(key)">
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-xs font-medium truncate" x-text="services[key].display_name"></div>
+                  </div>
+                  <div class="w-1.5 h-1.5 rounded-full shrink-0" :class="dotClass(nodeStatus(key))"></div>
+                </div>
+              </template>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Customer Environment Boundary Box (absolute) -->
+    <div
+      class="absolute top-[40px] left-0 w-[624px] h-[380px] rounded-2xl border-2 border-dashed border-accent/30 bg-accent/[0.02]">
+      <div
+        class="absolute -top-3 left-6 bg-bgMain px-2 flex items-center gap-2 text-accent text-xs font-semibold tracking-wider">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round"
+            d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3.75h.008v.008h-.008v-.008Zm0 3h.008v.008h-.008v-.008Zm0 3h.008v.008h-.008v-.008Z" />
+        </svg>
+        CUSTOMER ENVIRONMENT
+      </div>
+    </div>
+
+    <!-- SVG Overlay for Edges -->
+    <svg class="absolute inset-0 w-full h-full pointer-events-none z-0">
+
+      <!-- Customer Env Internal -->
+      <!-- backend <-> postgres (Data class: solid green) -->
+      <line x1="140" y1="150" x2="140" y2="350" stroke-width="2"
+        :stroke="edgeStroke('orders-service', 'orders-db')"
+        :stroke-opacity="edgeOpacity('orders-service', 'orders-db')" />
+
+      <!-- activity-worker -> mock-api (Data class: solid green) -->
+      <line x1="380" y1="250" x2="380" y2="350" stroke-width="2"
+        :stroke="edgeStroke('orders-activity-worker', 'mock-api')"
+        :stroke-opacity="edgeOpacity('orders-activity-worker', 'mock-api')" />
+
+      <!-- activity-worker -> postgres (Data class: solid green) -->
+      <path d="M 380 250 L 140 350" stroke-width="2"
+        :stroke="edgeStroke('orders-activity-worker', 'orders-db')"
+        :stroke-opacity="edgeOpacity('orders-activity-worker', 'orders-db')" fill="none" />
+
+      <!-- Cross-boundary (Cloud class: blue dashed 8 4) -->
+      <!-- backend -> cloud boundary -->
+      <line x1="140" y1="150" x2="688" y2="230" stroke-width="2.5" stroke-dasharray="8 4"
+        :stroke="cloudEdgeStroke('orders-service', '__temporal_cloud__')"
+        :stroke-opacity="edgeOpacity('orders-service', '__temporal_cloud__')" />
+
+      <!-- workflow-worker -> cloud boundary (arc over top) -->
+      <path d="M 380 150 C 380 80, 688 80, 688 230" fill="none" stroke-width="2.5" stroke-dasharray="8 4"
+        :stroke="cloudEdgeStroke('orders-workflow-worker', '__temporal_cloud__')"
+        :stroke-opacity="edgeOpacity('orders-workflow-worker', '__temporal_cloud__')" />
+
+      <!-- activity-worker -> cloud boundary (arc) -->
+      <path d="M 380 250 C 450 250, 688 230, 688 230" fill="none" stroke-width="2.5" stroke-dasharray="8 4"
+        :stroke="cloudEdgeStroke('orders-activity-worker', '__temporal_cloud__')"
+        :stroke-opacity="edgeOpacity('orders-activity-worker', '__temporal_cloud__')" />
+
+      <!-- Shared gateway dot (Cloud class: blue) -->
+      <circle cx="684" cy="230" r="4" :fill="cloudEdgeStroke('orders-service', '__temporal_cloud__')"
+        :fill-opacity="edgeOpacity('orders-service', '__temporal_cloud__')" />
+    </svg>
+
+    <!-- Customer Env -->
+    <template x-if="services['orders-service']">
+      <div class="absolute" style="top: 150px; left: 140px;" x-html="renderNode('orders-service')"></div>
+    </template>
+    <template x-if="services['orders-db']">
+      <div class="absolute" style="top: 350px; left: 140px;" x-html="renderNode('orders-db')"></div>
+    </template>
+    <template x-if="services['orders-workflow-worker']">
+      <div class="absolute" style="top: 150px; left: 380px;" x-html="renderNode('orders-workflow-worker')"></div>
+    </template>
+    <template x-if="services['orders-activity-worker']">
+      <div class="absolute" style="top: 250px; left: 380px;" x-html="renderNode('orders-activity-worker')"></div>
+    </template>
+    <template x-if="services['mock-api']">
+      <div class="absolute" style="top: 350px; left: 380px;" x-html="renderNode('mock-api')"></div>
+    </template>
+
+  </section>
+
+  <!-- Tooling & Infrastructure -->
+  <section class="max-w-6xl mx-auto px-8 py-8 mt-4 border-t border-borderSubtle">
+    <h3 class="text-sm font-semibold tracking-wide text-textPrimary mb-1 uppercase">Tooling & Infrastructure</h3>
+    <p class="text-textMuted text-xs mb-4">Not part of reference architecture — demo utilities only.</p>
+
+    <div class="flex flex-wrap gap-3">
+      <template x-for="key in ['retail-demo-console', 'ui-proxy', 'pgweb-orders', 'pgweb-temporal']">
+        <template x-if="services[key]">
+          <div @mouseenter="showTooltip(key, $event)" @mousemove="moveTooltip($event)" @mouseleave="hideTooltip()"
+            class="flex items-center gap-3 bg-bgPanel border border-borderSubtle rounded-md px-4 py-2 cursor-pointer hover:bg-white/[0.02] transition-colors"
+            :class="nodeBorderClass(key)">
+            <div x-html="getIcon(services[key].icon_key)" class="w-5 h-5" :class="nodeIconClass(key)"></div>
+            <div>
+              <div class="text-sm font-medium" x-text="services[key].display_name"></div>
+              <div class="text-xs text-textMuted" x-text="services[key].description"></div>
+            </div>
+            <div class="w-2 h-2 rounded-full ml-2" :class="dotClass(nodeStatus(key))"></div>
+          </div>
+        </template>
+      </template>
+    </div>
+  </section>
+
+  <!-- Tooltip Portal -->
+  <div x-show="hovered" x-transition.opacity.duration.150ms
+    class="fixed z-50 bg-bgPanel border border-borderSubtle rounded-md shadow-xl p-4 text-xs w-80 pointer-events-none"
+    :style="`top: ${hoverY}px; left: ${hoverX}px; transform: translate(10px, 10px);`" x-cloak>
+    <template x-if="hovered && services[hovered]">
+      <div class="flex flex-col gap-2">
+        <div class="flex justify-between items-start mb-1">
+          <div class="font-semibold text-sm text-textPrimary" x-text="services[hovered].display_name"></div>
+          <div class="px-2 py-0.5 rounded-full capitalize text-[10px] font-bold" :class="{
+                 'bg-success/20 text-success': nodeStatus(hovered) === 'healthy',
+                 'bg-info/20 text-info': nodeStatus(hovered) === 'starting',
+                 'bg-warn/20 text-warn': ['degraded', 'restarting'].includes(nodeStatus(hovered)),
+                 'bg-error/20 text-error': nodeStatus(hovered) === 'down',
+                 'bg-borderSubtle text-textMuted': ['paused', 'unknown'].includes(nodeStatus(hovered))
+               }" x-text="nodeStatus(hovered)"></div>
+        </div>
+
+        <div class="grid grid-cols-[80px_1fr] gap-x-2 gap-y-1 text-textMuted">
+          <div>Container:</div>
+          <div class="font-mono text-textPrimary truncate" x-text="services[hovered].container_name"></div>
+          <div>Image:</div>
+          <div class="font-mono text-textPrimary truncate" x-text="services[hovered].image"></div>
+          <div>Service:</div>
+          <div class="font-mono text-textPrimary" x-text="services[hovered].compose_service"></div>
+          <div>Docker:</div>
+          <div class="text-textPrimary"><span x-text="services[hovered].docker_state"></span> <span
+              x-show="services[hovered].docker_health" x-text="`(${services[hovered].docker_health})`"></span></div>
+          <template x-if="services[hovered].ports && services[hovered].ports.length">
+            <>
+              <div>Ports:</div>
+              <div class="font-mono text-textPrimary" x-text="services[hovered].ports.join(', ')"></div>
+            </>
+          </template>
+          <template x-if="services[hovered].task_queue">
+            <>
+              <div>Task Queue:</div>
+              <div class="font-mono text-textPrimary truncate" x-text="services[hovered].task_queue"></div>
+            </>
+          </template>
+        </div>
+
+        <template x-if="services[hovered].http_probe">
+          <div class="mt-2 pt-2 border-t border-borderSubtle">
+            <div class="flex justify-between mb-1">
+              <span class="text-textMuted">HTTP Probe</span>
+              <span class="font-mono" :class="services[hovered].http_probe.ok ? 'text-success' : 'text-error'"
+                x-text="services[hovered].http_probe.ok ? '200 OK' : 'FAILED'"></span>
+            </div>
+            <div class="grid grid-cols-[80px_1fr] gap-x-2 gap-y-1 text-textMuted">
+              <div>URL:</div>
+              <div class="font-mono text-textPrimary truncate" x-text="services[hovered].http_probe.url"></div>
+              <div>Latency:</div>
+              <div class="font-mono text-textPrimary" x-text="`${services[hovered].http_probe.latency_ms}ms`"></div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </template>
+
+    <!-- Custom Temporal Cloud Tooltip -->
+    <template x-if="hovered === '__temporal_cloud__'">
+      <div class="flex flex-col gap-2">
+        <div class="flex justify-between items-start mb-1">
+          <div class="font-semibold text-sm text-textPrimary">Temporal Cloud</div>
+          <div class="px-2 py-0.5 rounded-full capitalize text-[10px] font-bold" :class="{
+                 'bg-success/20 text-success': temporalCloudStatus() === 'healthy',
+                 'bg-info/20 text-info': temporalCloudStatus() === 'starting',
+                 'bg-warn/20 text-warn': ['degraded', 'restarting'].includes(temporalCloudStatus()),
+                 'bg-error/20 text-error': temporalCloudStatus() === 'down',
+                 'bg-borderSubtle text-textMuted': ['paused', 'unknown'].includes(temporalCloudStatus())
+               }" x-text="temporalCloudStatus()"></div>
+        </div>
+
+        <div class="grid grid-cols-[80px_1fr] gap-x-2 gap-y-1 text-textMuted">
+          <div>Endpoint:</div>
+          <div class="font-mono text-textPrimary truncate">your-ns.tmprl.cloud:7233</div>
+          <div>Ownership:</div>
+          <div class="text-textPrimary">Managed by Temporal</div>
+        </div>
+
+        <div class="mt-2 pt-2 border-t border-borderSubtle">
+          <div class="text-textMuted mb-2">Simulated by (3):</div>
+          <div class="flex flex-col gap-1">
+            <template x-for="k in ['temporal', 'postgresql', 'temporal-ui']">
+              <template x-if="services[k]">
+                <div class="flex items-center justify-between bg-bgMain rounded px-2 py-1">
+                  <div class="flex items-center gap-2">
+                    <div class="w-1.5 h-1.5 rounded-full" :class="dotClass(nodeStatus(k))"></div>
+                    <span class="font-mono truncate w-24" x-text="services[k].display_name"></span>
+                  </div>
+                  <span class="capitalize text-textPrimary" x-text="services[k].docker_state"></span>
+                </div>
+              </template>
+            </template>
+          </div>
+        </div>
+      </div>
+    </template>
+  </div>
+
+</div>
+
+<script>
+  const ICONS = {
+    'server-rack': '<svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><rect width="18" height="6" x="3" y="4" rx="1" /><rect width="18" height="6" x="3" y="14" rx="1" /><path d="M7 7h.01M7 17h.01M17 7h.01M17 17h.01" stroke-width="2" stroke-linecap="round"/></svg>',
+    'database': '<svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></svg>',
+    'window': '<svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><rect width="18" height="16" x="3" y="4" rx="2" /><path d="M3 8h18M7 4v4M11 4v4" /></svg>',
+    'api': '<svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.25 9.75 16.5 12l-2.25 2.25m-4.5 0L7.5 12l2.25-2.25M6 20.25h12A2.25 2.25 0 0 0 20.25 18V6A2.25 2.25 0 0 0 18 3.75H6A2.25 2.25 0 0 0 3.75 6v12A2.25 2.25 0 0 0 6 20.25Z" /></svg>',
+    'worker': '<svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 0 1 1.45.12l.773.774c.39.389.44 1.002.12 1.45l-.527.737c-.25.35-.272.806-.107 1.204.165.397.505.71.93.78l.893.15c.543.09.94.559.94 1.109v1.094c0 .55-.397 1.02-.94 1.11l-.894.149c-.424.07-.764.383-.929.78-.165.398-.143.854.107 1.204l.527.738c.32.447.269 1.06-.12 1.45l-.774.773a1.125 1.125 0 0 1-1.449.12l-.738-.527c-.35-.25-.806-.272-1.203-.107-.398.165-.71.505-.781.929l-.149.894c-.09.542-.56.94-1.11.94h-1.094c-.55 0-1.019-.398-1.11-.94l-.148-.894c-.071-.424-.384-.764-.781-.93-.398-.164-.854-.142-1.204.108l-.738.527c-.447.32-1.06.269-1.45-.12l-.773-.774a1.125 1.125 0 0 1-.12-1.45l.527-.737c.25-.35.272-.806.108-1.204-.165-.397-.506-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.109v-1.094c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.93-.78.165-.398.143-.854-.108-1.204l-.526-.738a1.125 1.125 0 0 1 .12-1.45l.773-.773a1.125 1.125 0 0 1 1.45-.12l.737.527c.35.25.807.272 1.204.107.397-.165.71-.505.78-.929l.15-.894Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /></svg>',
+    'network': '<svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 15L12 18.75 15.75 15m-7.5-6L12 5.25 15.75 9" /><path stroke-linecap="round" stroke-linejoin="round" d="M12 5.25v13.5" /><rect x="4" y="9" width="4" height="6" rx="1" /><rect x="16" y="9" width="4" height="6" rx="1" /></svg>',
+    'temporal-logo': '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 14h-2v-4h2v4zm0-6h-2V7h2v3z"/></svg>' // Using an info-circle approximation for now, or just default to T-glyph if available
+  };
+
+  function archApp() {
+    return {
+      services: {},
+      lastUpdated: null,
+      hovered: null,
+      hoverX: 0,
+      hoverY: 0,
+
+      async init() {
+        try {
+          const snap = await fetch('/api/status/snapshot').then(r => r.json());
+          this.services = snap;
+          this.lastUpdated = new Date().toISOString();
+        } catch (e) {
+          console.error("Initial snapshot fetch failed", e);
+        }
+
+        const es = new EventSource('/api/status/stream');
+        es.onmessage = (e) => {
+          this.services = JSON.parse(e.data);
+          this.lastUpdated = new Date().toISOString();
+        };
+        es.onerror = () => { /* Auto reconnects */ };
+      },
+
+      temporalCloudStatus() {
+        if (!this.services['temporal'] && !this.services['postgresql'] && !this.services['temporal-ui']) return 'unknown';
+        const keys = ['temporal', 'postgresql', 'temporal-ui'];
+        const statuses = keys.map(k => this.services[k]?.derived_status || 'down');
+
+        if (statuses.includes('down')) return 'down';
+        if (statuses.some(s => ['degraded', 'restarting'].includes(s))) return 'degraded';
+        if (statuses.includes('starting')) return 'starting';
+        if (statuses.includes('paused')) return 'paused';
+        if (statuses.every(s => s === 'healthy')) return 'healthy';
+        return 'unknown';
+      },
+
+      nodeStatus(key) {
+        if (key === '__temporal_cloud__') return this.temporalCloudStatus();
+        return this.services[key]?.derived_status || 'unknown';
+      },
+
+      nodeBorderClass(key) {
+        return {
+          healthy: 'border-success/60',
+          starting: 'border-info/60 animate-pulse',
+          degraded: 'border-warn/60',
+          restarting: 'border-warn/60 animate-pulse',
+          down: 'border-error/60',
+          paused: 'border-borderSubtle',
+          unknown: 'border-borderSubtle'
+        }[this.nodeStatus(key)];
+      },
+
+      nodeIconClass(key) {
+        return {
+          healthy: 'text-success',
+          starting: 'text-info',
+          degraded: 'text-warn',
+          restarting: 'text-warn',
+          down: 'text-error/40',
+          paused: 'text-textMuted/50',
+          unknown: 'text-textMuted/50'
+        }[this.nodeStatus(key)];
+      },
+
+      dotClass(status) {
+        return {
+          healthy: 'bg-success',
+          starting: 'bg-info animate-pulse',
+          degraded: 'bg-warn',
+          restarting: 'bg-warn animate-pulse',
+          down: 'bg-error',
+          paused: 'bg-borderSubtle',
+          unknown: 'bg-borderSubtle'
+        }[status];
+      },
+
+      edgeStatus(a, b) {
+        const sa = this.nodeStatus(a);
+        const sb = this.nodeStatus(b);
+        if (sa === 'down' || sb === 'down') return 'down';
+        if (sa === 'degraded' || sb === 'degraded') return 'degraded';
+        if (sa === 'healthy' && sb === 'healthy') return 'healthy';
+        return 'unknown';
+      },
+
+      edgeStroke(a, b) {
+        return { healthy: '#3ecf8e', degraded: '#f0b429', down: '#ff6b6b', unknown: '#8a90a2' }[this.edgeStatus(a, b)];
+      },
+
+      cloudEdgeStroke(a, b) {
+        return { healthy: '#60a5fa', degraded: '#f0b429', down: '#ff6b6b', unknown: '#8a90a2' }[this.edgeStatus(a, b)];
+      },
+
+      edgeOpacity(a, b) {
+        return this.edgeStatus(a, b) === 'healthy' ? 0.7 : 0.3;
+      },
+
+      getIcon(key) { return ICONS[key] || ICONS['window']; },
+
+      renderNode(key) {
+        // Small transform(-50%, -50%) centers the node on its coord for easier edge drawing
+        return `
+        <div @mouseenter="showTooltip('${key}', $event)" @mousemove="moveTooltip($event)" @mouseleave="hideTooltip()"
+             class="flex flex-col items-center justify-center bg-bgPanel border-2 rounded-lg p-4 w-[160px] h-[88px] cursor-pointer shadow-lg hover:shadow-xl transition-all z-10 transform -translate-x-1/2 -translate-y-1/2 ${this.nodeBorderClass(key)} bg-opacity-95 backdrop-blur-sm relative group">
+          <div class="w-8 h-8 mb-1 ${this.nodeIconClass(key)}">${this.getIcon(this.services[key].icon_key)}</div>
+          <div class="text-sm font-semibold tracking-tight text-center leading-tight">${this.services[key].display_name}</div>
+          <div class="text-[10px] text-textMuted font-mono truncate max-w-full px-2" title="${this.services[key].image}">${this.services[key].image.split('/').pop()}</div>
+          <div class="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 rounded-full border-2 border-bgPanel ${this.dotClass(this.nodeStatus(key))}"></div>
+        </div>
+      `;
+      },
+
+      showTooltip(key, ev) { this.hovered = key; this.hoverX = ev.clientX; this.hoverY = ev.clientY; },
+      moveTooltip(ev) { if (this.hovered) { this.hoverX = ev.clientX; this.hoverY = ev.clientY; } },
+      hideTooltip() { this.hovered = null; },
+      fmtRelTime(iso) { return window.relativeTime(iso); }
+    }
+  }
+</script>
+
+{% endblock %}

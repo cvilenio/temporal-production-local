@@ -1,0 +1,222 @@
+import uuid
+import os
+import asyncio
+import random
+from fastapi import FastAPI, Header, HTTPException
+from pydantic import BaseModel
+from typing import Callable, Awaitable
+
+# Cache and Lock for Idempotency
+_idempotency_cache: dict[str, dict] = {}
+_cache_lock = asyncio.Lock()
+
+# Ghost cache: tracks shipping labels created but whose response was "lost"
+_shipping_ghost_cache: dict[str, str] = {}
+
+# Attempt counters for demo purposes
+_shipping_attempts: dict[str, int] = {}
+_inventory_attempts: dict[str, int] = {}
+
+
+async def _with_idempotency(
+    idem_key: str | None, compute_fn: Callable[[], Awaitable[dict]]
+) -> dict:
+    if not idem_key:
+        raise HTTPException(status_code=400, detail="Idempotency-Key header missing")
+
+    async with _cache_lock:
+        if idem_key in _idempotency_cache:
+            return _idempotency_cache[idem_key]
+
+        # Compute and cache under lock so concurrent duplicate requests
+        # don't both execute compute_fn.
+        response = await compute_fn()
+        _idempotency_cache[idem_key] = response
+
+    return response
+
+
+# Models
+class PaymentChargeRequest(BaseModel):
+    token: str
+    amount: float
+
+
+class PaymentRefundRequest(BaseModel):
+    capture_id: str
+    amount: float
+
+
+class InventoryReserveRequest(BaseModel):
+    item_id: str
+    quantity: int
+
+
+class InventoryReleaseRequest(BaseModel):
+    reservation_id: str
+    item_id: str
+    quantity: int
+
+
+class ShippingRequest(BaseModel):
+    address: str
+    order_id: str
+
+
+class ShippingCancelRequest(BaseModel):
+    tracking_id: str
+
+
+app = FastAPI(title="Mock External Systems API")
+
+
+async def _simulate_latency(base_ms_env: str, default_ms: str):
+    base_ms = int(os.getenv(base_ms_env, default_ms))
+    if base_ms > 0:
+        # +/- 20% jitter
+        jitter = random.uniform(0.8, 1.2)
+        actual_ms = int(base_ms * jitter)
+        print(f"Simulating response latency: sleeping {actual_ms}ms (base {base_ms}ms)")
+        await asyncio.sleep(actual_ms / 1000.0)
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+
+
+# Endpoints
+@app.post("/payment/charge")
+async def charge_payment(
+    request: PaymentChargeRequest,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+):
+    if not idempotency_key:
+        raise HTTPException(status_code=400, detail="Idempotency-Key header missing")
+
+    async def compute() -> dict:
+        await _simulate_latency("MOCK_PAYMENT_LATENCY_MS", "5000")
+        return {"status": "success"}
+
+    return await _with_idempotency(idempotency_key, compute)
+
+
+@app.post("/payment/refund")
+async def refund_payment(
+    request: PaymentRefundRequest,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+):
+    async def compute() -> dict:
+        await _simulate_latency("MOCK_PAYMENT_LATENCY_MS", "5000")
+        return {"status": "success"}
+
+    return await _with_idempotency(idempotency_key, compute)
+
+
+@app.post("/inventory/reserve")
+async def reserve_inventory(
+    request: InventoryReserveRequest,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+):
+    if not idempotency_key:
+        raise HTTPException(status_code=400, detail="Idempotency-Key header missing")
+
+    item_id = request.item_id.lower()
+    if "flaky" in item_id:
+        async with _cache_lock:
+            attempt = _inventory_attempts.get(idempotency_key, 0) + 1
+            _inventory_attempts[idempotency_key] = attempt
+
+        if attempt <= 2:
+            print(f"[{idempotency_key}] Inventory Flaky: Attempt {attempt} returning 503")
+            raise HTTPException(status_code=503, detail="Service Unavailable")
+        print(f"[{idempotency_key}] Inventory Flaky: Attempt {attempt} succeeding")
+
+    async def compute() -> dict:
+        await _simulate_latency("MOCK_INVENTORY_LATENCY_MS", "5000")
+        return {"status": "success"}
+
+    return await _with_idempotency(idempotency_key, compute)
+
+
+@app.post("/inventory/release")
+async def release_inventory(
+    request: InventoryReleaseRequest,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+):
+    async def compute() -> dict:
+        await _simulate_latency("MOCK_INVENTORY_LATENCY_MS", "5000")
+        return {"status": "success"}
+
+    return await _with_idempotency(idempotency_key, compute)
+
+
+@app.post("/shipping/request")
+async def request_shipping(
+    request: ShippingRequest,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+):
+    if not idempotency_key:
+        raise HTTPException(status_code=400, detail="Idempotency-Key header missing")
+
+    addr = request.address.lower()
+    async with _cache_lock:
+        attempt = _shipping_attempts.get(idempotency_key, 0) + 1
+        _shipping_attempts[idempotency_key] = attempt
+
+    hang_ms = int(os.getenv("MOCK_SHIPPING_HANG_MS", "15000"))
+
+    if "ghost" in addr:
+        if attempt == 1:
+            tracking_id = f"TRK-{uuid.uuid4()}"
+            _shipping_ghost_cache[idempotency_key] = tracking_id
+            print(f"[{idempotency_key}] Ghost label created: {tracking_id}. Hanging {hang_ms}ms...")
+        else:
+            print(f"[{idempotency_key}] Ghost label already exists. Hanging {hang_ms}ms...")
+        await asyncio.sleep(hang_ms / 1000)
+        raise HTTPException(status_code=504, detail="Gateway Timeout")
+
+    if "flaky" in addr:
+        if attempt == 1:
+            print(f"[{idempotency_key}] Shipping Flaky: Attempt 1 hanging {hang_ms}ms...")
+            await asyncio.sleep(hang_ms / 1000)
+            raise HTTPException(status_code=504, detail="Gateway Timeout")
+        print(f"[{idempotency_key}] Shipping Flaky: Attempt {attempt} succeeding")
+
+    if "lost" in addr:
+        print(f"[{idempotency_key}] Shipping Lost: Attempt {attempt} hanging {hang_ms}ms...")
+        await asyncio.sleep(hang_ms / 1000)
+        raise HTTPException(status_code=504, detail="Gateway Timeout")
+
+    async def compute() -> dict:
+        tracking_id = f"TRK-{uuid.uuid4()}"
+        await _simulate_latency("MOCK_SHIPPING_LATENCY_MS", "8000")
+        return {"status": "success", "tracking_id": tracking_id}
+
+    return await _with_idempotency(idempotency_key, compute)
+
+
+@app.get("/shipping/status/{idem_key}")
+async def get_shipping_status(idem_key: str):
+    await _simulate_latency("MOCK_SHIPPING_LATENCY_MS", "8000")
+    # Check ghost cache first (labels created but response lost)
+    ghost_tracking = _shipping_ghost_cache.get(idem_key)
+    if ghost_tracking:
+        return {"status": "confirmed", "tracking_id": ghost_tracking}
+    async with _cache_lock:
+        cached = _idempotency_cache.get(idem_key)
+    if cached and "tracking_id" in cached:
+        return {"status": "confirmed", "tracking_id": cached["tracking_id"]}
+    return {"status": "not_found"}
+
+
+@app.post("/shipping/cancel")
+async def cancel_shipment(
+    request: ShippingCancelRequest,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+):
+    async def compute() -> dict:
+        await _simulate_latency("MOCK_SHIPPING_LATENCY_MS", "8000")
+        return {"status": "success"}
+
+    return await _with_idempotency(idempotency_key, compute)

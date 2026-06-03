@@ -1,0 +1,557 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="flex h-full" x-data="trackingApp()" x-init="initApp()">
+
+    <!-- Left Column: List -->
+    <div class="w-[380px] shrink-0 border-r border-borderSubtle bg-bgPanel flex flex-col h-full">
+        <!-- Header -->
+        <div class="px-4 py-3 border-b border-borderSubtle flex items-center justify-between bg-bgMain/30 shrink-0">
+            <h2 class="font-semibold text-textPrimary text-sm">Orders</h2>
+            <div class="text-xs text-textMuted flex items-center gap-1">
+                <span class="relative flex h-2 w-2">
+                    <span
+                        class="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-2 w-2 bg-accent"></span>
+                </span>
+                Live
+            </div>
+        </div>
+
+        <!-- List -->
+        <div class="flex-1 overflow-y-auto space-y-[1px] bg-borderSubtle pb-2">
+
+            <template x-for="batch in batchesView" :key="batch.batch_id">
+                <div>
+                    <!-- Batch Header -->
+                    <div @click="toggleBatch(batch)" role="button"
+                        class="group relative px-4 py-3 cursor-pointer transition-colors bg-bgPanel hover:bg-white/[0.03] select-none border-b border-borderSubtle"
+                        :class="{'bg-white/[0.05]': expandedBatchId === batch.batch_id}">
+                        <div class="flex items-start gap-2">
+                            <svg class="w-4 h-4 mt-0.5 shrink-0 transition-transform duration-200" 
+                                 :class="{'rotate-90': expandedBatchId === batch.batch_id}"
+                                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                            </svg>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2">
+                                    <span class="font-mono text-xs text-textMuted" x-text="batch.batch_id === 'ungrouped' ? 'UNGROUPED' : batch.batch_id.substring(0, 8)"></span>
+                                </div>
+                                <h3 class="text-textPrimary font-medium text-sm truncate" x-text="batch.summary"></h3>
+                                <div class="flex justify-between items-center mt-1">
+                                    <span class="text-xs text-textMuted" x-text="batch.batch_id === 'ungrouped' ? '' : window.relativeTime(batch.timestamp_utc)"></span>
+                                    <span class="text-xs" :class="batch.failed > 0 ? 'text-error' : 'text-success'" x-text="batch.batch_id === 'ungrouped' ? batch.orders.length + ' orders' : batch.triggered + ' triggered, ' + batch.failed + ' failed'"></span>
+                                </div>
+                                <div class="mt-2" x-show="batch.batch_id !== 'ungrouped' && batchHasInflight(batch)">
+                                    <button @click.stop="cancelBatch(batch)"
+                                        class="text-xs px-2 py-1 rounded bg-error/10 text-error hover:bg-error/20 border border-error/30 transition-colors">
+                                        Cancel All In-Flight
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Indented Orders -->
+                    <div x-show="expandedBatchId === batch.batch_id" x-collapse>
+                        <template x-for="order in batch.orders" :key="order.id">
+                            <div @click.stop="selectOrder(order)"
+                                class="group relative pl-10 pr-4 py-3 cursor-pointer transition-colors bg-bgMain hover:bg-white/[0.03] select-none border-b border-borderSubtle"
+                                :class="{
+                                     'accent-border pl-[37px]': !TERMINAL_STATUSES.includes(order.status),
+                                     'bg-white/[0.05]': selectedId === order.id
+                                 }">
+
+                                <div class="flex items-center justify-between mb-1">
+                                    <span class="text-sm font-bold truncate pr-2 text-textPrimary" x-text="order.id"></span>
+                                    <span class="text-xs text-textMuted shrink-0" :title="formatTime(order.created_at)"
+                                        x-text="window.relativeTime(order.created_at)"></span>
+                                </div>
+
+                                <div class="text-sm text-textMuted truncate mb-2 pr-2" x-text="order.scenario_label || '—'"></div>
+
+                                <div class="flex items-center justify-between text-xs mt-1">
+                                    <!-- Level badge -->
+                                    <span class="px-2 py-0.5 rounded-full font-medium tracking-wide uppercase text-[10px]" :class="{
+                                              'pill-info': order.customer_message_level === 'info',
+                                              'pill-success': order.customer_message_level === 'success',
+                                              'pill-warn': order.customer_message_level === 'warn' || order.customer_message_level === 'warning',
+                                              'pill-error': order.customer_message_level === 'error',
+                                              'pill-default': !['info','success','warn','warning','error'].includes(order.customer_message_level)
+                                          }" x-text="order.status.replace('_', ' ')"></span>
+
+                                    <span class="font-mono text-textPrimary opacity-90"
+                                        x-text="'$' + order.amount.toFixed(2)"></span>
+                                </div>
+                            </div>
+                        </template>
+                        <div x-show="batch.orders.length === 0" class="pl-10 pr-4 py-3 text-sm text-textMuted bg-bgMain border-b border-borderSubtle">
+                            No visible orders.
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+            <div x-show="batchesView.length === 0" class="p-8 text-center text-textMuted text-sm bg-bgPanel">
+                No orders found.
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Right Pane: Tracking Area -->
+    <div class="flex-1 bg-bgMain flex flex-col h-full">
+        <!-- Empty State -->
+        <div x-show="!selectedOrder"
+            class="flex-1 flex flex-col items-center justify-center text-textMuted/50 select-none">
+            <svg class="w-16 h-16 mb-4 opacity-50" fill="none" stroke="currentColor" stroke-width="1"
+                viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                    d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                <line x1="12" y1="22.08" x2="12" y2="12" />
+            </svg>
+            <p>Select an order to track</p>
+        </div>
+
+        <!-- Order Content -->
+        <template x-if="selectedOrder">
+            <div class="flex-1 flex flex-col overflow-y-auto p-8 max-w-4xl mx-auto w-full">
+                <!-- Header Info -->
+                <div class="flex justify-between items-start mb-8">
+                    <div>
+                        <h2 class="text-3xl font-bold text-textPrimary leading-tight" x-text="selectedOrder.id">
+                        </h2>
+                        <p class="text-textMuted mt-1">Ordered on <span
+                                x-text="formatTime(selectedOrder.created_at)"></span></p>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-2xl font-bold text-textPrimary" x-text="'$' + selectedOrder.amount.toFixed(2)">
+                        </div>
+                        <p class="text-textMuted text-sm mt-1">Order Total</p>
+                    </div>
+                </div>
+
+                <!-- Progress Bar -->
+                <div class="mb-12 mt-4 relative">
+                    <!-- Progress Line Background -->
+                    <div class="absolute top-4 left-4 right-4 h-[2px] bg-borderSubtle rounded-full -z-10"></div>
+
+                    <!-- Dynamic Progress Line Foreground -->
+                    <div class="absolute top-4 left-4 h-[2px] rounded-full -z-10 transition-all duration-500"
+                        :class="stepForStatus(selectedOrder).isFailure ? 'bg-error' : 'bg-accent'"
+                        :style="'width: ' + ((stepForStatus(selectedOrder).currentIndex / 4) * 100) + '%; max-width: calc(100% - 2rem);'">
+                    </div>
+
+                    <div class="flex justify-between">
+                        <template x-for="(step, i) in steps" :key="i">
+                            <div class="flex flex-col items-center relative z-10 w-24 text-center">
+                                <!-- Circle -->
+                                <div class="w-8 h-8 rounded-full flex items-center justify-center border-2 mb-3 transition-colors duration-300 bg-bgMain"
+                                    :class="{
+                                         'border-accent bg-accent text-white': stepForStatus(selectedOrder).currentIndex >= i && !(stepForStatus(selectedOrder).isFailure && stepForStatus(selectedOrder).failedAtIndex <= i),
+                                         'border-error bg-error text-white': stepForStatus(selectedOrder).isFailure && stepForStatus(selectedOrder).failedAtIndex === i,
+                                         'border-borderSubtle bg-bgPanel text-textMuted': stepForStatus(selectedOrder).currentIndex < i || (stepForStatus(selectedOrder).isFailure && stepForStatus(selectedOrder).failedAtIndex < i)
+                                     }">
+
+                                    <!-- Check (Passed or Current) -->
+                                    <svg x-show="stepForStatus(selectedOrder).currentIndex >= i && !(stepForStatus(selectedOrder).isFailure && stepForStatus(selectedOrder).failedAtIndex <= i)"
+                                        class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="3"
+                                        viewBox="0 0 24 24"
+                                        :class="{ 'animate-pulse': stepForStatus(selectedOrder).currentIndex === i && selectedOrder.status !== 'completed' }">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path>
+                                    </svg>
+
+                                    <!-- Failed X -->
+                                    <svg x-show="stepForStatus(selectedOrder).isFailure && stepForStatus(selectedOrder).failedAtIndex === i"
+                                        class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="3"
+                                        viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12">
+                                        </path>
+                                    </svg>
+                                </div>
+
+                                <!-- Label -->
+                                <span class="text-xs font-medium" :class="{
+                                          'text-textPrimary': stepForStatus(selectedOrder).currentIndex === i,
+                                          'text-textPrimary opacity-80': stepForStatus(selectedOrder).currentIndex > i && !(stepForStatus(selectedOrder).isFailure && stepForStatus(selectedOrder).failedAtIndex < i),
+                                          'text-textMuted': stepForStatus(selectedOrder).currentIndex < i || (stepForStatus(selectedOrder).isFailure && stepForStatus(selectedOrder).failedAtIndex < i),
+                                          'text-error': stepForStatus(selectedOrder).isFailure && stepForStatus(selectedOrder).failedAtIndex === i
+                                      }"
+                                    x-text="(stepForStatus(selectedOrder).isFailure && i === stepForStatus(selectedOrder).failedAtIndex && ['cancelled', 'cancelled_with_issues'].includes(selectedOrder.status)) ? 'Cancelled' : step.label"></span>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Status Callout -->
+                <div class="mb-8 rounded-lg overflow-hidden border border-borderSubtle bg-bgPanel/50">
+                    <div class="border-l-4 p-6" :class="{
+                             'border-info bg-info/5 text-info': selectedOrder.customer_message_level === 'info',
+                             'border-success bg-success/5 text-success': selectedOrder.customer_message_level === 'success',
+                             'border-warn bg-warn/5 text-warn': selectedOrder.customer_message_level === 'warn' || selectedOrder.customer_message_level === 'warning',
+                             'border-error bg-error/5 text-error': selectedOrder.customer_message_level === 'error',
+                             'border-borderSubtle text-textPrimary': !['info','success','warn','warning','error'].includes(selectedOrder.customer_message_level)
+                         }">
+                        <div class="flex items-start gap-4">
+                            <svg x-show="selectedOrder.customer_message_level === 'info'"
+                                class="w-6 h-6 shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="2"
+                                viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            <svg x-show="selectedOrder.customer_message_level === 'success'"
+                                class="w-6 h-6 shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="2"
+                                viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            <svg x-show="selectedOrder.customer_message_level === 'warn' || selectedOrder.customer_message_level === 'warning'"
+                                class="w-6 h-6 shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="2"
+                                viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z">
+                                </path>
+                            </svg>
+                            <svg x-show="selectedOrder.customer_message_level === 'error'"
+                                class="w-6 h-6 shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="2"
+                                viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+
+                            <div>
+                                <h3 class="font-semibold text-base mb-1" style="color: inherit">Status Update</h3>
+                                <p class="text-sm opacity-90 leading-relaxed" style="color: inherit"
+                                    x-text="selectedOrder.customer_message || 'Waiting for update...'"></p>
+
+                                <template x-if="selectedOrder.store_credit_cents > 0">
+                                    <p class="text-sm opacity-90 mt-2 font-medium" style="color: inherit"
+                                        x-text="'Store credit applied: $' + (selectedOrder.store_credit_cents / 100).toFixed(2)">
+                                    </p>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Order Details Grid -->
+                <div class="grid grid-cols-2 gap-8 text-sm">
+                    <!-- Left Column -->
+                    <div class="space-y-6">
+                        <div>
+                            <h4 class="text-textMuted font-medium mb-2 uppercase tracking-wider text-xs">Shipping
+                                Address</h4>
+                            <div class="text-textPrimary bg-bgPanel p-4 rounded-md border border-borderSubtle whitespace-pre-wrap leading-relaxed"
+                                x-text="selectedOrder.address"></div>
+                        </div>
+                    </div>
+
+                    <!-- Right Column -->
+                    <div class="space-y-6">
+                        <div>
+                            <h4 class="text-textMuted font-medium mb-2 uppercase tracking-wider text-xs">Payment Method
+                            </h4>
+                            <div
+                                class="text-textPrimary bg-bgPanel p-4 rounded-md border border-borderSubtle flex items-center gap-3">
+                                <svg class="w-6 h-6 text-textMuted" fill="none" stroke="currentColor" stroke-width="1.5"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                        d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z">
+                                    </path>
+                                </svg>
+                                <span
+                                    x-text="'Card ending in •••• ' + (selectedOrder.payment_last_four || 'XXXX')"></span>
+                            </div>
+                        </div>
+
+                        <div>
+                            <h4 class="text-textMuted font-medium mb-2 uppercase tracking-wider text-xs">Order
+                                Information</h4>
+                            <div class="bg-bgPanel p-4 rounded-md border border-borderSubtle space-y-3">
+                                <div class="flex justify-between">
+                                    <span class="text-textMuted">Order ID</span>
+                                    <span class="text-textPrimary font-mono font-medium"
+                                        x-text="selectedOrder.id"></span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-textMuted">Tracking Number</span>
+                                    <span class="text-textPrimary font-mono font-medium"
+                                        x-text="selectedOrder.tracking_id || '—'"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </template>
+    </div>
+</div>
+
+<script>
+    function trackingApp() {
+        const TERMINAL_STATUSES = ['completed', 'failed', 'cancelled', 'cancelled_with_issues', 'shipping_failed'];
+
+        return {
+            orders: [],
+            batches: [],
+            selectedId: null,
+            expandedBatchId: null,
+
+            steps: [
+                { id: 'pending', label: 'Received' },
+                { id: 'inventory_reserved', label: 'Inventory' },
+                { id: 'shipment_created', label: 'Shipping' },
+                { id: 'payment_captured', label: 'Payment' },
+                { id: 'completed', label: 'Complete' }
+            ],
+
+            get selectedOrder() {
+                if (!this.selectedId) return null;
+                return this.orders.find(o => o.id === this.selectedId) || null;
+            },
+
+            get batchesView() {
+                const ordersById = new Map(this.orders.map(o => [o.id, o]));
+                const mappedBatches = [];
+                const seenIds = new Set();
+
+                // Map known batches
+                for (const b of this.batches) {
+                    const batchOrders = (b.order_ids || [])
+                        .map(id => {
+                            const o = ordersById.get(id);
+                            if (o) {
+                                // Attach scenario label from batch metadata if available
+                                o.scenario_label = b.order_labels ? b.order_labels[id] : null;
+                            }
+                            return o;
+                        })
+                        .filter(o => o); // only orders we have data for
+                    
+                    batchOrders.forEach(o => seenIds.add(o.id));
+                    
+                    mappedBatches.push({
+                        ...b,
+                        orders: batchOrders
+                    });
+                }
+
+                // Collect ungrouped orders
+                const ungroupedOrders = this.orders.filter(o => !seenIds.has(o.id));
+                if (ungroupedOrders.length > 0) {
+                    mappedBatches.push({
+                        batch_id: 'ungrouped',
+                        summary: 'Ungrouped Orders',
+                        timestamp_utc: null,
+                        triggered: ungroupedOrders.length,
+                        failed: 0,
+                        orders: ungroupedOrders
+                    });
+                }
+
+                return mappedBatches;
+            },
+
+            batchHasInflight(batch) {
+                return batch.orders.some(o => !TERMINAL_STATUSES.includes(o.status));
+            },
+
+            async cancelBatch(batch) {
+                const inflightIds = batch.orders
+                    .filter(o => !TERMINAL_STATUSES.includes(o.status))
+                    .map(o => o.id);
+                if (inflightIds.length === 0) return;
+                if (!confirm(`Cancel ${inflightIds.length} in-flight order(s) in this batch?`)) return;
+                try {
+                    const res = await fetch('/api/cancel-batch', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ order_ids: inflightIds })
+                    });
+                    const data = await res.json();
+                    alert(`Cancelled: ${data.requested} requested, ${data.skipped} skipped (already terminal).`);
+                } catch (e) {
+                    console.error('Cancel batch failed:', e);
+                    alert('Failed to cancel batch. See console.');
+                }
+            },
+
+            toggleBatch(batch) {
+                if (this.expandedBatchId === batch.batch_id) {
+                    this.expandedBatchId = null;
+                } else {
+                    this.expandedBatchId = batch.batch_id;
+                    if (batch.orders.length > 0) {
+                        this.selectOrder(batch.orders[0]);
+                    }
+                    this.updateUrl(batch.batch_id, this.selectedOrder?.id);
+                }
+            },
+
+            selectOrder(order) {
+                this.selectedId = order.id;
+                this.updateUrl(this.expandedBatchId, order.id);
+            },
+
+            updateUrl(batchId, orderId) {
+                const url = new URL(window.location);
+                if (batchId && batchId !== 'ungrouped') {
+                    url.searchParams.set('batch', batchId);
+                } else {
+                    url.searchParams.delete('batch');
+                }
+                
+                if (orderId) {
+                    url.searchParams.set('order', orderId);
+                } else {
+                    url.searchParams.delete('order');
+                }
+                
+                window.history.replaceState({}, '', url);
+            },
+
+            stepForStatus(order) {
+                if (!order) return { currentIndex: 0, isFailure: false, failedAtIndex: -1 };
+                
+                const status = order.status;
+                const lastReached = order.last_reached_status;
+
+                // Map canonical statuses to progress bar indexes
+                let currentIndex = 0;
+                let isFailure = false;
+                let failedAtIndex = -1;
+
+                const statusToIndex = (s) => {
+                    switch (s) {
+                        case 'pending': return 0;
+                        case 'reserving_inventory': return 1;
+                        case 'inventory_reserved': return 1;
+                        case 'creating_shipment': return 2;
+                        case 'shipment_created': return 2;
+                        case 'capturing_payment': return 3;
+                        case 'payment_captured': return 3;
+                        case 'finalizing': return 4;
+                        case 'completed': return 4;
+                        case 'shipping_failed': return 2;
+                        case 'cancelled':
+                        case 'cancelled_with_issues': return 4;
+                        default: return 0;
+                    }
+                };
+
+                switch (status) {
+                    case 'pending': currentIndex = 0; break;
+                    case 'reserving_inventory':
+                    case 'inventory_reserved': currentIndex = 1; break;
+                    case 'creating_shipment':
+                    case 'shipment_created': currentIndex = 2; break;
+                    case 'capturing_payment':
+                    case 'payment_captured': currentIndex = 3; break;
+                    case 'finalizing':
+                    case 'completed': currentIndex = 4; break;
+
+                    case 'shipping_failed':
+                        currentIndex = 2; isFailure = true; failedAtIndex = 2;
+                        break;
+                    case 'cancelled':
+                    case 'cancelled_with_issues':
+                        isFailure = true;
+                        if (lastReached) {
+                            const lastIdx = statusToIndex(lastReached);
+                            if (['inventory_reserved', 'shipment_created', 'payment_captured'].includes(lastReached)) {
+                                failedAtIndex = Math.min(lastIdx + 1, 4);
+                            } else {
+                                failedAtIndex = lastIdx;
+                            }
+                        } else {
+                            failedAtIndex = 0;
+                        }
+                        currentIndex = failedAtIndex;
+                        break;
+                    case 'failed':
+                    default:
+                        currentIndex = 0; isFailure = true; failedAtIndex = 0;
+                        break;
+                }
+
+                return { currentIndex, isFailure, failedAtIndex };
+            },
+
+            initApp() {
+                const urlParams = new URLSearchParams(window.location.search);
+                const initialOrderId = urlParams.get('order');
+                const initialBatchId = urlParams.get('batch');
+
+                Promise.all([
+                    fetch('/api/tracking/orders?limit=100').then(r => r.json()),
+                    fetch('/api/tracking/batches').then(r => r.json())
+                ])
+                .then(([ordersData, batchesData]) => {
+                    this.orders = ordersData;
+                    this.batches = batchesData;
+
+                    if (initialBatchId) {
+                        this.expandedBatchId = initialBatchId;
+                    }
+
+                    if (initialOrderId) {
+                        const target = this.orders.find(o => o.id === initialOrderId);
+                        if (target) {
+                            this.selectOrder(target);
+                        } else {
+                            fetch(`/api/tracking/orders/${initialOrderId}`)
+                                .then(r => r.ok ? r.json() : null)
+                                .then(order => {
+                                    if (order) {
+                                        this.orders.unshift(order);
+                                        this.selectOrder(order);
+                                    }
+                                });
+                        }
+                    } else if (initialBatchId) {
+                        const targetBatch = this.batchesView.find(b => b.batch_id === initialBatchId);
+                        if (targetBatch && targetBatch.orders.length > 0) {
+                            this.selectOrder(targetBatch.orders[0]);
+                        }
+                    }
+                })
+                .catch(e => console.error("Error fetching initial data:", e));
+
+                // SSE connection
+                const evtSource = new EventSource("/api/tracking/stream");
+                evtSource.onmessage = (e) => {
+                    try {
+                        const newOrder = JSON.parse(e.data);
+
+                        const existingIdx = this.orders.findIndex(o => o.id === newOrder.id);
+                        if (existingIdx >= 0) {
+                            this.orders[existingIdx] = newOrder;
+                            this.orders = [...this.orders];
+                        } else {
+                            this.orders.unshift(newOrder);
+                            if (this.orders.length > 500) {
+                                this.orders.pop();
+                            }
+                        }
+                    } catch (err) {
+                        console.error("SSE parse error:", err);
+                    }
+                };
+
+                setInterval(() => {
+                    if (this.orders.length > 0) {
+                        this.orders = [...this.orders];
+                    }
+                }, 60000);
+            },
+
+            formatTime(iso) {
+                if (!iso) return "";
+                const d = new Date(iso);
+                return d.toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+            }
+        }
+    }
+</script>
+{% endblock %}
