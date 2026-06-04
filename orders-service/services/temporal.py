@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from temporalio.client import Client
 from temporalio.service import RPCError, RPCStatusCode
 from temporalio.contrib.pydantic import pydantic_data_converter
@@ -6,19 +10,35 @@ from workflows.order_workflow import OrderWorkflow
 from shared.temporal_ids import TaskQueue, SignalName, SearchAttribute
 from shared.workflow_io import OrderWorkflowInput
 
+if TYPE_CHECKING:
+    from temporalio.runtime import Runtime
+
 
 class TemporalService:
-    def __init__(self, temporal_address: str, temporal_namespace: str):
+    def __init__(
+        self,
+        temporal_address: str,
+        temporal_namespace: str,
+        runtime: Runtime | None = None,
+        interceptors: list | None = None,
+    ):
         self.temporal_address = temporal_address
         self.temporal_namespace = temporal_namespace
+        self.runtime = runtime
+        self.interceptors = interceptors or []
         self.client: Client | None = None
 
     async def connect(self):
-        # Register Pydantic payload converter for typed boundaries
+        # TracingInterceptor propagates OTel span context across the
+        # client → workflow → activity boundary via Temporal headers.
+        # pydantic_data_converter handles typed payload serialisation.
+        # Both are independent: the interceptor uses headers, not payloads.
         self.client = await Client.connect(
             self.temporal_address,
             namespace=self.temporal_namespace,
             data_converter=pydantic_data_converter,
+            interceptors=self.interceptors,
+            runtime=self.runtime,
         )
         return self.client
 

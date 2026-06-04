@@ -12,7 +12,7 @@ from activities import (
 from workflows.order_workflow import OrderWorkflow
 from config import settings
 from shared.temporal_ids import TaskQueue
-from resources import get_temporal_service, get_mock_api, get_orders_service_client
+from resources import container, get_temporal_service, get_mock_api, get_orders_service_client
 
 
 async def main():
@@ -27,16 +27,20 @@ async def main():
     )
     args = parser.parse_args()
 
-    temporal_service = get_temporal_service()
+    # Per-process service name — must override before init_resources so the
+    # telemetry resource initialises with the correct service name.
+    container.config.otel_service_name.override(f"orders-worker-{args.role}")
+    # Start telemetry (OTel providers + Prometheus metrics endpoint).
+    # Not awaited: the telemetry resource is a sync generator.
+    container.init_resources()
 
     print(
         f"Connecting to Temporal at {settings.temporal_address} (namespace: {settings.temporal_namespace})..."
     )
 
-    # Connect to Temporal
+    temporal_service = get_temporal_service()
     client = await temporal_service.connect()
 
-    # Determine registration based on role
     if args.role == "workflow":
         task_queue = TaskQueue.ORDERS_WORKFLOW
         workflows = [OrderWorkflow]
@@ -52,7 +56,6 @@ async def main():
             *make_customer_message_activities(orders_client),
         ]
 
-    # Run the worker
     print(
         f"Starting Temporal Worker [ROLE: {args.role}] on queue [{task_queue}] with concurrency:\n"
         f"  activities={settings.worker_max_concurrent_activities}, "
@@ -76,7 +79,14 @@ async def main():
         max_cached_workflows=settings.worker_max_cached_workflows,
     )
 
-    await worker.run()
+    try:
+        await worker.run()
+    finally:
+        # Flush in-flight spans / logs / metrics before the process exits.
+        # Runs on SIGTERM — Temporal's worker handles the signal and returns
+        # from worker.run(), then this drains the last telemetry batch before
+        # Docker Compose removes the container.
+        container.shutdown_resources()
 
 
 if __name__ == "__main__":

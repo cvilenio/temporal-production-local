@@ -18,7 +18,7 @@ from shared.workflow_io import OrderWorkflowInput
 from shared.ids import generate_order_ids
 from db.models import Base, Order, IdempotencyRecord
 
-from resources import get_database, get_temporal_service
+from resources import container, get_database, get_temporal_service
 from services.temporal import TemporalService
 from db.engine import Database
 from sqlalchemy import select
@@ -32,18 +32,28 @@ async def get_db_session(db: Database = Depends(get_database)):
 # --- App Lifecycle ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize DB Schema
+    # Per-process service name override — must happen before init_resources so
+    # the telemetry resource initialises with the correct service name.
+    container.config.otel_service_name.override("orders-service")
+    # Start telemetry (OTel providers + Prometheus metrics endpoint).
+    # Not awaited: the telemetry resource is a sync generator.
+    container.init_resources()
+
+    # Initialize DB schema
     db = get_database()
     async with db._engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    # Connect Temporal Client
+    # Connect Temporal client (TemporalService carries the OTel Runtime +
+    # TracingInterceptor injected by the container).
     temporal_service = get_temporal_service()
     await temporal_service.connect()
 
     yield
 
     await db.disconnect()
+    # Flush in-flight spans / logs / metrics before the process exits.
+    container.shutdown_resources()
 
 
 app = FastAPI(title="Orders Service", lifespan=lifespan)
