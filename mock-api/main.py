@@ -8,7 +8,14 @@ from typing import Callable, Awaitable
 
 # Cache and Lock for Idempotency
 _idempotency_cache: dict[str, dict] = {}
+# Brief global guard for the cache dict + the per-key lock registry below.
+# NOTE: never hold this across the latency-simulating compute_fn — doing so
+# serializes EVERY request behind one lock (each held for the full simulated
+# delay), which under concurrent load cascades into activity timeouts.
 _cache_lock = asyncio.Lock()
+# Per-idempotency-key locks: only requests sharing a key (genuine duplicates)
+# serialize; distinct orders run concurrently.
+_key_locks: dict[str, asyncio.Lock] = {}
 
 # Ghost cache: tracks shipping labels created but whose response was "lost"
 _shipping_ghost_cache: dict[str, str] = {}
@@ -24,14 +31,23 @@ async def _with_idempotency(
     if not idem_key:
         raise HTTPException(status_code=400, detail="Idempotency-Key header missing")
 
+    # Fast path + grab a per-key lock, all under a brief global guard.
     async with _cache_lock:
         if idem_key in _idempotency_cache:
             return _idempotency_cache[idem_key]
+        key_lock = _key_locks.setdefault(idem_key, asyncio.Lock())
 
-        # Compute and cache under lock so concurrent duplicate requests
-        # don't both execute compute_fn.
+    # Serialize only same-key (duplicate) requests; the slow compute_fn runs
+    # WITHOUT the global lock so distinct orders proceed concurrently.
+    async with key_lock:
+        async with _cache_lock:
+            if idem_key in _idempotency_cache:
+                return _idempotency_cache[idem_key]
+
         response = await compute_fn()
-        _idempotency_cache[idem_key] = response
+
+        async with _cache_lock:
+            _idempotency_cache[idem_key] = response
 
     return response
 

@@ -89,7 +89,7 @@
         {
           "datasource": "$datasource",
           "exemplar": true,
-          "expr": "sum(rate(temporal_request_latency_seconds_bucket[5m]))",
+          "expr": "sum(rate(temporal_request_latency_bucket[5m]))",
           "interval": "",
           "legendFormat": "requests",
           "refId": "A"
@@ -97,7 +97,7 @@
         {
           "datasource": "$datasource",
           "exemplar": true,
-          "expr": "sum(rate(temporal_request_latency_seconds_bucket[5m]))",
+          "expr": "sum(rate(temporal_request_latency_bucket[5m]))",
           "hide": false,
           "interval": "",
           "legendFormat": "failures",
@@ -184,7 +184,7 @@
         {
           "datasource": "$datasource",
           "exemplar": true,
-          "expr": "sum by (operation) ((rate(temporal_request_latency_seconds_bucket[5m])))",
+          "expr": "sum by (operation) ((rate(temporal_request_latency_bucket[5m])))",
           "interval": "",
           "legendFormat": "{{operation }}",
           "refId": "A"
@@ -270,7 +270,7 @@
         {
           "datasource": "$datasource",
           "exemplar": true,
-          "expr": "sum by (operation) (rate(temporal_request_latency_seconds_bucket[5m]))",
+          "expr": "sum by (operation) (rate(temporal_request_latency_bucket[5m]))",
           "interval": "",
           "legendFormat": "{{operation }}",
           "refId": "A"
@@ -356,7 +356,7 @@
         {
           "datasource": "$datasource",
           "exemplar": true,
-          "expr": "histogram_quantile(0.95, sum by (namespace, operation, le) (rate(temporal_request_latency_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (namespace, operation, le) (rate(temporal_request_latency_bucket[5m])))",
           "interval": "",
           "legendFormat": "{{ namespace }} - {{operation }}",
           "refId": "A"
@@ -450,39 +450,24 @@
           "steppedLine": false,
           "targets": [
             {
-              "datasource": "$datasource",
-              "exemplar": true,
-              "expr": "rate(temporal_workflow_completed[5m])",
-              "interval": "",
-              "legendFormat": "{{ workflow_type }}",
-              "refId": "A"
+              "refId": "A",
+              "expr": "sum by (workflow_type) (rate(temporal_workflow_completed[5m]))",
+              "legendFormat": "completed - {{ workflow_type }}"
             },
             {
-              "datasource": "$datasource",
-              "exemplar": true,
+              "refId": "B",
               "expr": "sum(rate(temporal_workflow_failed[5m]))",
-              "hide": false,
-              "interval": "",
-              "legendFormat": "failed",
-              "refId": "B"
+              "legendFormat": "failed"
             },
             {
-              "datasource": "$datasource",
-              "exemplar": true,
+              "refId": "C",
               "expr": "sum(rate(temporal_workflow_canceled[5m]))",
-              "hide": false,
-              "interval": "",
-              "legendFormat": "cancelled",
-              "refId": "C"
+              "legendFormat": "cancelled"
             },
             {
-              "datasource": "$datasource",
-              "exemplar": true,
+              "refId": "D",
               "expr": "sum(rate(temporal_workflow_continue_as_new[5m]))",
-              "hide": false,
-              "interval": "",
-              "legendFormat": "continued_as_new",
-              "refId": "D"
+              "legendFormat": "continued_as_new"
             }
           ],
           "thresholds": [],
@@ -513,7 +498,8 @@
           ],
           "yaxis": {
             "align": false
-          }
+          },
+          "description": "Workflow outcome counters. sdk-core (Python) AND Tally (Go/Java) both emit these under the same names. A counter series only appears once first incremented, so `cancelled` / `continued_as_new` stay empty until such an event occurs."
         },
         {
           "aliasColors": {},
@@ -565,7 +551,7 @@
             {
               "datasource": "$datasource",
               "exemplar": true,
-              "expr": "histogram_quantile(0.95, sum(rate(temporal_workflow_endtoend_latency_seconds_bucket[5m])) by (namespace, workflow_type, le))",
+              "expr": "histogram_quantile(0.95, sum(rate(temporal_workflow_endtoend_latency_bucket[5m])) by (namespace, workflow_type, le))",
               "interval": "",
               "legendFormat": "{{ namespace }} - {{ workflow_type }}",
               "refId": "A"
@@ -649,12 +635,9 @@
           "steppedLine": false,
           "targets": [
             {
-              "datasource": "$datasource",
-              "exemplar": true,
+              "refId": "A",
               "expr": "sum by (namespace, workflow_type) (rate(temporal_workflow_completed[5m]))",
-              "interval": "",
-              "legendFormat": "{{ namespace }} - {{ workflow_type }}",
-              "refId": "A"
+              "legendFormat": "{{ namespace }} - {{ workflow_type }}"
             }
           ],
           "thresholds": [],
@@ -685,7 +668,8 @@
           ],
           "yaxis": {
             "align": false
-          }
+          },
+          "description": "Successful completions per workflow type (`temporal_workflow_completed`). Emitted by sdk-core and Tally alike; appears once at least one workflow of that type completes successfully."
         },
         {
           "aliasColors": {},
@@ -737,7 +721,7 @@
             {
               "datasource": "$datasource",
               "exemplar": true,
-              "expr": "sum by (namespace, task_queue) (rate(temporal_workflow_task_schedule_to_start_latency_seconds_bucket[5m]))",
+              "expr": "sum by (namespace, task_queue) (rate(temporal_workflow_task_schedule_to_start_latency_bucket[5m]))",
               "interval": "",
               "legendFormat": "{{ namespace }} - {{ task_queue }}",
               "refId": "A"
@@ -1098,7 +1082,7 @@
         {
           "datasource": "$datasource",
           "exemplar": true,
-          "expr": "histogram_quantile(0.95, sum(rate(temporal_workflow_task_execution_latency_seconds_bucket[5m])) by (namespace, le))",
+          "expr": "histogram_quantile(0.95, sum(rate(temporal_workflow_task_execution_latency_bucket[5m])) by (namespace, le))",
           "interval": "",
           "legendFormat": "{{ namespace }}",
           "refId": "A"
@@ -1184,7 +1168,7 @@
         {
           "datasource": "$datasource",
           "exemplar": true,
-          "expr": "histogram_quantile(0.95, sum(rate(temporal_workflow_task_execution_latency_seconds_bucket[5m])) by (namespace, workflow_type, le))",
+          "expr": "histogram_quantile(0.95, sum(rate(temporal_workflow_task_execution_latency_bucket[5m])) by (namespace, workflow_type, le))",
           "interval": "",
           "legendFormat": "{{ namespace }} -- {{ workflow_type }}",
           "refId": "A"
@@ -1283,7 +1267,7 @@
         {
           "datasource": "$datasource",
           "exemplar": true,
-          "expr": "sum by (namespace) (rate(temporal_activity_execution_latency_seconds_count[5m]))",
+          "expr": "sum by (namespace) (rate(temporal_activity_execution_latency_count[5m]))",
           "interval": "",
           "legendFormat": "latency count",
           "refId": "A"
@@ -1369,7 +1353,7 @@
         {
           "datasource": "$datasource",
           "exemplar": true,
-          "expr": "sum by (namespace, activity_type) (rate(temporal_activity_execution_latency_seconds_count[5m]))",
+          "expr": "sum by (namespace, activity_type) (rate(temporal_activity_execution_latency_count[5m]))",
           "interval": "",
           "legendFormat": "{{ activity_type }}",
           "refId": "A"
@@ -1453,12 +1437,9 @@
       "steppedLine": false,
       "targets": [
         {
-          "datasource": "$datasource",
-          "exemplar": true,
+          "refId": "A",
           "expr": "sum by (namespace, activity_type) (rate(temporal_activity_execution_failed[5m]))",
-          "interval": "",
-          "legendFormat": "{{ namespace }} - {{ activity_type }}",
-          "refId": "A"
+          "legendFormat": "{{ namespace }} - {{ activity_type }}"
         }
       ],
       "thresholds": [],
@@ -1489,7 +1470,8 @@
       ],
       "yaxis": {
         "align": false
-      }
+      },
+      "description": "Activity failures per type (`temporal_activity_execution_failed`, tagged with activity_type). Emitted by sdk-core and Tally; empty while activities succeed, populates on failures/retries (e.g. the inventory-flaky demo)."
     },
     {
       "aliasColors": {},
@@ -1541,7 +1523,7 @@
         {
           "datasource": "$datasource",
           "exemplar": true,
-          "expr": "histogram_quantile(0.95, sum(rate(temporal_activity_execution_latency_seconds_bucket[5m])) by (namespace, activity_type, le))",
+          "expr": "histogram_quantile(0.95, sum(rate(temporal_activity_execution_latency_bucket[5m])) by (namespace, activity_type, le))",
           "interval": "",
           "legendFormat": "{{ namespace }} - {{ activity_type }}",
           "refId": "A"
@@ -1627,7 +1609,7 @@
         {
           "datasource": "$datasource",
           "exemplar": true,
-          "expr": "histogram_quantile(0.95, sum(rate(temporal_activity_succeed_endtoend_latency_seconds_bucket[5m])) by (namespace, activity_type, le))",
+          "expr": "histogram_quantile(0.95, sum(rate(temporal_activity_succeed_endtoend_latency_bucket[5m])) by (namespace, activity_type, le))",
           "interval": "",
           "legendFormat": "{{ activity_type }}",
           "refId": "A"
@@ -1812,7 +1794,7 @@
         {
           "datasource": "$datasource",
           "exemplar": true,
-          "expr": "histogram_quantile(0.95, sum(rate(temporal_activity_schedule_to_start_latency_seconds_bucket[5m])) by (namespace, le))",
+          "expr": "histogram_quantile(0.95, sum(rate(temporal_activity_schedule_to_start_latency_bucket[5m])) by (namespace, le))",
           "interval": "",
           "legendFormat": "",
           "refId": "A"
@@ -1898,7 +1880,7 @@
         {
           "datasource": "$datasource",
           "exemplar": true,
-          "expr": "histogram_quantile(0.95, sum(rate(temporal_activity_schedule_to_start_latency_seconds_bucket[5m])) by (namespace, activity_type, le))",
+          "expr": "histogram_quantile(0.95, sum(rate(temporal_activity_schedule_to_start_latency_bucket[5m])) by (namespace, activity_type, le))",
           "interval": "",
           "legendFormat": "{{ activity_type }}",
           "refId": "A"
