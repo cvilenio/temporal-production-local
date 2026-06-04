@@ -107,7 +107,14 @@ SERVICE_REGISTRY = {
         "description": "pgweb",
         "http_probe": None,
         "tcp_port": 8081,
-    }
+    },
+    "lgtm": {
+        "group": "Tooling",
+        "icon_key": "chart",
+        "display_name": "Observability (LGTM)",
+        "description": "Grafana, Loki, Tempo, Prometheus",
+        "http_probe": "http://lgtm:3000/api/health",
+    },
 }
 
 _current_snapshot = {}
