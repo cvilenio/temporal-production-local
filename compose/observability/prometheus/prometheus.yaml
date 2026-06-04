@@ -1,0 +1,23 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+
+scrape_configs:
+  # Temporal Server — combined metrics exposed via PROMETHEUS_ENDPOINT env var
+  - job_name: temporal-server
+    static_configs:
+      - targets: ['temporal:9091']
+        labels:
+          service: temporal-server
+
+  # Temporal Python SDK metrics — each process binds a /metrics pull endpoint.
+  # PrometheusConfig on the Runtime exports these with standardised suffixes so
+  # the pre-built sdk.json dashboard works without modification.
+  - job_name: temporal-sdk
+    static_configs:
+      - targets:
+          - 'orders-service:9000'
+          - 'orders-workflow-worker:9000'
+          - 'orders-activity-worker:9000'
+        labels:
+          service: temporal-sdk

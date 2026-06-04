@@ -26,6 +26,8 @@ from shared.activity_io import (
     RefundPaymentRequest,
 )
 
+from temporalio.contrib.opentelemetry.workflow import completed_span as otel_span
+
 from workflows._helpers import retry_policies as retry
 from workflows._helpers.errors import unwrap_activity_error
 from workflows.order.context import OrderRunContext
@@ -42,6 +44,19 @@ class OrderWorkflow:
         self._cancelled_from_status: OrderStatus | None = None
         self._compensations: list[tuple[ActivityName, Any]] = []
         self._ctx: OrderRunContext | None = None
+
+        # Custom workflow metrics — ride the Temporal SDK pull pipeline so they
+        # are replay-safe (suppressed during history replay automatically).
+        # Tag with bounded, low-cardinality labels only (not order_id/trace_id).
+        _meter = workflow.metric_meter()
+        self._step_counter = _meter.create_counter(
+            "order_workflow_steps_completed",
+            description="Steps completed within the order workflow",
+        )
+        self._compensation_counter = _meter.create_counter(
+            "order_workflow_compensations_run",
+            description="Saga compensation activities executed",
+        )
 
     # ----- signals -----
 
@@ -135,6 +150,10 @@ class OrderWorkflow:
         )
 
         await self._notify(ctx, OrderStatus.PENDING, "Order received, getting ready to process.")
+        # otel_span creates a sandbox-safe OTel span via TracingInterceptor's context.
+        # Import is from temporalio.contrib (fully pass-through in the sandbox).
+        otel_span("order.create_order_record")
+        self._step_counter.add(1, {"step": "create_order_record"})
         workflow.logger.info("step completed", extra=self._log_ctx(ctx, step="create_order_record"))
 
     # ----- step: reserve inventory -----
@@ -181,6 +200,8 @@ class OrderWorkflow:
 
         self._set_status(OrderStatus.INVENTORY_RESERVED)
         await self._notify(ctx, OrderStatus.INVENTORY_RESERVED, "Items reserved in our warehouse.")
+        otel_span("order.reserve_inventory")
+        self._step_counter.add(1, {"step": "reserve_inventory"})
         workflow.logger.info("step completed", extra=self._log_ctx(ctx, step="reserve_inventory"))
 
     # ----- step: create shipment -----
@@ -258,6 +279,8 @@ class OrderWorkflow:
 
         self._set_status(OrderStatus.SHIPMENT_CREATED)
         await self._notify(ctx, OrderStatus.SHIPMENT_CREATED, f"Shipment created. Tracking: {tracking_id}")
+        otel_span("order.create_shipment")
+        self._step_counter.add(1, {"step": "create_shipment"})
         workflow.logger.info("step completed", extra=self._log_ctx(ctx, step="create_shipment"))
         return tracking_id
 
@@ -299,6 +322,8 @@ class OrderWorkflow:
 
         self._set_status(OrderStatus.PAYMENT_CAPTURED)
         await self._notify(ctx, OrderStatus.PAYMENT_CAPTURED, "Payment captured successfully.")
+        otel_span("order.capture_payment")
+        self._step_counter.add(1, {"step": "capture_payment"})
         workflow.logger.info("step completed", extra=self._log_ctx(ctx, step="capture_payment"))
 
     # ----- step: finalize -----
@@ -322,6 +347,8 @@ class OrderWorkflow:
             f"Your order is finalized. Your tracking number is {tracking_id}.",
             level="success",
         )
+        otel_span("order.finalize")
+        self._step_counter.add(1, {"step": "finalize"})
         workflow.logger.info("step completed", extra=self._log_ctx(ctx, step="finalize"))
 
     # ----- internal helpers -----
@@ -409,6 +436,7 @@ class OrderWorkflow:
         self._compensations.clear()
 
         for activity_name, req in reversed(comps):
+            self._compensation_counter.add(1, {"activity": str(activity_name)})
             try:
                 await workflow.execute_activity(
                     activity_name,

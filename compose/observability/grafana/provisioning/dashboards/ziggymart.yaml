@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: ziggymart
+    folder: Ziggymart Demo
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards/ziggymart

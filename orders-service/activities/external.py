@@ -1,7 +1,11 @@
+import datetime
+import time
+
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 from clients.mock_api import MockApiClient
 from shared.errors import ErrorType
+from shared.metrics import business_meter
 from shared.temporal_ids import ActivityName
 from shared.activity_io import (
     ReserveInventoryRequest,
@@ -14,10 +18,31 @@ from shared.activity_io import (
     RefundPaymentRequest,
 )
 
+
 def make_external_activities(mock_api: MockApiClient) -> list:
+    # ── Business metrics (OTLP push pipeline) ───────────────────────────────
+    # These record application-level facts that matter to the business.
+    # business_meter() returns a global OTel Meter; it's safe to call here
+    # because activities run outside the workflow sandbox.
+    _meter = business_meter()
+    # Counter name has no _total suffix — the OTel Collector's Prometheus
+    # exporter appends it, yielding `orders_payments_captured_total`.
+    _payments_captured = _meter.create_counter(
+        "orders.payments_captured",
+        description="Number of payment captures that succeeded",
+    )
+    _payment_amount = _meter.create_histogram(
+        "orders.payment_amount",
+        description="Amount charged per captured payment",
+        unit="usd_cents",
+    )
+
     @activity.defn(name=ActivityName.RESERVE_INVENTORY)
     async def reserve_inventory(req: ReserveInventoryRequest) -> None:
-        """Reserves inventory."""
+        activity.logger.info(
+            "calling inventory API",
+            extra={"item_id": req.item_id, "quantity": req.quantity},
+        )
         result = await mock_api.reserve_inventory(
             item_id=req.item_id,
             quantity=req.quantity,
@@ -40,16 +65,37 @@ def make_external_activities(mock_api: MockApiClient) -> list:
 
     @activity.defn(name=ActivityName.CAPTURE_PAYMENT)
     async def capture_payment(req: CapturePaymentRequest) -> None:
+        activity.logger.info(
+            "capturing payment",
+            extra={"amount": float(req.amount)},
+        )
+        t0 = time.monotonic()
         result = await mock_api.charge_payment(
             token=req.auth_token,
             amount=req.amount,
             idem_key=req.idem_key,
         )
+        elapsed = datetime.timedelta(seconds=time.monotonic() - t0)
+
         if not result["success"]:
             raise ApplicationError(
                 f"Payment capture failed: {result['reason']}",
                 type=ErrorType.UNRECOGNIZED_ACTIVITY_FAILURE,
             )
+
+        # Operational metric (SDK pull pipeline) — activity.metric_meter() MUST
+        # be called inside the activity body, not at factory/setup time.
+        activity.metric_meter().create_histogram_timedelta(
+            "orders_payment_capture_duration",
+            description="Wall-clock time for the payment capture API call",
+            unit="duration",
+        ).record(elapsed)
+
+        # Business metrics (OTLP push pipeline via business_meter) — safe in
+        # activities since they run outside the workflow sandbox.
+        _payments_captured.add(1)
+        _payment_amount.record(int(req.amount * 100))
+        activity.logger.info("payment captured", extra={"amount": float(req.amount)})
 
     @activity.defn(name=ActivityName.VERIFY_SHIPMENT_STATUS)
     async def verify_shipment_status(req: VerifyShipmentRequest) -> ShipmentCreatedResult:

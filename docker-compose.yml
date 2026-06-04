@@ -14,6 +14,11 @@
 #                    │
 #          temporal-search-attributes
 #
+#   lgtm (grafana/otel-lgtm) — OTel Collector + Prometheus + Tempo + Loki + Grafana
+#     ◄── OTLP push (traces, logs, business metrics)  from orders-service / workers
+#     ◄── Prometheus scrape (Temporal server + SDK metrics)
+#     Grafana UI: http://localhost:3000  (admin / admin)
+#
 #   orders-db ──► orders-service ──► orders-workflow-worker
 #              │         │           orders-activity-worker
 #              │         └─────────► retail-demo-console
@@ -27,6 +32,48 @@
 # =============================================================================
 
 services:
+
+  # ===========================================================================
+  # OBSERVABILITY — LGTM STACK
+  # Single all-in-one container: OpenTelemetry Collector + Prometheus + Tempo +
+  # Loki + Grafana with all datasources pre-wired.
+  #
+  #   Grafana UI:    http://localhost:3000  (admin / admin)
+  #   OTLP gRPC:     lgtm:4317  (internal — traces, logs, business metrics push)
+  #   OTLP HTTP:     lgtm:4318  (internal)
+  #
+  # Prometheus inside lgtm ALSO scrapes Temporal server + SDK metrics endpoints
+  # via the mounted prometheus.yaml (pull pipeline for operational metrics).
+  # ===========================================================================
+
+  lgtm:
+    image: grafana/otel-lgtm:latest
+    container_name: lgtm
+    environment:
+      # Allow anonymous admin access so the UI opens without a login prompt
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=false
+    networks:
+      - temporal-network
+    ports:
+      - "3000:3000"   # Grafana UI
+    volumes:
+      # Custom Prometheus scrape config (replaces the built-in one).
+      # Adds scrape jobs for Temporal server metrics and SDK pull metrics.
+      - ./compose/observability/prometheus/prometheus.yaml:/otel-lgtm/prometheus.yaml:ro
+      # Pre-built Temporal dashboards (server + SDK) plus custom Ziggymart board
+      - ./compose/observability/grafana/provisioning/dashboards/ziggymart.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/ziggymart.yaml:ro
+      - ./compose/observability/grafana/dashboards:/var/lib/grafana/dashboards/ziggymart:ro
+      # Persist Grafana state, Prometheus TSDB, Tempo blocks, Loki chunks
+      - lgtm-data:/data
+    healthcheck:
+      # otel-lgtm writes /tmp/ready once all internal components are up
+      test: ["CMD-SHELL", "test -f /tmp/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 20s
 
   # ===========================================================================
   # TEMPORAL CLUSTER — PERSISTENCE
@@ -100,6 +147,9 @@ services:
       - POSTGRES_SEEDS=postgresql
       - BIND_ON_IP=0.0.0.0
       - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+      # Expose combined Temporal server Prometheus metrics on port 9091.
+      # Prometheus inside lgtm scrapes this via temporal:9091/metrics.
+      - PROMETHEUS_ENDPOINT=0.0.0.0:9091
     networks:
       - temporal-network
     ports:
@@ -264,10 +314,17 @@ services:
         condition: service_healthy
       orders-db:
         condition: service_healthy
+      lgtm:
+        condition: service_healthy
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_NAMESPACE=ziggymart
       - DATABASE_URL=postgresql+asyncpg://admin:password@orders-db:5432/orders_db
+      # Observability — all three signals (traces, logs, business metrics) push here
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://lgtm:4317
+      - OTEL_SERVICE_NAME=orders-service
+      # SDK operational metrics are pulled by Prometheus on this port
+      - SDK_METRICS_PORT=9000
     networks:
       - temporal-network
     ports:
@@ -310,6 +367,8 @@ services:
         condition: service_healthy
       mock-api:
         condition: service_started
+      lgtm:
+        condition: service_healthy
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_NAMESPACE=ziggymart
@@ -317,6 +376,9 @@ services:
       - MOCK_API_URL=http://mock-api:8000
       - ORDERS_SERVICE_URL=http://orders-service:8000
       - PYTHONUNBUFFERED=1
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://lgtm:4317
+      - OTEL_SERVICE_NAME=orders-workflow-worker
+      - SDK_METRICS_PORT=9000
     networks:
       - temporal-network
 
@@ -339,6 +401,8 @@ services:
         condition: service_healthy
       mock-api:
         condition: service_started
+      lgtm:
+        condition: service_healthy
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_NAMESPACE=ziggymart
@@ -346,6 +410,9 @@ services:
       - MOCK_API_URL=http://mock-api:8000
       - ORDERS_SERVICE_URL=http://orders-service:8000
       - PYTHONUNBUFFERED=1
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://lgtm:4317
+      - OTEL_SERVICE_NAME=orders-activity-worker
+      - SDK_METRICS_PORT=9000
     networks:
       - temporal-network
 
@@ -434,3 +501,4 @@ networks:
 
 volumes:
   orders-db-data:
+  lgtm-data:
