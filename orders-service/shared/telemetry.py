@@ -117,8 +117,12 @@ def init_observability(
     # PrometheusConfig binds /metrics on 0.0.0.0:<port>, scraped by Prometheus
     # inside the lgtm container.
     #
-    # durations_as_seconds=True → latency histograms are exposed as *_seconds
-    # (what the sdk.json dashboard's histogram panels expect).
+    # durations_as_seconds=True → latency histogram VALUES are in seconds (not the
+    # SDK default of milliseconds). It does NOT add a `_seconds` name suffix — that
+    # is a separate exporter option (unit_suffix, default off, left unset here), so
+    # histograms are exposed as bare `temporal_*_latency_bucket` with second-scale
+    # values. (counters_total_suffix is likewise unset → counters carry no `_total`.)
+    # The bundled sdk.json + critical-flows dashboards query these bare names.
     #
     # NOTE: the Python SDK's Prometheus exporter exposes counters WITHOUT a
     # `_total` suffix (e.g. `temporal_workflow_completed`, not

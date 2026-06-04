@@ -810,7 +810,7 @@
           "instant": false,
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "{{ kubernetes_pod_name }}",
+          "legendFormat": "{{ instance }}",
           "refId": "A"
         }
       ],
@@ -1000,7 +1000,7 @@
         {
           "expr": "num_goroutines",
           "interval": "",
-          "legendFormat": "{{kubernetes_pod_name}}",
+          "legendFormat": "{{instance}}",
           "refId": "A"
         }
       ],
@@ -1095,7 +1095,7 @@
         {
           "expr": "memory_allocated",
           "interval": "",
-          "legendFormat": "{{kubernetes_pod_name}}",
+          "legendFormat": "{{instance}}",
           "refId": "A"
         }
       ],
@@ -1190,7 +1190,7 @@
         {
           "expr": "memory_heap",
           "interval": "",
-          "legendFormat": "{{kubernetes_pod_name}}",
+          "legendFormat": "{{instance}}",
           "refId": "A"
         }
       ],
@@ -1285,7 +1285,7 @@
         {
           "expr": "memory_stack",
           "interval": "",
-          "legendFormat": "{{kubernetes_pod_name}}",
+          "legendFormat": "{{instance}}",
           "refId": "A"
         }
       ],
@@ -1378,9 +1378,9 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "sum by (kubernetes_pod_name) (rate(memory_num_gc[5m]))",
+          "expr": "sum by (instance) (rate(memory_num_gc_count[5m]))",
           "interval": "",
-          "legendFormat": "{{kubernetes_pod_name}}",
+          "legendFormat": "{{instance}}",
           "refId": "A"
         }
       ],
@@ -1473,10 +1473,10 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(memory_gc_pause_ms_bucket[5m])) by (kubernetes_pod_name, le))",
+          "expr": "histogram_quantile(0.95, sum(rate(memory_gc_pause_ms_bucket[5m])) by (instance, le))",
           "hide": false,
           "interval": "",
-          "legendFormat": "{{ kubernetes_pod_name }}",
+          "legendFormat": "{{ instance }}",
           "refId": "A"
         }
       ],

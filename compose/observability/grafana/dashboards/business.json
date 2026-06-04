@@ -86,7 +86,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(orders_payment_capture_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(orders_payment_capture_duration_bucket[5m])))",
           "legendFormat": "p95 capture duration"
         }
       ]
