@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response
 from resources import container, get_database, get_temporal_service
 from services.temporal import TemporalService
-from shared.ids import generate_order_id
+from shared.ids import order_id_from_key
 from shared.models import (
     CustomerStatusUpdate,
     InventoryReservationUpdate,
@@ -110,11 +110,12 @@ async def submit_order(
             )
 
     # 3. Generate IDs
-    # order_id is a random, time-sortable business id. workflow_id is derived
-    # from the client idempotency key so a retried start collides on the same id
-    # and USE_EXISTING attaches instead of spawning a duplicate workflow.
-    order_id = generate_order_id()
-    workflow_id = f"order-wf-{x_idempotency_key}"
+    # order_id is derived deterministically from the client idempotency key, so a
+    # retried submission yields the same id. workflow_id mirrors it, so a retried
+    # start collides on the same id and USE_EXISTING attaches instead of spawning
+    # a duplicate workflow.
+    order_id = order_id_from_key(x_idempotency_key)
+    workflow_id = order_id
 
     # 4. Insert DB record
     order = Order(
