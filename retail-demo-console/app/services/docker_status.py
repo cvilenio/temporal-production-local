@@ -1,9 +1,10 @@
 import asyncio
 import os
+from datetime import UTC, datetime
+from typing import Any
+
 import docker
 import httpx
-from datetime import datetime, timezone
-from typing import Dict, Any, Set
 from app.shared.temporal_ids import TaskQueue
 
 # In-network ports for probe fallback (must match docker-compose.yml container ports,
@@ -21,7 +22,6 @@ SERVICE_REGISTRY = {
         "http_probe": None,
         "tcp_port": 7233,
     },
-
     "temporal-ui": {
         "group": "Temporal Cloud",
         "icon_key": "window",
@@ -119,9 +119,10 @@ SERVICE_REGISTRY = {
 
 _current_snapshot = {}
 
+
 class StatusBroker:
     def __init__(self):
-        self.connections: Set[asyncio.Queue] = set()
+        self.connections: set[asyncio.Queue] = set()
 
     async def connect(self) -> asyncio.Queue:
         q = asyncio.Queue()
@@ -134,7 +135,7 @@ class StatusBroker:
     def disconnect(self, q: asyncio.Queue):
         self.connections.discard(q)
 
-    def publish(self, message: Dict[str, Any]):
+    def publish(self, message: dict[str, Any]):
         for q in self.connections:
             try:
                 q.put_nowait(message)
@@ -142,19 +143,24 @@ class StatusBroker:
                 # Use print for now to match file style
                 print(f"Status broker publish error: {e}")
 
+
 broker = StatusBroker()
+
 
 def get_snapshot():
     return _current_snapshot
 
-def derive_status(docker_state: str, docker_health: str | None, http_ok: bool | None) -> str:
+
+def derive_status(
+    docker_state: str, docker_health: str | None, http_ok: bool | None
+) -> str:
     if docker_state in ("exited", "dead", "not-found"):
         return "down"
     if docker_state == "paused":
         return "paused"
     if docker_state == "restarting":
         return "restarting"
-    
+
     if docker_state == "running":
         if http_ok is False:
             return "degraded"
@@ -165,14 +171,17 @@ def derive_status(docker_state: str, docker_health: str | None, http_ok: bool | 
             return "degraded"
         if docker_health == "starting":
             return "starting"
-        
+
         return "healthy"
-    
+
     return "unknown"
+
 
 async def check_tcp(host: str, port: int) -> bool:
     try:
-        _, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=2.0)
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=2.0
+        )
         writer.close()
         await writer.wait_closed()
         return True
@@ -188,15 +197,16 @@ async def check_http(url: str, client: httpx.AsyncClient) -> dict:
             "url": url,
             "ok": resp.status_code == 200,
             "latency_ms": int((datetime.now() - start).total_seconds() * 1000),
-            "checked_at": datetime.now(timezone.utc).isoformat()
+            "checked_at": datetime.now(UTC).isoformat(),
         }
     except Exception:
         return {
             "url": url,
             "ok": False,
             "latency_ms": int((datetime.now() - start).total_seconds() * 1000),
-            "checked_at": datetime.now(timezone.utc).isoformat()
+            "checked_at": datetime.now(UTC).isoformat(),
         }
+
 
 async def _no_probe():
     return None
@@ -252,11 +262,11 @@ async def build_snapshot_via_probes(http_client: httpx.AsyncClient) -> dict:
     tcp_checks = await asyncio.gather(
         *[check_tcp(host, port) for host, port in tcp_targets]
     )
-    tcp_results = dict(zip((host for host, _ in tcp_targets), tcp_checks))
+    tcp_results = dict(zip((host for host, _ in tcp_targets), tcp_checks, strict=True))
 
     snapshot: dict[str, dict] = {}
     for compose_svc, config, http_res in zip(
-        SERVICE_REGISTRY.keys(), SERVICE_REGISTRY.values(), http_results
+        SERVICE_REGISTRY.keys(), SERVICE_REGISTRY.values(), http_results, strict=True
     ):
         reachable = False
         if http_res is not None:
@@ -299,9 +309,7 @@ async def build_snapshot_via_probes(http_client: httpx.AsyncClient) -> dict:
     return snapshot
 
 
-async def build_snapshot_via_docker(
-    client, http_client: httpx.AsyncClient
-) -> dict:
+async def build_snapshot_via_docker(client, http_client: httpx.AsyncClient) -> dict:
     all_containers = await asyncio.to_thread(lambda: client.containers.list(all=True))
     containers = {
         c.labels.get("com.docker.compose.service"): c
@@ -328,7 +336,9 @@ async def build_snapshot_via_docker(
             health = c.attrs["State"]["Health"]["Status"]
 
         ports = []
-        for port, bindings in c.attrs.get("NetworkSettings", {}).get("Ports", {}).items():
+        for port, bindings in (
+            c.attrs.get("NetworkSettings", {}).get("Ports", {}).items()
+        ):
             if bindings:
                 ports.append(port)
 
@@ -340,7 +350,7 @@ async def build_snapshot_via_docker(
 
     snapshot: dict[str, dict] = {}
     for compose_svc, config, http_res in zip(
-        SERVICE_REGISTRY.keys(), SERVICE_REGISTRY.values(), results
+        SERVICE_REGISTRY.keys(), SERVICE_REGISTRY.values(), results, strict=True
     ):
         c = containers.get(compose_svc)
         if c:

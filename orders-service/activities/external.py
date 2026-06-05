@@ -1,22 +1,22 @@
 import datetime
 import time
 
-from temporalio import activity
-from temporalio.exceptions import ApplicationError
 from clients.mock_api import MockApiClient
+from shared.activity_io import (
+    CancelShipmentRequest,
+    CapturePaymentRequest,
+    CreateShipmentRequest,
+    RefundPaymentRequest,
+    ReleaseInventoryRequest,
+    ReserveInventoryRequest,
+    ShipmentCreatedResult,
+    VerifyShipmentRequest,
+)
 from shared.errors import ErrorType
 from shared.metrics import business_meter
 from shared.temporal_ids import ActivityName
-from shared.activity_io import (
-    ReserveInventoryRequest,
-    CreateShipmentRequest,
-    ShipmentCreatedResult,
-    CapturePaymentRequest,
-    VerifyShipmentRequest,
-    ReleaseInventoryRequest,
-    CancelShipmentRequest,
-    RefundPaymentRequest,
-)
+from temporalio import activity
+from temporalio.exceptions import ApplicationError
 
 
 def make_external_activities(mock_api: MockApiClient) -> list:
@@ -98,7 +98,9 @@ def make_external_activities(mock_api: MockApiClient) -> list:
         activity.logger.info("payment captured", extra={"amount": float(req.amount)})
 
     @activity.defn(name=ActivityName.VERIFY_SHIPMENT_STATUS)
-    async def verify_shipment_status(req: VerifyShipmentRequest) -> ShipmentCreatedResult:
+    async def verify_shipment_status(
+        req: VerifyShipmentRequest,
+    ) -> ShipmentCreatedResult:
         result = await mock_api.verify_shipment_status(
             idem_key=req.idem_key,
         )

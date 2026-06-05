@@ -2,25 +2,23 @@ import hashlib
 import json
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Depends, HTTPException, Header, Request
+from db.engine import Database
+from db.models import Base, IdempotencyRecord, Order
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response
-from shared.models import (
-    OrderRequest,
-    OrderStatus,
-    CustomerStatusUpdate,
-    InventoryReservationUpdate,
-    ShipmentUpdate,
-    PaymentCaptureUpdate,
-    OrderFailRequest,
-)
-from shared.workflow_io import OrderWorkflowInput
-
-from shared.ids import generate_order_ids
-from db.models import Base, Order, IdempotencyRecord
-
 from resources import container, get_database, get_temporal_service
 from services.temporal import TemporalService
-from db.engine import Database
+from shared.ids import generate_order_ids
+from shared.models import (
+    CustomerStatusUpdate,
+    InventoryReservationUpdate,
+    OrderFailRequest,
+    OrderRequest,
+    OrderStatus,
+    PaymentCaptureUpdate,
+    ShipmentUpdate,
+)
+from shared.workflow_io import OrderWorkflowInput
 from sqlalchemy import select
 
 
@@ -331,7 +329,11 @@ async def cancel_order(
     # Only cancel if still in-flight
     terminal_statuses = {s.value for s in OrderStatus.terminal_statuses()}
     if order.status in terminal_statuses:
-        return {"requested": False, "reason": "already_terminal", "status": order.status}
+        return {
+            "requested": False,
+            "reason": "already_terminal",
+            "status": order.status,
+        }
 
     res = await temporal_service.cancel_order(order.workflow_id)
     return {

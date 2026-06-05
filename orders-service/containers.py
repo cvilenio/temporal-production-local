@@ -17,13 +17,13 @@ Entrypoint pattern (sync resources → do NOT await):
     ...
     container.shutdown_resources()    # flushes telemetry (in finally / teardown)
 """
-from collections.abc import Iterator
 
-from dependency_injector import containers, providers
+from collections.abc import Iterator
 
 from clients.mock_api import MockApiClient
 from clients.orders_service import OrdersServiceClient
 from db.engine import Database
+from dependency_injector import containers, providers
 from services.temporal import TemporalService
 from shared.telemetry import Telemetry, init_observability
 

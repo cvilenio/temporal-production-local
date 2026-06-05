@@ -13,6 +13,7 @@ PUSH  (OTLP gRPC to lgtm)  — Traces → Tempo, Logs → Loki,
                               Workflow code MUST use workflow.metric_meter() instead
                               (replay-safe; rides the PULL pipeline).
 """
+
 from __future__ import annotations
 
 import logging
@@ -29,7 +30,6 @@ from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-
 from temporalio.contrib.opentelemetry import TracingInterceptor
 from temporalio.runtime import PrometheusConfig, Runtime, TelemetryConfig
 

@@ -2,37 +2,42 @@ from datetime import timedelta
 from typing import Any
 
 from temporalio import workflow
-from temporalio.exceptions import ActivityError, ApplicationError
 from temporalio.contrib.opentelemetry.workflow import completed_span as otel_span
+from temporalio.exceptions import ActivityError, ApplicationError
 
 with workflow.unsafe.imports_passed_through():
+    from shared.activity_io import (
+        CancelShipmentRequest,
+        CapturePaymentRequest,
+        CreateOrderRecordRequest,
+        CreateShipmentRequest,
+        FinalizeOrderRequest,
+        MarkOrderFailedRequest,
+        PersistInventoryReservationRequest,
+        PersistPaymentCaptureRequest,
+        PersistShipmentRequest,
+        RefundPaymentRequest,
+        ReleaseInventoryRequest,
+        ReserveInventoryRequest,
+        ShipmentCreatedResult,
+        UpdateCustomerStatusRequest,
+        VerifyShipmentRequest,
+    )
     from shared.errors import ErrorType
     from shared.models import OrderStatus
-    from shared.temporal_ids import TaskQueue, ActivityName, SignalName, SearchAttribute
-    from shared.workflow_io import OrderWorkflowInput, OrderWorkflowResult
-    from shared.activity_io import (
-        CreateOrderRecordRequest,
-        ReserveInventoryRequest,
-        PersistInventoryReservationRequest,
-        CreateShipmentRequest,
-        ShipmentCreatedResult,
-        VerifyShipmentRequest,
-        PersistShipmentRequest,
-        CapturePaymentRequest,
-        PersistPaymentCaptureRequest,
-        FinalizeOrderRequest,
-        UpdateCustomerStatusRequest,
-        MarkOrderFailedRequest,
-        ReleaseInventoryRequest,
-        CancelShipmentRequest,
-        RefundPaymentRequest,
+    from shared.temporal_ids import ActivityName, SearchAttribute, SignalName, TaskQueue
+    from shared.workflow_io import (
+        OrderResultStatus,
+        OrderWorkflowInput,
+        OrderWorkflowResult,
     )
+
     from workflows._helpers import retry_policies as retry
     from workflows._helpers.errors import unwrap_activity_error
+    from workflows.order import retry_policies as order_retry
     from workflows.order.context import OrderRunContext
     from workflows.order.exceptions import OrderCancelled
     from workflows.order.terminal import TERMINAL_CONFIG, TerminalReason
-    from workflows.order import retry_policies as order_retry
 
 
 @workflow.defn
@@ -75,7 +80,9 @@ class OrderWorkflow:
         # Defensive trace ID propagation — client also sets this, but the workflow
         # sets it too so it is correct even if started without a trace-aware client.
         if ctx.trace_id:
-            workflow.upsert_search_attributes({SearchAttribute.TRACE_ID: [ctx.trace_id]})
+            workflow.upsert_search_attributes(
+                {SearchAttribute.TRACE_ID: [ctx.trace_id]}
+            )
 
         workflow.logger.info("order workflow started", extra=self._log_ctx(ctx))
 
@@ -108,15 +115,24 @@ class OrderWorkflow:
             cause = unwrap_activity_error(e)
 
             # Unrecoverable shipping failure — compensate and surface clean terminal state
-            if isinstance(cause, ApplicationError) and cause.type == ErrorType.SHIPMENT_NOT_VERIFIED:
-                return await self._finalize_terminal(ctx, TerminalReason.SHIPPING_UNRECOVERABLE)
+            if (
+                isinstance(cause, ApplicationError)
+                and cause.type == ErrorType.SHIPMENT_NOT_VERIFIED
+            ):
+                return await self._finalize_terminal(
+                    ctx, TerminalReason.SHIPPING_UNRECOVERABLE
+                )
 
             # Unexpected activity or application failure — compensate and re-raise for Temporal retry
-            workflow.logger.error("unexpected workflow failure", exc_info=True, extra=self._log_ctx(ctx))
+            workflow.logger.error(
+                "unexpected workflow failure", exc_info=True, extra=self._log_ctx(ctx)
+            )
             failed_comps = await self._run_compensations(ctx)
             await self._record_terminal_state(
                 ctx,
-                status=OrderStatus.CANCELLED_WITH_ISSUES if failed_comps else OrderStatus.FAILED,
+                status=OrderStatus.CANCELLED_WITH_ISSUES
+                if failed_comps
+                else OrderStatus.FAILED,
                 message="Something went wrong with your order. Our team is investigating.",
                 failure_reason=str(e),
             )
@@ -128,7 +144,9 @@ class OrderWorkflow:
     # ----- step: create order record -----
 
     async def _step_create_order_record(self, ctx: OrderRunContext) -> None:
-        workflow.logger.info("step starting", extra=self._log_ctx(ctx, step="create_order_record"))
+        workflow.logger.info(
+            "step starting", extra=self._log_ctx(ctx, step="create_order_record")
+        )
 
         await workflow.execute_activity(
             ActivityName.CREATE_ORDER_RECORD,
@@ -148,17 +166,23 @@ class OrderWorkflow:
             task_queue=TaskQueue.ORDERS_ACTIVITY,
         )
 
-        await self._notify(ctx, OrderStatus.PENDING, "Order received, getting ready to process.")
+        await self._notify(
+            ctx, OrderStatus.PENDING, "Order received, getting ready to process."
+        )
         # otel_span creates a sandbox-safe OTel span via TracingInterceptor's context.
         # Import is from temporalio.contrib (fully pass-through in the sandbox).
         otel_span("order.create_order_record")
         self._step_counter.add(1, {"step": "create_order_record"})
-        workflow.logger.info("step completed", extra=self._log_ctx(ctx, step="create_order_record"))
+        workflow.logger.info(
+            "step completed", extra=self._log_ctx(ctx, step="create_order_record")
+        )
 
     # ----- step: reserve inventory -----
 
     async def _step_reserve_inventory(self, ctx: OrderRunContext) -> None:
-        workflow.logger.info("step starting", extra=self._log_ctx(ctx, step="reserve_inventory"))
+        workflow.logger.info(
+            "step starting", extra=self._log_ctx(ctx, step="reserve_inventory")
+        )
         self._set_status(OrderStatus.RESERVING_INVENTORY)
 
         await workflow.execute_activity(
@@ -176,15 +200,17 @@ class OrderWorkflow:
         # Register compensation before persisting — ensures rollback is possible
         # even if the persistence step fails.
         reservation_id = ctx.generate_reservation_id()
-        self._compensations.append((
-            ActivityName.RELEASE_INVENTORY,
-            ReleaseInventoryRequest(
-                reservation_id=reservation_id,
-                item_id=ctx.item_id,
-                quantity=ctx.quantity,
-                idem_key=ctx.idem_key("release_inventory"),
-            ),
-        ))
+        self._compensations.append(
+            (
+                ActivityName.RELEASE_INVENTORY,
+                ReleaseInventoryRequest(
+                    reservation_id=reservation_id,
+                    item_id=ctx.item_id,
+                    quantity=ctx.quantity,
+                    idem_key=ctx.idem_key("release_inventory"),
+                ),
+            )
+        )
 
         await workflow.execute_activity(
             ActivityName.PERSIST_INVENTORY_RESERVATION,
@@ -198,15 +224,21 @@ class OrderWorkflow:
         )
 
         self._set_status(OrderStatus.INVENTORY_RESERVED)
-        await self._notify(ctx, OrderStatus.INVENTORY_RESERVED, "Items reserved in our warehouse.")
+        await self._notify(
+            ctx, OrderStatus.INVENTORY_RESERVED, "Items reserved in our warehouse."
+        )
         otel_span("order.reserve_inventory")
         self._step_counter.add(1, {"step": "reserve_inventory"})
-        workflow.logger.info("step completed", extra=self._log_ctx(ctx, step="reserve_inventory"))
+        workflow.logger.info(
+            "step completed", extra=self._log_ctx(ctx, step="reserve_inventory")
+        )
 
     # ----- step: create shipment -----
 
     async def _step_create_shipment(self, ctx: OrderRunContext) -> str:
-        workflow.logger.info("step starting", extra=self._log_ctx(ctx, step="create_shipment"))
+        workflow.logger.info(
+            "step starting", extra=self._log_ctx(ctx, step="create_shipment")
+        )
         self._set_status(OrderStatus.CREATING_SHIPMENT)
 
         shipping_idem_key = ctx.idem_key("create_shipment")
@@ -235,7 +267,10 @@ class OrderWorkflow:
             except ActivityError:
                 workflow.logger.warning(
                     "create_shipment failed; verifying status",
-                    extra={**self._log_ctx(ctx, step="create_shipment"), "cycle": cycle},
+                    extra={
+                        **self._log_ctx(ctx, step="create_shipment"),
+                        "cycle": cycle,
+                    },
                 )
                 try:
                     result = await workflow.execute_activity(
@@ -251,22 +286,31 @@ class OrderWorkflow:
 
                 except ActivityError as ve:
                     cause = unwrap_activity_error(ve)
-                    if isinstance(cause, ApplicationError) and cause.type == ErrorType.SHIPMENT_NOT_VERIFIED:
+                    if (
+                        isinstance(cause, ApplicationError)
+                        and cause.type == ErrorType.SHIPMENT_NOT_VERIFIED
+                    ):
                         if cycle == 1:
                             continue  # Cycle 1: retry create on verify failure
                         else:
-                            raise   # Cycle 2: surface terminal.
+                            raise  # Cycle 2: surface terminal.
                     else:
-                        raise 
+                        raise
+
+        # tracking_id is guaranteed set here: the loop either breaks on success
+        # (assigning it) or raises on terminal failure.
+        assert tracking_id is not None
 
         # Register compensation only after we have a confirmed tracking ID
-        self._compensations.append((
-            ActivityName.CANCEL_SHIPMENT,
-            CancelShipmentRequest(
-                tracking_id=tracking_id,
-                idem_key=ctx.idem_key("cancel_shipment"),
-            ),
-        ))
+        self._compensations.append(
+            (
+                ActivityName.CANCEL_SHIPMENT,
+                CancelShipmentRequest(
+                    tracking_id=tracking_id,
+                    idem_key=ctx.idem_key("cancel_shipment"),
+                ),
+            )
+        )
 
         await workflow.execute_activity(
             ActivityName.PERSIST_SHIPMENT,
@@ -277,16 +321,24 @@ class OrderWorkflow:
         )
 
         self._set_status(OrderStatus.SHIPMENT_CREATED)
-        await self._notify(ctx, OrderStatus.SHIPMENT_CREATED, f"Shipment created. Tracking: {tracking_id}")
+        await self._notify(
+            ctx,
+            OrderStatus.SHIPMENT_CREATED,
+            f"Shipment created. Tracking: {tracking_id}",
+        )
         otel_span("order.create_shipment")
         self._step_counter.add(1, {"step": "create_shipment"})
-        workflow.logger.info("step completed", extra=self._log_ctx(ctx, step="create_shipment"))
+        workflow.logger.info(
+            "step completed", extra=self._log_ctx(ctx, step="create_shipment")
+        )
         return tracking_id
 
     # ----- step: capture payment -----
 
     async def _step_capture_payment(self, ctx: OrderRunContext) -> None:
-        workflow.logger.info("step starting", extra=self._log_ctx(ctx, step="capture_payment"))
+        workflow.logger.info(
+            "step starting", extra=self._log_ctx(ctx, step="capture_payment")
+        )
         self._set_status(OrderStatus.CAPTURING_PAYMENT)
 
         await workflow.execute_activity(
@@ -302,14 +354,16 @@ class OrderWorkflow:
         )
 
         capture_id = f"CAP-{workflow.uuid4()}"
-        self._compensations.append((
-            ActivityName.REFUND_PAYMENT,
-            RefundPaymentRequest(
-                capture_id=capture_id,
-                amount=ctx.amount,
-                idem_key=ctx.idem_key("refund_payment"),
-            ),
-        ))
+        self._compensations.append(
+            (
+                ActivityName.REFUND_PAYMENT,
+                RefundPaymentRequest(
+                    capture_id=capture_id,
+                    amount=ctx.amount,
+                    idem_key=ctx.idem_key("refund_payment"),
+                ),
+            )
+        )
 
         await workflow.execute_activity(
             ActivityName.PERSIST_PAYMENT_CAPTURE,
@@ -320,10 +374,14 @@ class OrderWorkflow:
         )
 
         self._set_status(OrderStatus.PAYMENT_CAPTURED)
-        await self._notify(ctx, OrderStatus.PAYMENT_CAPTURED, "Payment captured successfully.")
+        await self._notify(
+            ctx, OrderStatus.PAYMENT_CAPTURED, "Payment captured successfully."
+        )
         otel_span("order.capture_payment")
         self._step_counter.add(1, {"step": "capture_payment"})
-        workflow.logger.info("step completed", extra=self._log_ctx(ctx, step="capture_payment"))
+        workflow.logger.info(
+            "step completed", extra=self._log_ctx(ctx, step="capture_payment")
+        )
 
     # ----- step: finalize -----
 
@@ -348,7 +406,9 @@ class OrderWorkflow:
         )
         otel_span("order.finalize")
         self._step_counter.add(1, {"step": "finalize"})
-        workflow.logger.info("step completed", extra=self._log_ctx(ctx, step="finalize"))
+        workflow.logger.info(
+            "step completed", extra=self._log_ctx(ctx, step="finalize")
+        )
 
     # ----- internal helpers -----
 
@@ -366,7 +426,7 @@ class OrderWorkflow:
     def _make_result(
         self,
         ctx: OrderRunContext,
-        status: str,
+        status: OrderResultStatus,
         tracking_id: str | None = None,
     ) -> OrderWorkflowResult:
         """Build the typed workflow result."""
@@ -379,7 +439,9 @@ class OrderWorkflow:
 
     def _set_status(self, status: OrderStatus) -> None:
         self._status = status
-        workflow.upsert_search_attributes({SearchAttribute.ORDER_STATUS: [status.value]})
+        workflow.upsert_search_attributes(
+            {SearchAttribute.ORDER_STATUS: [status.value]}
+        )
 
     def _raise_if_cancelled(self) -> None:
         if self._cancel_requested:
@@ -387,7 +449,11 @@ class OrderWorkflow:
             raise OrderCancelled()
 
     async def _notify(
-        self, ctx: OrderRunContext, status: OrderStatus, message: str, level: str = "info"
+        self,
+        ctx: OrderRunContext,
+        status: OrderStatus,
+        message: str,
+        level: str = "info",
     ) -> None:
         await workflow.execute_activity(
             ActivityName.UPDATE_CUSTOMER_STATUS,
@@ -476,12 +542,18 @@ class OrderWorkflow:
         if reason == TerminalReason.CANCELLED_BY_USER and payment_was_captured:
             message = "Your order has been cancelled. Any charges will be refunded."
 
-        status = OrderStatus.CANCELLED_WITH_ISSUES if failed_comps else config.clean_status
+        status = (
+            OrderStatus.CANCELLED_WITH_ISSUES if failed_comps else config.clean_status
+        )
 
         if failed_comps:
             workflow.logger.error(
                 "terminal finalization with failed compensations",
-                extra={**self._log_ctx(ctx), "reason": reason, "failed_compensations": failed_comps},
+                extra={
+                    **self._log_ctx(ctx),
+                    "reason": reason,
+                    "failed_compensations": failed_comps,
+                },
             )
         else:
             workflow.logger.warning(

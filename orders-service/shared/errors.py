@@ -6,6 +6,7 @@ class ErrorType(StrEnum):
     Kept as StrEnum so values travel through Temporal's ApplicationError.type
     without requiring custom class deserialization.
     """
+
     SHIPMENT_NOT_VERIFIED = "ShipmentNotVerified"
     COMPENSATION_FAILED = "CompensationFailed"
     UNEXPECTED_ORDER_FAILURE = "UnexpectedOrderFailure"

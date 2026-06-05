@@ -75,7 +75,9 @@ class MockApiClient:
             idem_key,
         )
 
-    async def refund_payment(self, capture_id: str, amount: float, idem_key: str) -> None:
+    async def refund_payment(
+        self, capture_id: str, amount: float, idem_key: str
+    ) -> None:
         await self._post(
             "/payment/refund",
             {"capture_id": capture_id, "amount": amount},

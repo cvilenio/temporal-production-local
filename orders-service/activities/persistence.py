@@ -1,14 +1,15 @@
-from temporalio import activity
 from clients.orders_service import OrdersServiceClient
-from shared.temporal_ids import ActivityName
 from shared.activity_io import (
     CreateOrderRecordRequest,
-    PersistInventoryReservationRequest,
-    PersistShipmentRequest,
-    PersistPaymentCaptureRequest,
-    MarkOrderFailedRequest,
     FinalizeOrderRequest,
+    MarkOrderFailedRequest,
+    PersistInventoryReservationRequest,
+    PersistPaymentCaptureRequest,
+    PersistShipmentRequest,
 )
+from shared.temporal_ids import ActivityName
+from temporalio import activity
+
 
 def make_persistence_activities(client: OrdersServiceClient) -> list:
     @activity.defn(name=ActivityName.CREATE_ORDER_RECORD)
@@ -16,22 +17,18 @@ def make_persistence_activities(client: OrdersServiceClient) -> list:
         await client.ensure_order(req.model_dump(mode="json"))
 
     @activity.defn(name=ActivityName.PERSIST_INVENTORY_RESERVATION)
-    async def persist_inventory_reservation(req: PersistInventoryReservationRequest) -> None:
-        await client.persist_inventory_reservation(
-            req.order_id, req.reservation_id
-        )
+    async def persist_inventory_reservation(
+        req: PersistInventoryReservationRequest,
+    ) -> None:
+        await client.persist_inventory_reservation(req.order_id, req.reservation_id)
 
     @activity.defn(name=ActivityName.PERSIST_SHIPMENT)
     async def persist_shipment(req: PersistShipmentRequest) -> None:
-        await client.persist_shipment(
-            req.order_id, req.tracking_id
-        )
+        await client.persist_shipment(req.order_id, req.tracking_id)
 
     @activity.defn(name=ActivityName.PERSIST_PAYMENT_CAPTURE)
     async def persist_payment_capture(req: PersistPaymentCaptureRequest) -> None:
-        await client.persist_payment_capture(
-            req.order_id, req.capture_id
-        )
+        await client.persist_payment_capture(req.order_id, req.capture_id)
 
     @activity.defn(name=ActivityName.MARK_ORDER_FAILED)
     async def mark_order_failed(req: MarkOrderFailedRequest) -> None:

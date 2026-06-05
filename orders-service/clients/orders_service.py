@@ -1,11 +1,12 @@
 import httpx
 from temporalio.exceptions import ApplicationError
 
+
 class OrdersServiceClient:
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip("/")
 
-    async def _request(self, method: str, path: str, json: dict = None) -> dict:
+    async def _request(self, method: str, path: str, json: dict | None = None) -> dict:
         async with httpx.AsyncClient() as client:
             response = await client.request(
                 method,
@@ -29,16 +30,32 @@ class OrdersServiceClient:
         await self._request("POST", "/internal/orders/ensure", json=order_data)
 
     async def update_customer_status(self, order_id: str, payload: dict) -> None:
-        await self._request("PATCH", f"/orders/{order_id}/customer-status", json=payload)
+        await self._request(
+            "PATCH", f"/orders/{order_id}/customer-status", json=payload
+        )
 
-    async def persist_inventory_reservation(self, order_id: str, reservation_id: str) -> None:
-        await self._request("PATCH", f"/internal/orders/{order_id}/inventory-reservation", json={"reservation_id": reservation_id})
+    async def persist_inventory_reservation(
+        self, order_id: str, reservation_id: str
+    ) -> None:
+        await self._request(
+            "PATCH",
+            f"/internal/orders/{order_id}/inventory-reservation",
+            json={"reservation_id": reservation_id},
+        )
 
     async def persist_shipment(self, order_id: str, tracking_id: str) -> None:
-        await self._request("PATCH", f"/internal/orders/{order_id}/shipment", json={"tracking_id": tracking_id})
+        await self._request(
+            "PATCH",
+            f"/internal/orders/{order_id}/shipment",
+            json={"tracking_id": tracking_id},
+        )
 
     async def persist_payment_capture(self, order_id: str, capture_id: str) -> None:
-        await self._request("PATCH", f"/internal/orders/{order_id}/payment-capture", json={"capture_id": capture_id})
+        await self._request(
+            "PATCH",
+            f"/internal/orders/{order_id}/payment-capture",
+            json={"capture_id": capture_id},
+        )
 
     async def mark_order_failed(self, order_id: str, payload: dict) -> None:
         await self._request("POST", f"/orders/{order_id}/fail", json=payload)

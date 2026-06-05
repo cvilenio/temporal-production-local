@@ -11,12 +11,13 @@ Each process entrypoint must override the service name and call
 any accessor that depends on telemetry (get_temporal_service). Teardown calls
 `container.shutdown_resources()` to flush telemetry.
 """
-from containers import Container
-from config import settings
-from db.engine import Database
-from services.temporal import TemporalService
+
 from clients.mock_api import MockApiClient
 from clients.orders_service import OrdersServiceClient
+from config import settings
+from containers import Container
+from db.engine import Database
+from services.temporal import TemporalService
 
 container = Container()
 container.config.from_pydantic(settings)

@@ -1,7 +1,8 @@
-from temporalio import activity
 from clients.orders_service import OrdersServiceClient
-from shared.temporal_ids import ActivityName
 from shared.activity_io import UpdateCustomerStatusRequest
+from shared.temporal_ids import ActivityName
+from temporalio import activity
+
 
 def make_customer_message_activities(client: OrdersServiceClient) -> list:
     @activity.defn(name=ActivityName.UPDATE_CUSTOMER_STATUS)

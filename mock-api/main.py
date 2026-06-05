@@ -1,10 +1,11 @@
-import uuid
-import os
 import asyncio
+import os
 import random
+import uuid
+from collections.abc import Awaitable, Callable
+
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
-from typing import Callable, Awaitable
 
 # Cache and Lock for Idempotency
 _idempotency_cache: dict[str, dict] = {}
@@ -144,7 +145,9 @@ async def reserve_inventory(
             _inventory_attempts[idempotency_key] = attempt
 
         if attempt <= 2:
-            print(f"[{idempotency_key}] Inventory Flaky: Attempt {attempt} returning 503")
+            print(
+                f"[{idempotency_key}] Inventory Flaky: Attempt {attempt} returning 503"
+            )
             raise HTTPException(status_code=503, detail="Service Unavailable")
         print(f"[{idempotency_key}] Inventory Flaky: Attempt {attempt} succeeding")
 
@@ -186,21 +189,29 @@ async def request_shipping(
         if attempt == 1:
             tracking_id = f"TRK-{uuid.uuid4()}"
             _shipping_ghost_cache[idempotency_key] = tracking_id
-            print(f"[{idempotency_key}] Ghost label created: {tracking_id}. Hanging {hang_ms}ms...")
+            print(
+                f"[{idempotency_key}] Ghost label created: {tracking_id}. Hanging {hang_ms}ms..."
+            )
         else:
-            print(f"[{idempotency_key}] Ghost label already exists. Hanging {hang_ms}ms...")
+            print(
+                f"[{idempotency_key}] Ghost label already exists. Hanging {hang_ms}ms..."
+            )
         await asyncio.sleep(hang_ms / 1000)
         raise HTTPException(status_code=504, detail="Gateway Timeout")
 
     if "flaky" in addr:
         if attempt == 1:
-            print(f"[{idempotency_key}] Shipping Flaky: Attempt 1 hanging {hang_ms}ms...")
+            print(
+                f"[{idempotency_key}] Shipping Flaky: Attempt 1 hanging {hang_ms}ms..."
+            )
             await asyncio.sleep(hang_ms / 1000)
             raise HTTPException(status_code=504, detail="Gateway Timeout")
         print(f"[{idempotency_key}] Shipping Flaky: Attempt {attempt} succeeding")
 
     if "lost" in addr:
-        print(f"[{idempotency_key}] Shipping Lost: Attempt {attempt} hanging {hang_ms}ms...")
+        print(
+            f"[{idempotency_key}] Shipping Lost: Attempt {attempt} hanging {hang_ms}ms..."
+        )
         await asyncio.sleep(hang_ms / 1000)
         raise HTTPException(status_code=504, detail="Gateway Timeout")
 

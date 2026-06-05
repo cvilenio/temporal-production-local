@@ -1,16 +1,17 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import Dict, Any, Set
-from .config import settings
+from datetime import UTC, datetime
+from typing import Any
+
 from . import db
+from .config import settings
 
 logger = logging.getLogger(__name__)
 
 
 class Broker:
     def __init__(self):
-        self.connections: Set[asyncio.Queue] = set()
+        self.connections: set[asyncio.Queue] = set()
 
     async def subscribe(self) -> asyncio.Queue:
         q = asyncio.Queue()
@@ -21,7 +22,7 @@ class Broker:
         if q in self.connections:
             self.connections.remove(q)
 
-    async def broadcast(self, message: Dict[str, Any]):
+    async def broadcast(self, message: dict[str, Any]):
         if not self.connections:
             return
 
@@ -51,7 +52,7 @@ async def poll_order_updates():
 
     if not last_seen_ts:
         # Fallback to now if DB is empty
-        last_seen_ts = datetime.now(timezone.utc)
+        last_seen_ts = datetime.now(UTC)
 
     logger.info(f"Initialized order poller at {last_seen_ts}")
 
