@@ -210,3 +210,41 @@ async def cancel_batch(payload: dict[str, Any] = Body(...)):
 @router.get("/submission-log")
 async def get_submission_log():
     return await submission_log.get_all()
+
+
+@router.post("/reset")
+async def reset_demo(payload: dict[str, Any] = Body(default={})):
+    """Reset all demo state: proxy to orders-service /admin/reset (terminates
+    workflows + truncates order tables), then clear the in-memory submission log
+    so the console's batch history matches the wiped backend.
+
+    delete_closed (default true) also removes closed workflows from the Temporal
+    UI list; set false to only stop in-flight work and keep history.
+    """
+    delete_closed = bool(payload.get("delete_closed", True))
+
+    async with httpx.AsyncClient(
+        timeout=settings.orders_service_timeout_seconds
+    ) as client:
+        try:
+            response = await client.post(
+                f"{settings.orders_service_url.rstrip('/')}/admin/reset",
+                params={"delete_closed": str(delete_closed).lower()},
+            )
+            response.raise_for_status()
+            result = response.json()
+        except httpx.HTTPStatusError as e:
+            # Surface the backend's reason (e.g. 403 when reset is disabled)
+            # without clearing local state — backend reset did not happen.
+            detail = e.response.text
+            try:
+                detail = e.response.json().get("detail", detail)
+            except Exception:
+                pass
+            return {"ok": False, "status_code": e.response.status_code, "error": detail}
+        except Exception as e:
+            return {"ok": False, "status_code": None, "error": str(e)}
+
+    # Backend reset succeeded — clear the console's own in-memory history.
+    await submission_log.clear()
+    return {"ok": True, **result}

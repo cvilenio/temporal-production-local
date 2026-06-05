@@ -10,8 +10,17 @@
         <h2 class="text-2xl font-semibold tracking-tight">Live Architecture</h2>
         <p class="text-textMuted mt-1">Reference Architecture for the Demo with live status from the services.</p>
       </div>
-      <div class="text-sm text-textMuted" x-show="lastUpdated">
-        Updated <span x-text="fmtRelTime(lastUpdated)"></span>
+      <div class="flex items-center gap-4">
+        <div class="text-sm text-textMuted" x-show="lastUpdated">
+          Updated <span x-text="fmtRelTime(lastUpdated)"></span>
+        </div>
+        <button @click="openReset()" :disabled="resetting"
+          class="flex items-center gap-2 px-3 py-1.5 rounded-md border border-error/40 text-error text-sm font-medium hover:bg-error/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-4 h-4" :class="resetting ? 'animate-spin' : ''" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+          </svg>
+          <span x-text="resetting ? 'Resetting…' : 'Reset Demo State'"></span>
+        </button>
       </div>
     </div>
 
@@ -319,6 +328,88 @@
     </template>
   </div>
 
+  <!-- Reset Confirmation Modal -->
+  <div x-show="showResetModal" x-transition.opacity
+    class="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm" x-cloak
+    @keydown.escape.window="showResetModal = false">
+    <div class="bg-bgPanel border border-error/40 rounded-xl shadow-2xl w-[440px] max-w-[90vw] p-6"
+      @click.outside="if (!resetting) showResetModal = false">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="w-9 h-9 rounded-full bg-error/15 flex items-center justify-center shrink-0">
+          <svg class="w-5 h-5 text-error" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+          </svg>
+        </div>
+        <h3 class="text-lg font-semibold text-textPrimary">Reset demo state?</h3>
+      </div>
+
+      <p class="text-sm text-textMuted leading-relaxed mb-4">
+        This is <span class="text-error font-medium">destructive and irreversible</span>. It will:
+      </p>
+      <ul class="text-sm text-textMuted space-y-1.5 mb-4 list-disc pl-5">
+        <li>Terminate all in-flight order workflows in the namespace</li>
+        <li><span x-show="deleteClosed">Delete closed workflow history (clears the Temporal UI list)</span>
+            <span x-show="!deleteClosed">Leave closed workflow history intact</span></li>
+        <li>Truncate the <span class="font-mono text-textPrimary/80">orders</span> and
+            <span class="font-mono text-textPrimary/80">idempotency_keys</span> tables</li>
+        <li>Clear this console's batch submission log</li>
+      </ul>
+
+      <label class="flex items-center gap-2 text-sm text-textMuted mb-5 cursor-pointer select-none">
+        <input type="checkbox" x-model="deleteClosed" class="accent-accent w-4 h-4">
+        Also delete closed workflow history
+      </label>
+
+      <div class="flex justify-end gap-2">
+        <button @click="showResetModal = false" :disabled="resetting"
+          class="px-4 py-2 rounded-md text-sm text-textMuted hover:text-textPrimary border border-borderSubtle hover:bg-white/[0.03] transition-colors disabled:opacity-50">
+          Cancel
+        </button>
+        <button @click="doReset()" :disabled="resetting"
+          class="px-4 py-2 rounded-md text-sm font-medium bg-error/90 text-white hover:bg-error transition-colors disabled:opacity-50 flex items-center gap-2">
+          <svg x-show="resetting" class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+          </svg>
+          <span x-text="resetting ? 'Resetting…' : 'Reset Everything'"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reset Result Toast -->
+  <div x-show="resetResult" x-transition
+    class="fixed bottom-6 right-6 z-[70] w-96 max-w-[90vw] rounded-lg shadow-2xl border p-4 text-sm" x-cloak
+    :class="resetResult && resetResult.ok ? 'bg-bgPanel border-success/40' : 'bg-bgPanel border-error/40'">
+    <template x-if="resetResult">
+      <div>
+        <div class="flex items-start justify-between mb-2">
+          <div class="font-semibold" :class="resetResult.ok ? 'text-success' : 'text-error'"
+            x-text="resetResult.ok ? 'Demo state reset' : 'Reset failed'"></div>
+          <button @click="resetResult = null" class="text-textMuted hover:text-textPrimary">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <template x-if="resetResult.ok && resetResult.workflows">
+          <div class="text-textMuted space-y-0.5">
+            <div>Workflows terminated: <span class="text-textPrimary font-mono" x-text="resetResult.workflows.terminated"></span>
+              <span x-show="resetResult.workflows.terminate_errors" class="text-warn" x-text="`(${resetResult.workflows.terminate_errors} errors)`"></span>
+            </div>
+            <div x-show="resetResult.workflows.delete_closed">Workflows deleted: <span class="text-textPrimary font-mono" x-text="resetResult.workflows.deleted"></span>
+              <span x-show="resetResult.workflows.delete_errors" class="text-warn" x-text="`(${resetResult.workflows.delete_errors} errors)`"></span>
+            </div>
+            <div x-show="resetResult.database">Tables truncated: <span class="text-textPrimary font-mono" x-text="(resetResult.database.truncated || []).join(', ')"></span></div>
+          </div>
+        </template>
+        <template x-if="!resetResult.ok">
+          <div class="text-textMuted break-words" x-text="resetResult.error || 'Unknown error'"></div>
+        </template>
+      </div>
+    </template>
+  </div>
+
 </div>
 
 <script>
@@ -340,6 +431,12 @@
       hovered: null,
       hoverX: 0,
       hoverY: 0,
+
+      // Reset flow
+      showResetModal: false,
+      resetting: false,
+      deleteClosed: true,
+      resetResult: null,
 
       async init() {
         try {
@@ -451,7 +548,26 @@
       showTooltip(key, ev) { this.hovered = key; this.hoverX = ev.clientX; this.hoverY = ev.clientY; },
       moveTooltip(ev) { if (this.hovered) { this.hoverX = ev.clientX; this.hoverY = ev.clientY; } },
       hideTooltip() { this.hovered = null; },
-      fmtRelTime(iso) { return window.relativeTime(iso); }
+      fmtRelTime(iso) { return window.relativeTime(iso); },
+
+      openReset() { this.resetResult = null; this.showResetModal = true; },
+
+      async doReset() {
+        this.resetting = true;
+        try {
+          const res = await fetch('/api/reset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ delete_closed: this.deleteClosed })
+          });
+          this.resetResult = await res.json();
+        } catch (e) {
+          this.resetResult = { ok: false, error: String(e) };
+        } finally {
+          this.resetting = false;
+          this.showResetModal = false;
+        }
+      }
     }
   }
 </script>
