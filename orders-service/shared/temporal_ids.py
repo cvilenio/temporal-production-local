@@ -1,5 +1,7 @@
 from enum import StrEnum
 
+from temporalio.common import SearchAttributeKey
+
 
 class TaskQueue(StrEnum):
     ORDERS_WORKFLOW = "orders-workflow-task-queue"
@@ -30,7 +32,10 @@ class SignalName(StrEnum):
     CANCEL_ORDER = "cancel_order"
 
 
-class SearchAttribute(StrEnum):
-    ORDER_ID = "OrderId"
-    ORDER_STATUS = "OrderStatus"
-    TRACE_ID = "TraceId"
+class SearchAttribute:
+    """Typed Search Attribute keys. Names must match the attributes registered
+    on the Temporal namespace (all keyword-typed)."""
+
+    ORDER_ID = SearchAttributeKey.for_keyword("OrderId")
+    ORDER_STATUS = SearchAttributeKey.for_keyword("OrderStatus")
+    TRACE_ID = SearchAttributeKey.for_keyword("TraceId")

@@ -81,7 +81,7 @@ class OrderWorkflow:
         # sets it too so it is correct even if started without a trace-aware client.
         if ctx.trace_id:
             workflow.upsert_search_attributes(
-                {SearchAttribute.TRACE_ID: [ctx.trace_id]}
+                [SearchAttribute.TRACE_ID.value_set(ctx.trace_id)]
             )
 
         workflow.logger.info("order workflow started", extra=self._log_ctx(ctx))
@@ -440,7 +440,7 @@ class OrderWorkflow:
     def _set_status(self, status: OrderStatus) -> None:
         self._status = status
         workflow.upsert_search_attributes(
-            {SearchAttribute.ORDER_STATUS: [status.value]}
+            [SearchAttribute.ORDER_STATUS.value_set(status.value)]
         )
 
     def _raise_if_cancelled(self) -> None:
@@ -517,12 +517,24 @@ class OrderWorkflow:
                     extra={**self._log_ctx(ctx), "compensation": str(activity_name)},
                 )
                 failed.append(str(activity_name))
-                await self._notify(
-                    ctx,
-                    self._status,
-                    f"Compensation {activity_name} failed: {e}. Operator follow-up required.",
-                    level="error",
-                )
+                # Best-effort customer notification — must not abort the
+                # remaining compensations if it also fails.
+                try:
+                    await self._notify(
+                        ctx,
+                        self._status,
+                        f"Compensation {activity_name} failed: {e}. Operator follow-up required.",
+                        level="error",
+                    )
+                except ActivityError:
+                    workflow.logger.error(
+                        "failed to notify about failed compensation",
+                        exc_info=True,
+                        extra={
+                            **self._log_ctx(ctx),
+                            "compensation": str(activity_name),
+                        },
+                    )
 
         return failed
 

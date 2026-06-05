@@ -31,14 +31,3 @@ def generate_order_id() -> str:
     combined = (ts_ms << 32) | rand
 
     return f"ORD-{_encode_crockford(combined, 16)}"
-
-
-def generate_order_ids() -> tuple[str, str]:
-    """
-    Generates order_id and workflow_id.
-    Returns: (order_id, workflow_id)
-    """
-    order_id = generate_order_id()
-    # We maintain workflow_id as a separate field for architectural decoupling,
-    # though it currently mirrors the order_id.
-    return order_id, order_id

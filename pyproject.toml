@@ -66,9 +66,7 @@ down = { cmd = "docker compose down -v", help = "Stop the stack and drop volumes
 fresh = { sequence = ["down", "up"], help = "Recreate the stack from scratch" }
 
 [tool.pyright]
-# Start at "basic" so adoption on existing code is low-friction; ratchet to
-# "standard" once the codebase is clean.
-typeCheckingMode = "basic"
+typeCheckingMode = "standard"
 pythonVersion = "3.12"
 include = ["orders-service", "retail-demo-console", "mock-api"]
 exclude = ["**/.venv", "**/__pycache__", "archive"]
