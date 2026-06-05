@@ -3,37 +3,36 @@ from typing import Any
 
 from temporalio import workflow
 from temporalio.exceptions import ActivityError, ApplicationError
-
-from shared.errors import ErrorType
-from shared.models import OrderStatus
-from shared.temporal_ids import TaskQueue, ActivityName, SignalName, SearchAttribute
-from shared.workflow_io import OrderWorkflowInput, OrderWorkflowResult
-from shared.activity_io import (
-    CreateOrderRecordRequest,
-    ReserveInventoryRequest,
-    PersistInventoryReservationRequest,
-    CreateShipmentRequest,
-    ShipmentCreatedResult,
-    VerifyShipmentRequest,
-    PersistShipmentRequest,
-    CapturePaymentRequest,
-    PersistPaymentCaptureRequest,
-    FinalizeOrderRequest,
-    UpdateCustomerStatusRequest,
-    MarkOrderFailedRequest,
-    ReleaseInventoryRequest,
-    CancelShipmentRequest,
-    RefundPaymentRequest,
-)
-
 from temporalio.contrib.opentelemetry.workflow import completed_span as otel_span
 
-from workflows._helpers import retry_policies as retry
-from workflows._helpers.errors import unwrap_activity_error
-from workflows.order.context import OrderRunContext
-from workflows.order.exceptions import OrderCancelled
-from workflows.order.terminal import TERMINAL_CONFIG, TerminalReason
-from workflows.order import retry_policies as order_retry
+with workflow.unsafe.imports_passed_through():
+    from shared.errors import ErrorType
+    from shared.models import OrderStatus
+    from shared.temporal_ids import TaskQueue, ActivityName, SignalName, SearchAttribute
+    from shared.workflow_io import OrderWorkflowInput, OrderWorkflowResult
+    from shared.activity_io import (
+        CreateOrderRecordRequest,
+        ReserveInventoryRequest,
+        PersistInventoryReservationRequest,
+        CreateShipmentRequest,
+        ShipmentCreatedResult,
+        VerifyShipmentRequest,
+        PersistShipmentRequest,
+        CapturePaymentRequest,
+        PersistPaymentCaptureRequest,
+        FinalizeOrderRequest,
+        UpdateCustomerStatusRequest,
+        MarkOrderFailedRequest,
+        ReleaseInventoryRequest,
+        CancelShipmentRequest,
+        RefundPaymentRequest,
+    )
+    from workflows._helpers import retry_policies as retry
+    from workflows._helpers.errors import unwrap_activity_error
+    from workflows.order.context import OrderRunContext
+    from workflows.order.exceptions import OrderCancelled
+    from workflows.order.terminal import TERMINAL_CONFIG, TerminalReason
+    from workflows.order import retry_policies as order_retry
 
 
 @workflow.defn
