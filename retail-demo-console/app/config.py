@@ -9,6 +9,14 @@ class Settings(BaseSettings):
     order_poll_interval_seconds: int = 3
     orders_service_timeout_seconds: int = 60
 
+    # Browser-reachable URLs for embedded tool UIs (iframed in the console).
+    # These resolve in the user's browser, not inside the container, so they
+    # point at host-published ports. Temporal UI is served via the nginx
+    # ui-proxy (8081), which strips X-Frame-Options so it can be framed.
+    temporal_ui_embed_url: str = "http://localhost:8081"
+    grafana_embed_url: str = "http://localhost:3000"
+    pgweb_embed_url: str = "http://localhost:8083"
+
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )

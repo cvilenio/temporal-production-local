@@ -54,6 +54,8 @@ services:
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
       - GF_AUTH_DISABLE_LOGIN_FORM=false
+      # Drop X-Frame-Options so Grafana can be embedded in the demo console iframe
+      - GF_SECURITY_ALLOW_EMBEDDING=true
     networks:
       - temporal-network
     ports:
@@ -448,6 +450,10 @@ services:
       - LOG_BUFFER_SIZE=500
       - MESSAGE_POLL_INTERVAL_SECONDS=3
       - ORDERS_SERVICE_TIMEOUT_SECONDS=60
+      # Browser-reachable URLs for the embedded tool UIs (resolved client-side)
+      - TEMPORAL_UI_EMBED_URL=http://localhost:8081
+      - GRAFANA_EMBED_URL=http://localhost:3000
+      - PGWEB_EMBED_URL=http://localhost:8083
     networks:
       - temporal-network
     ports:

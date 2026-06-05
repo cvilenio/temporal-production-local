@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from ..config import settings
 from ..scenarios import SCENARIOS
 
 router = APIRouter()
@@ -32,4 +33,43 @@ async def tracking_page(request: Request):
 async def architecture_page(request: Request):
     return templates.TemplateResponse(
         request=request, name="architecture.html", context={"active": "architecture"}
+    )
+
+
+# Embedded tool UIs — each rendered as a full-bleed iframe inside the console.
+def _embed_page(request: Request, *, active: str, title: str, embed_url: str):
+    return templates.TemplateResponse(
+        request=request,
+        name="embed.html",
+        context={"active": active, "title": title, "embed_url": embed_url},
+    )
+
+
+@router.get("/temporal-ui", response_class=HTMLResponse)
+async def temporal_ui_page(request: Request):
+    return _embed_page(
+        request,
+        active="temporal-ui",
+        title="Temporal Web UI",
+        embed_url=settings.temporal_ui_embed_url,
+    )
+
+
+@router.get("/grafana", response_class=HTMLResponse)
+async def grafana_page(request: Request):
+    return _embed_page(
+        request,
+        active="grafana",
+        title="Grafana",
+        embed_url=settings.grafana_embed_url,
+    )
+
+
+@router.get("/pgweb", response_class=HTMLResponse)
+async def pgweb_page(request: Request):
+    return _embed_page(
+        request,
+        active="pgweb",
+        title="pgweb — Orders DB",
+        embed_url=settings.pgweb_embed_url,
     )
