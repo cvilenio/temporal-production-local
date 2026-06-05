@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="h-full w-full flex flex-col">
+  <!-- Thin toolbar: label + open-in-new-tab fallback (iframes can be finicky) -->
+  <div class="h-9 shrink-0 flex items-center justify-between px-4 border-b border-borderSubtle bg-bgPanel/60">
+    <span class="text-xs uppercase tracking-wider text-textMuted font-semibold">{{ title }}</span>
+    <a href="{{ embed_url }}" target="_blank" rel="noopener noreferrer"
+       class="text-xs text-textMuted hover:text-accent flex items-center gap-1 transition-colors">
+      Open in new tab
+      <!-- Lucide "external-link" -->
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+        <path d="M15 3h6v6" />
+        <path d="M10 14 21 3" />
+        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+      </svg>
+    </a>
+  </div>
+
+  <iframe
+    src="{{ embed_url }}"
+    title="{{ title }}"
+    class="flex-1 w-full border-0 bg-white"
+    referrerpolicy="no-referrer"></iframe>
+</div>
+
+{% endblock %}
