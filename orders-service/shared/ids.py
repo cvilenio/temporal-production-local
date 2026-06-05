@@ -1,5 +1,4 @@
-import secrets
-import time
+import hashlib
 
 # Crockford Base32 alphabet (excludes I, L, O, U)
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -14,20 +13,17 @@ def _encode_crockford(n: int, length: int) -> str:
     return "".join(reversed(out))
 
 
-def generate_order_id() -> str:
+def order_id_from_key(idempotency_key: str) -> str:
     """
-    Generate a customer-friendly, time-sortable ID.
-    Format: ORD-{16 chars of Crockford Base32}
-    Total length: 20 characters.
+    Deterministic, customer-friendly order id derived from the client
+    idempotency key. The same key always yields the same id, so a retried
+    submission maps to one order (and one workflow, since workflow_id == order_id).
 
-    Structure:
-    - First 10 chars: 48-bit millisecond timestamp (time-sortable until year 10889)
-    - Last 6 chars: 32-bit random value (~4.3 billion per ms collision space)
+    Format: ORD-{16 chars of Crockford Base32} (80 bits of a SHA-256 digest).
+    Not time-sortable, unlike a random id — ordering is done via timestamp
+    columns, not the id itself.
     """
-    ts_ms = int(time.time() * 1000) & 0xFFFFFFFFFFFF  # 48 bits
-    rand = secrets.randbits(32)  # 32 bits
-
-    # 80 bits total = 16 chars * 5 bits
-    combined = (ts_ms << 32) | rand
-
-    return f"ORD-{_encode_crockford(combined, 16)}"
+    digest = hashlib.sha256(idempotency_key.encode("utf-8")).digest()
+    # 80 bits = 10 bytes = 16 Crockford chars
+    n = int.from_bytes(digest[:10], "big")
+    return f"ORD-{_encode_crockford(n, 16)}"
