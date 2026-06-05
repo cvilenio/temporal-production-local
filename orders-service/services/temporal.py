@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from temporalio.client import Client
-from temporalio.service import RPCError, RPCStatusCode
-from temporalio.contrib.pydantic import pydantic_data_converter
-
-from workflows.order_workflow import OrderWorkflow
-from shared.temporal_ids import TaskQueue, SignalName, SearchAttribute
+from shared.temporal_ids import SearchAttribute, SignalName, TaskQueue
 from shared.workflow_io import OrderWorkflowInput
+from temporalio.client import Client
+from temporalio.contrib.pydantic import pydantic_data_converter
+from temporalio.service import RPCError, RPCStatusCode
+from workflows.order_workflow import OrderWorkflow
 
 if TYPE_CHECKING:
     from temporalio.runtime import Runtime
@@ -59,12 +58,14 @@ class TemporalService:
         if trace_id:
             search_attributes[SearchAttribute.TRACE_ID] = [trace_id]
 
-        handle = await self.client.start_workflow(
+        # TODO: migrate to TypedSearchAttributes. The deprecated dict form still
+        # works at runtime but no longer matches the typed start_workflow overloads.
+        handle = await self.client.start_workflow(  # pyright: ignore[reportCallIssue]
             OrderWorkflow.run,
             order_input,
             id=workflow_id,
             task_queue=TaskQueue.ORDERS_WORKFLOW,
-            search_attributes=search_attributes,
+            search_attributes=search_attributes,  # pyright: ignore[reportArgumentType]
         )
         return handle.id
 

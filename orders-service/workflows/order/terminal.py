@@ -1,17 +1,22 @@
-from enum import StrEnum
 from dataclasses import dataclass
+from enum import StrEnum
+
 from shared.models import OrderStatus
+from shared.workflow_io import OrderResultStatus
+
 
 class TerminalReason(StrEnum):
     SHIPPING_UNRECOVERABLE = "shipping_unrecoverable"
     CANCELLED_BY_USER = "cancelled_by_user"
 
+
 @dataclass
 class TerminalConfig:
     clean_status: OrderStatus
     message: str
-    return_string: str
+    return_string: OrderResultStatus
     level: str = "warn"
+
 
 TERMINAL_CONFIG = {
     TerminalReason.SHIPPING_UNRECOVERABLE: TerminalConfig(

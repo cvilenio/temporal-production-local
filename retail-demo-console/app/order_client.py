@@ -1,10 +1,11 @@
+from typing import Any
+
 import httpx
-from typing import Dict, Any
 
 
 async def submit_order(
-    client: httpx.AsyncClient, base_url: str, payload: Dict[str, Any], idem_key: str
-) -> Dict[str, Any]:
+    client: httpx.AsyncClient, base_url: str, payload: dict[str, Any], idem_key: str
+) -> dict[str, Any]:
     try:
         response = await client.post(
             f"{base_url.rstrip('/')}/submit-order",
@@ -24,7 +25,10 @@ async def submit_order(
     except Exception as e:
         return {"ok": False, "status_code": None, "error": str(e)}
 
-async def fetch_order(client: httpx.AsyncClient, base_url: str, order_id: str) -> Dict[str, Any] | None:
+
+async def fetch_order(
+    client: httpx.AsyncClient, base_url: str, order_id: str
+) -> dict[str, Any] | None:
     try:
         response = await client.get(f"{base_url.rstrip('/')}/orders/{order_id}")
         if response.status_code == 404:

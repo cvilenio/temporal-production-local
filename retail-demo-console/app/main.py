@@ -1,12 +1,13 @@
 import asyncio
 from contextlib import asynccontextmanager
+
+from app import db
+from app.routes import orders_api, pages, status_api, tracking_api
+from app.services.docker_status import poll_status_loop
+from app.sse import poll_order_updates
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app import db
-from app.routes import pages, orders_api, tracking_api, status_api
-from app.sse import poll_order_updates
-from app.services.docker_status import poll_status_loop
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -15,7 +16,7 @@ async def lifespan(app: FastAPI):
 
     # Start the SSE background poller
     poller_task = asyncio.create_task(poll_order_updates())
-    
+
     # Start Docker status poller
     status_poller_task = asyncio.create_task(poll_status_loop())
 

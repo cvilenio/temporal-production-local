@@ -22,4 +22,6 @@ class Settings(BaseSettings):
     )
 
 
-settings = Settings()
+# database_url has no default; pydantic-settings populates it from the
+# environment at runtime, which the type checker can't see.
+settings = Settings()  # pyright: ignore[reportCallIssue]

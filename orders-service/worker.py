@@ -1,18 +1,22 @@
-import asyncio
 import argparse
+import asyncio
 import os
 
-from temporalio.worker import Worker
-
 from activities import (
+    make_customer_message_activities,
     make_external_activities,
     make_persistence_activities,
-    make_customer_message_activities,
 )
-from workflows.order_workflow import OrderWorkflow
 from config import settings
+from resources import (
+    container,
+    get_mock_api,
+    get_orders_service_client,
+    get_temporal_service,
+)
 from shared.temporal_ids import TaskQueue
-from resources import container, get_temporal_service, get_mock_api, get_orders_service_client
+from temporalio.worker import Worker
+from workflows.order_workflow import OrderWorkflow
 
 
 async def main():

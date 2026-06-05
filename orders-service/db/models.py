@@ -1,12 +1,12 @@
 from sqlalchemy import (
+    Index,
     Integer,
     Numeric,
     Text,
-    Index,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy.types import TIMESTAMP
 from sqlalchemy.sql import func
+from sqlalchemy.types import TIMESTAMP
 
 
 class Base(DeclarativeBase):

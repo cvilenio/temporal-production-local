@@ -19,17 +19,17 @@ def generate_order_id() -> str:
     Generate a customer-friendly, time-sortable ID.
     Format: ORD-{16 chars of Crockford Base32}
     Total length: 20 characters.
-    
+
     Structure:
     - First 10 chars: 48-bit millisecond timestamp (time-sortable until year 10889)
     - Last 6 chars: 32-bit random value (~4.3 billion per ms collision space)
     """
     ts_ms = int(time.time() * 1000) & 0xFFFFFFFFFFFF  # 48 bits
     rand = secrets.randbits(32)  # 32 bits
-    
+
     # 80 bits total = 16 chars * 5 bits
     combined = (ts_ms << 32) | rand
-    
+
     return f"ORD-{_encode_crockford(combined, 16)}"
 
 

@@ -1,6 +1,5 @@
-from collections import deque
 import asyncio
-from typing import List, Dict
+from collections import deque
 
 from .config import settings
 
@@ -10,11 +9,11 @@ class SubmissionLog:
         self._log = deque(maxlen=maxlen)
         self._lock = asyncio.Lock()
 
-    async def append_batch(self, entry: Dict):
+    async def append_batch(self, entry: dict):
         async with self._lock:
             self._log.appendleft(entry)
 
-    async def get_all(self) -> List[Dict]:
+    async def get_all(self) -> list[dict]:
         async with self._lock:
             return list(self._log)
 

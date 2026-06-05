@@ -1,8 +1,10 @@
-from temporalio import workflow
 from shared.workflow_io import OrderWorkflowInput
+from temporalio import workflow
+
 
 class OrderRunContext:
     """Order-specific runtime context for the workflow."""
+
     def __init__(self, input: OrderWorkflowInput, workflow_id: str):
         self.order_id = input.order_id
         self.workflow_id = workflow_id

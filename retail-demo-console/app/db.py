@@ -1,5 +1,6 @@
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Any
+
 import asyncpg
 from asyncpg.pool import Pool
 
@@ -9,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 # Strip asyncpg driver part for raw asyncpg
 _raw_db_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
-pool: Optional[Pool] = None
+pool: Pool | None = None
 
 
 async def init_db():
@@ -24,7 +25,7 @@ async def close_db():
         await pool.close()
 
 
-def _map_row(row: asyncpg.Record) -> Dict[str, Any]:
+def _map_row(row: asyncpg.Record) -> dict[str, Any]:
     return {
         "id": row["id"],
         "status": row["status"],
@@ -41,7 +42,7 @@ def _map_row(row: asyncpg.Record) -> Dict[str, Any]:
     }
 
 
-async def fetch_recent_orders(limit: int = 100) -> List[Dict[str, Any]]:
+async def fetch_recent_orders(limit: int = 100) -> list[dict[str, Any]]:
     if not pool:
         return []
     query = """
@@ -55,7 +56,7 @@ async def fetch_recent_orders(limit: int = 100) -> List[Dict[str, Any]]:
         return [_map_row(r) for r in rows]
 
 
-async def fetch_orders_updated_after(last_ts, limit: int = 500) -> List[Dict[str, Any]]:
+async def fetch_orders_updated_after(last_ts, limit: int = 500) -> list[dict[str, Any]]:
     if not pool:
         return []
     query = """

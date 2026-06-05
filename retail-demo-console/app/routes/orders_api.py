@@ -1,31 +1,34 @@
-import httpx
-import uuid
 import asyncio
 import hashlib
 import json
 import random
-from datetime import datetime, timezone
+import uuid
+from datetime import UTC, datetime
+from typing import Any
+
+import httpx
 from fastapi import APIRouter, Body
-from typing import Dict, Any
 
 from ..config import settings
+from ..order_client import submit_order
 from ..scenarios import SCENARIOS
 from ..submission_log import submission_log
-from ..order_client import submit_order
 
 router = APIRouter(prefix="/api")
 
 
 @router.post("/submit-batch")
-async def submit_batch(payload: Dict[str, Dict[str, int]] = Body(...)):
+async def submit_batch(payload: dict[str, dict[str, int]] = Body(...)):
     counts = payload.get("counts", {})
     batch_id = str(uuid.uuid4())
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = datetime.now(UTC).isoformat()
 
     tasks = []
     scenarios_run = []
 
-    async with httpx.AsyncClient(timeout=settings.orders_service_timeout_seconds) as client:
+    async with httpx.AsyncClient(
+        timeout=settings.orders_service_timeout_seconds
+    ) as client:
         for scenario_key, count in counts.items():
             if count <= 0 or scenario_key not in SCENARIOS:
                 continue
@@ -80,7 +83,7 @@ async def submit_batch(payload: Dict[str, Dict[str, int]] = Body(...)):
     formatted_results = []
 
     for r in results:
-        if isinstance(r, Exception):
+        if isinstance(r, BaseException):
             failed += 1
             formatted_results.append({"label": "Unknown", "ok": False, "error": str(r)})
         else:
@@ -126,14 +129,16 @@ async def submit_batch(payload: Dict[str, Dict[str, int]] = Body(...)):
 
 
 @router.post("/replay-batch")
-async def replay_batch(payload: Dict[str, Any] = Body(...)):
+async def replay_batch(payload: dict[str, Any] = Body(...)):
     replays = payload.get("replays", [])
     batch_id = str(uuid.uuid4())
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = datetime.now(UTC).isoformat()
 
     tasks = []
 
-    async with httpx.AsyncClient(timeout=settings.orders_service_timeout_seconds) as client:
+    async with httpx.AsyncClient(
+        timeout=settings.orders_service_timeout_seconds
+    ) as client:
         for r in replays:
             sk = r["scenario"]
             sd = SCENARIOS.get(sk, {"label": "Unknown"})
@@ -153,7 +158,7 @@ async def replay_batch(payload: Dict[str, Any] = Body(...)):
     formatted_results = []
 
     for r in results:
-        if isinstance(r, Exception):
+        if isinstance(r, BaseException):
             failed += 1
             formatted_results.append({"label": "Unknown", "ok": False, "error": str(r)})
         else:
@@ -186,12 +191,14 @@ async def replay_batch(payload: Dict[str, Any] = Body(...)):
 
 
 @router.post("/cancel-batch")
-async def cancel_batch(payload: Dict[str, Any] = Body(...)):
+async def cancel_batch(payload: dict[str, Any] = Body(...)):
     order_ids = payload.get("order_ids", [])
     if not order_ids:
         return {"requested": 0, "skipped": 0}
 
-    async with httpx.AsyncClient(timeout=settings.orders_service_timeout_seconds) as client:
+    async with httpx.AsyncClient(
+        timeout=settings.orders_service_timeout_seconds
+    ) as client:
         response = await client.post(
             f"{settings.orders_service_url.rstrip('/')}/orders/cancel-batch",
             json={"order_ids": order_ids},

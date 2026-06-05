@@ -28,6 +28,7 @@ Example (workflow — use the SDK meter instead):
     )
     counter.add(1, {"step": "reserve_inventory"})
 """
+
 from opentelemetry import metrics
 
 
