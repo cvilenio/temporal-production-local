@@ -5,6 +5,11 @@ from typing import TYPE_CHECKING
 from shared.temporal_ids import SearchAttribute, SignalName, TaskQueue
 from shared.workflow_io import OrderWorkflowInput
 from temporalio.client import Client
+from temporalio.common import (
+    SearchAttributePair,
+    TypedSearchAttributes,
+    WorkflowIDConflictPolicy,
+)
 from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.service import RPCError, RPCStatusCode
 from workflows.order_workflow import OrderWorkflow
@@ -51,21 +56,24 @@ class TemporalService:
         if not self.client:
             raise RuntimeError("Temporal client not connected")
 
-        search_attributes = {
-            SearchAttribute.ORDER_ID: [order_id],
-            SearchAttribute.ORDER_STATUS: ["pending"],
-        }
+        pairs = [
+            SearchAttributePair(SearchAttribute.ORDER_ID, order_id),
+            SearchAttributePair(SearchAttribute.ORDER_STATUS, "pending"),
+        ]
         if trace_id:
-            search_attributes[SearchAttribute.TRACE_ID] = [trace_id]
+            pairs.append(SearchAttributePair(SearchAttribute.TRACE_ID, trace_id))
 
-        # TODO: migrate to TypedSearchAttributes. The deprecated dict form still
-        # works at runtime but no longer matches the typed start_workflow overloads.
-        handle = await self.client.start_workflow(  # pyright: ignore[reportCallIssue]
+        # USE_EXISTING makes a retried start idempotent: if a workflow with this
+        # id is already running (e.g. the caller retried after the DB commit but
+        # before the idempotency record landed), attach to it instead of starting
+        # a duplicate. Relies on workflow_id being derived from the idempotency key.
+        handle = await self.client.start_workflow(
             OrderWorkflow.run,
             order_input,
             id=workflow_id,
             task_queue=TaskQueue.ORDERS_WORKFLOW,
-            search_attributes=search_attributes,  # pyright: ignore[reportArgumentType]
+            search_attributes=TypedSearchAttributes(pairs),
+            id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
         )
         return handle.id
 
