@@ -8,6 +8,11 @@ class Settings(BaseSettings):
     mock_api_url: str = "http://localhost:8001"
     orders_service_url: str = "http://localhost:8002"
 
+    # Demo-only kill switch for the destructive /admin/reset endpoint
+    # (terminate workflows + truncate app tables). Defaults on for the local
+    # demo; set DEMO_RESET_ENABLED=false to disable in any shared environment.
+    demo_reset_enabled: bool = True
+
     # Worker slot / concurrency tuning
     worker_max_concurrent_activities: int = 200
     worker_max_concurrent_workflow_tasks: int = 200

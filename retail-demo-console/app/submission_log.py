@@ -17,5 +17,9 @@ class SubmissionLog:
         async with self._lock:
             return list(self._log)
 
+    async def clear(self):
+        async with self._lock:
+            self._log.clear()
+
 
 submission_log = SubmissionLog(settings.log_buffer_size)
