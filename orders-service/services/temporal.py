@@ -5,7 +5,10 @@ import logging
 from typing import TYPE_CHECKING
 
 from shared.temporal_ids import SearchAttribute, SignalName, TaskQueue
-from shared.workflow_io import OrderWorkflowInput
+from shared.workflow_io import (
+    ORDER_WORKFLOW_EXECUTION_TIMEOUT,
+    OrderWorkflowInput,
+)
 from temporalio.api.common.v1 import WorkflowExecution as WorkflowExecutionMsg
 from temporalio.api.workflowservice.v1 import DeleteWorkflowExecutionRequest
 from temporalio.client import Client
@@ -82,6 +85,7 @@ class TemporalService:
             order_input,
             id=workflow_id,
             task_queue=TaskQueue.ORDERS_WORKFLOW,
+            execution_timeout=ORDER_WORKFLOW_EXECUTION_TIMEOUT,
             search_attributes=TypedSearchAttributes(pairs),
             id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
         )
