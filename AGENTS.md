@@ -34,5 +34,21 @@ Drop caveman ONLY for:
 
 ## Output Boundaries
 - **Code implementation:** Standard professional style.
-- **Git Commits:** Conventional Commits style.
+- **Git Commits:** See "Commit Convention" below. NOT Conventional Commits.
 - **Documentation:** Standard English/Markdown.
+
+## Commit Convention (MUST FOLLOW)
+Authoritative rules live in [`CONTRIBUTING.md`](CONTRIBUTING.md). Any agent writing a
+commit or PR title in this repo MUST obey these. Summary:
+
+- **Imperative, sentence case.** "Add X", not "Added X" / "adds X" / "add x".
+- **No trailing period.** Subject under ~72 chars.
+- **NO Conventional Commits types.** Do not prefix with `feat:` / `fix:` / `chore:` /
+  `refactor:` etc. This repo mirrors `temporalio/sdk-python`, which does not use them.
+- **Optional lowercase scope prefix** only when it clarifies: `ci:`, `docs:`, or a
+  component like `orders:` / `console:`. Loose, not required.
+- Body optional; wrap ~72 cols; explain *why*, not what.
+
+Examples — good: `Add deterministic order ID derived from idempotency key`,
+`orders: Narrow retry policy on payment activity`, `ci: Drop macos-intel from CI`.
+Bad: `feat: add order id`, `Added order id.`, `update stuff`.
