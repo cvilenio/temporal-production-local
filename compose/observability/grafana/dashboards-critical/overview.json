@@ -47,7 +47,7 @@
       "id": 1,
       "options": {
         "mode": "markdown",
-        "content": "\n**Local OSS view of reference \"OSS critical-path\" dashboard.**\nSource dashboards live in `ref/`; mapping rationale in `internal notes`.\n\nThis stack monitors the **three critical flows** worth watching:\n\n1. **Starting / Signaling** \u2014 `StartWorkflowExecution`, `SignalWorkflowExecution` (customer API creating/modifying workflow state). SLO p99 < 200ms.\n2. **Workflow Progress** \u2014 workers polling (`PollWorkflowTaskQueue`, `PollActivityTaskQueue`) and completing work (`Respond*`).\n3. **Task Processing** \u2014 Temporal's engine processing background tasks (`TransferActive`, `TimerActive`) to generate work for pollers.\n\nUse the **Critical Flows** dropdown (top-left) to drill into each flow + Worker Tuning.\n\n> **OSS vs Cloud parity gaps (intentionally not shown):** AlertManager `ALERTS` (no alerting wired locally), k8s pod CPU-%-of-request (no k8s), storage-engine panels (internal storage layer \u2014 this demo runs **Postgres**, so storage collapses to the persistence API layer), per-namespace breakdowns (`perNamespaceScope` not set), and `service_latency` (no OSS equivalent \u2014 Progress latency below includes worker time). Server metrics use **bare names** (no `temporal_` prefix).\n"
+        "content": "\n**Critical-path monitoring for self-hosted / OSS Temporal.**\nA compact view of the operations that most directly affect application health.\n\nThis stack watches three critical flows:\n\n1. **Starting / Signaling** \u2014 `StartWorkflowExecution`, `SignalWorkflowExecution` (client API creating/modifying workflow state). Target a tight latency budget here.\n2. **Workflow Progress** \u2014 workers polling (`PollWorkflowTaskQueue`, `PollActivityTaskQueue`) and completing work (`Respond*`).\n3. **Task Processing** \u2014 Temporal's engine processing background tasks (`TransferActive`, `TimerActive`) to generate work for pollers.\n\nUse the **Critical Flows** dropdown (top-left) to drill into each flow + Worker Tuning.\n\n> **Notes:** No alerting is wired locally (`ALERTS` panel omitted). This demo runs **Postgres**, so the storage layer collapses to the persistence API (no separate storage-driver panels). Server metrics use **bare names** (no `temporal_` prefix).\n"
       }
     },
     {
@@ -162,7 +162,7 @@
     {
       "type": "timeseries",
       "title": "Critical Frontend Latency p99 by Operation",
-      "description": "SLO thresholds: yellow 200ms, red 1s (matches reference Starting Latency thresholds).",
+      "description": "Latency thresholds: yellow 200ms, red 1s.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -291,7 +291,7 @@
     {
       "type": "timeseries",
       "title": "Persistence Latency p99 by Operation",
-      "description": "Deepest storage layer OSS exposes (Postgres). Cloud storage/Cassandra panels collapse here.",
+      "description": "Deepest storage layer OSS exposes on Postgres — the persistence API layer.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -492,7 +492,7 @@
     {
       "type": "timeseries",
       "title": "Instances Up by Job",
-      "description": "temporal-server + temporal-sdk scrape targets (replaces reference up{job=~'*-headless'}).",
+      "description": "temporal-server + temporal-sdk scrape targets.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

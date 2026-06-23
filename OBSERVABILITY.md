@@ -18,8 +18,8 @@ http://localhost:3000   Grafana  (admin / admin)
 
 These are pre-loaded from `compose/observability/grafana/dashboards/` (folder **Ziggymart Demo**).
 
-A second set — the **Temporal Critical Flows** folder — translates the internal Temporal Cloud
-reference dashboards (in `ref/`) to this local OSS + Postgres stack. See
+A second set — the **Temporal Critical Flows** folder — gives a drill-down view of the
+critical-path server operations on this local OSS + Postgres stack. See
 [Critical Flows dashboards](#temporal-critical-flows) below.
 
 ---
@@ -222,44 +222,41 @@ Python is the only worker today.)*
 
 ---
 
-## Temporal Critical Flows (reference translation)
+## Temporal Critical Flows
 
-The **Temporal Critical Flows** Grafana folder is a local-OSS translation of Temporal Cloud's
-internal **reference** dashboards (the reference exports live in `ref/`; the full internal-to-OSS mapping and
-rationale is in `internal notes`). It gives a practical, drill-down view of
-the three flows worth watching, plus the worker-side view.
+The **Temporal Critical Flows** Grafana folder is a drill-down view of the critical-path server
+operations — the three flows that most directly affect application health — plus a worker-side view.
 
 Files: `compose/observability/grafana/dashboards-critical/`, provisioned via `critical.yaml`.
 
-| Dashboard | Translates (ref/) | What it shows |
-|---|---|---|
-| **Overview** | `main_dashboard.json` | Critical frontend RPS / errors / **p99 latency with SLO threshold lines** (200ms/1s) by operation; history task-processing p99; persistence p99; availability, goroutines, restarts, instances up. Cross-links to the flows. |
-| **Starting & Signaling** | `signal_starting.json` | Flow 1 — `Start*`/`Signal*` RPS, errors, p99 latency (SLO lines); hot-path persistence. |
-| **Workflow Progress** | `workflow_progress.json` | Flow 2 — `Respond*` and `Poll*` RPS/errors/latency; progress persistence. |
-| **Task Processing** | `task_processing.json` | Flow 3 — TransferActive vs TimerActive **split** (p50 + p99 + tasks/sec); ShardInfo lock + history-cache latency; task persistence. |
-| **Worker Tuning** | *(new — server dashboards have no worker view)* | Worker SDK levers: task slots available, sticky-cache hit/miss/size, pollers, schedule-to-start p99, poll success vs empty. |
+| Dashboard | What it shows |
+|---|---|
+| **Overview** | Critical frontend RPS / errors / **p99 latency with threshold lines** (200ms/1s) by operation; history task-processing p99; persistence p99; availability, goroutines, restarts, instances up. Cross-links to the flows. |
+| **Starting & Signaling** | Flow 1 — `Start*`/`Signal*` RPS, errors, p99 latency (threshold lines); hot-path persistence. |
+| **Workflow Progress** | Flow 2 — `Respond*` and `Poll*` RPS/errors/latency; progress persistence. |
+| **Task Processing** | Flow 3 — TransferActive vs TimerActive **split** (p50 + p99 + tasks/sec); ShardInfo lock + history-cache latency; task persistence. |
+| **Worker Tuning** | Worker SDK levers: task slots available, sticky-cache hit/miss/size, pollers, schedule-to-start p99, poll success vs empty. |
 
-### Faithful where it can be, honest where it can't
+### OSS + Postgres scope
 
-This is OSS + a single **Postgres** backend, not Temporal Cloud. The following reference panels have **no
-local equivalent** and are intentionally dropped (each is noted in-dashboard so the parity gap is
+This is OSS Temporal with a single **Postgres** backend. A few things a richer setup might show have
+**no local equivalent** here and are intentionally omitted (each is noted in-dashboard so the gap is
 explicit):
 
-| reference panel | Why dropped / how collapsed |
+| Omitted | Why dropped / how collapsed |
 |---|---|
 | `ALERTS{firing,critical}` | No AlertManager wired locally |
 | Pod CPU % of request | No Kubernetes (uses `process`/Go-runtime + `restarts` instead) |
-| WAL storage, storage element/IO/semaphore locks, Cassandra hot/flushing path | internal storage layer. On Postgres, storage collapses to the **persistence API layer** (`persistence_latency_bucket` by operation) |
+| Dedicated storage-engine panels | On Postgres, storage collapses to the **persistence API layer** (`persistence_latency_bucket` by operation) |
 | Per-namespace RPS/latency | `perNamespaceScope` not set → no `namespace` label on server metrics |
-| `service_latency` (Progress) | No OSS variant → `Respond*` latency **includes worker time** (noted on the panel) |
+| Worker-excluded `Respond*` latency | OSS `service_latency` for `Respond*` **includes worker time** (noted on the panel) |
 
-> **Metric naming (verified against the running stack 2026-06-04).** Server panels use **bare names**
+> **Metric naming (verified against the running stack).** Server panels use **bare names**
 > (`service_requests`, `service_latency_bucket`, `task_latency_bucket`, `persistence_latency_bucket`,
 > `lock_latency_bucket{operation="ShardInfo"}`, `cache_latency_bucket{operation="HistoryCacheGetOrCreate"}`)
 > — no `temporal_` prefix, matching this repo's server config. Notes from verification:
-> - **No `cluster` label** is emitted locally, so these dashboards do **not** filter by cluster (unlike
->   the reference originals). There is no `temporal_service_type` label on the history `lock`/`cache` metrics
->   either — only `operation`.
+> - **No `cluster` label** is emitted locally, so these dashboards do **not** filter by cluster. There
+>   is no `temporal_service_type` label on the history `lock`/`cache` metrics either — only `operation`.
 > - Worker Tuning panels use `temporal_`-prefixed SDK names with **no `_total`** on counters and bare
 >   `*_latency_bucket` (no `_seconds` — sdk-core default `unit_suffix` is off; see the SDK-metrics section above).
 > - Error panels use `OR on() vector(0)` so they render a flat **0** line in a healthy system rather than
