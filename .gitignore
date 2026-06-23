@@ -20,9 +20,11 @@ venv/
 !*.tfvars.example
 
 # Secrets / Temporal Cloud credentials (keep out of git)
+.keys/
 *.key
 *.pem
 *-apikey*
+*.<account-id>.txt
 
 # IDE
 .idea/
