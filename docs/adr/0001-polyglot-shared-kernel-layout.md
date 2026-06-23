@@ -15,21 +15,25 @@ configuration on top — proven previously with a shared base image and thin Pyt
 
 Organize the repo as **shared kernels per language + thin apps grouped by type**:
 
-- `kernels/<lang>/` — reusable library code (workflows, activities, clients, telemetry,
-  app/worker factories). For Python this is the uv workspace package `orders-kernel`, which
-  owns the concrete dependency versions.
-- `apps/<type>/<lang>/` — thin deployment units. Types: `workers/`, `orders-api/`,
-  `codec-server/`, `console/`, `mock-api/`. Each app imports its kernel and starts one
-  thing.
-- `images/app.Dockerfile` — one configurable image; build args select the dependency group
-  and entrypoint. The kernel is always installed (the "base"); the app dir is copied last
-  (the "definition").
+- `libs/<use-case>/<lang>/` — reusable library code per use case (workflows, activities,
+  clients, telemetry, app/worker factories). Use case sits **above** language
+  (`libs/orders/python`) so a domain's polyglot pieces stay together, mirroring `apps/`.
+  The importable package is just `orders`, installed editable via the uv workspace, so
+  imports are flat `from orders…` regardless of filesystem depth. (`libs/` over
+  `kernel/`/`src/`: the recognizable apps-vs-library signal across languages.)
+- `apps/<class>/<app>/<lang>/` — thin deployment units, grouped by **deployment class**:
+  `temporal/` (workers, codec-server), `business/` (the orders-api client/gateway), `demo/`
+  (console, mock-api — not required to run Temporal in prod). Each app imports the kernel
+  and starts one thing.
+- `images/<lang>.Dockerfile` — one configurable image per language; build args select the
+  dependency group and entrypoint. The kernel is always installed (the "base"); the app dir
+  is copied last (the "definition").
 
 This mirrors the official samples' structure in every SDK (see ARCHITECTURE.md).
 
 ## Consequences
 
-- Adding a language = a new `kernels/<lang>/` + `apps/*/<lang>/`; no reshuffle.
+- Adding a language = a new `libs/<use-case>/<lang>/` + `apps/*/*/<lang>/`; no reshuffle.
 - App definitions stay tiny; library versions have a single source of truth per language.
 - The console keeps its own `app.*` package and a duplicated `TaskQueue`; a cross-cutting
   shared definition can be extracted later if churn warrants.

@@ -1,7 +1,8 @@
 # 0001 — Polyglot + kind/ArgoCD restructure
 
-- **Status:** In progress. Branch `restructure/polyglot-k8s`, uncommitted. Python migration
-  verified (uv sync / ruff / pyright / import-smoke green). Design under review with the human.
+- **Status:** Landed + committed (`28fda28`). The layout's open questions below were resolved
+  by dialogue and the tree was restructured — see **checkpoint 0002** for the final
+  `apps/` + `libs/` shape (this file's paths reflect the pre-restructure state).
 - **Date:** 2026-06-23
 
 ## Done this session
@@ -9,7 +10,7 @@
 - **Cleanup:** removed leaked `Untitled` Cloud JWT; kept `guts.<account-id>.txt` (real Cloud key,
   gitignored); tightened `.gitignore` (caches, TF state, key/pem/apikey).
 - **Shared-kernel migration (43 git renames, history preserved):**
-  `kernels/python/orders_kernel/` (workflows, activities, clients, db, shared, services,
+  `kernels/python/orders/` (workflows, activities, clients, db, shared, services,
   `config.py`, `containers.py`, `resources.py`, `api.py`, `worker.py`). uv workspace package.
   Thin apps under `apps/`: `workers/python/{workflow,activity}`, `orders-api`, `codec-server`
   (new), `console`, `mock-api`.

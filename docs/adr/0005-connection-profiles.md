@@ -11,7 +11,7 @@ no TLS/auth support at all.
 
 ## Decision
 
-Extend the single `orders_kernel.config.Settings` object (one-stop config) with
+Extend the single `orders.config.Settings` object (one-stop config) with
 `temporal_tls`, `temporal_api_key`, and `temporal_tls_client_cert_path` /
 `_key_path`. `TemporalService.connect()` builds `tls` (bool or `TLSConfig`) and `api_key`
 from these and passes them to `Client.connect`. Local defaults keep TLS off; Cloud is opt-in

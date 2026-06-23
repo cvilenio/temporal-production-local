@@ -17,8 +17,8 @@ sunset:
   scaledownDelay: 30m
   deleteDelay: 2h
 
-# One entry per worker profile (mirrors orders_kernel.worker.WORKER_PROFILES and
-# apps/workers/python/<name>/). Each profile is its own image (the entrypoint is
+# One entry per worker profile (mirrors orders.worker.WORKER_PROFILES and
+# apps/temporal/workers/python/<name>/). Each profile is its own image (the entrypoint is
 # baked at build time via APP_PATH), so each gets its own image tag = version.
 workers:
   - name: workflow

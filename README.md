@@ -8,7 +8,8 @@ It is designed to showcase how Temporal solves the problem of **ambiguous side-e
 > structure (shared-kernel polyglot monorepo), the kind + Terraform + ArgoCD lifecycle,
 > worker versioning, and the Temporal Cloud switch, see
 > [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and the ADRs in [`docs/adr/`](docs/adr/).
-> Apps live under `apps/`, shared code under `kernels/`, deployment under `deploy/`.
+> Apps live under `apps/` (grouped by class: `temporal/`, `business/`, `demo/`), shared
+> code under `libs/`, deployment under `deploy/`.
 
 ## Architecture
 
