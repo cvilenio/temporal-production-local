@@ -6,10 +6,10 @@ dependencies = []
 
 [dependency-groups]
 # Apps that build on the shared Python kernel just depend on it; the kernel's
-# own pyproject (kernels/python) owns the concrete library versions — single
+# own pyproject (libs/orders/python) owns the concrete library versions — single
 # source of truth. Worker and API apps are thin definitions on top.
-workers = ["orders-kernel"]
-orders-api = ["orders-kernel"]
+workers = ["orders"]
+orders-api = ["orders"]
 codec-server = [
   "fastapi==0.111.0",
   "uvicorn==0.29.0",
@@ -44,10 +44,10 @@ default-groups = ["workers", "orders-api", "codec-server", "retail-demo-console"
 
 # The Python shared kernel is a workspace package; apps depend on it by name.
 [tool.uv.workspace]
-members = ["kernels/python"]
+members = ["libs/orders/python"]
 
 [tool.uv.sources]
-orders-kernel = { workspace = true }
+orders = { workspace = true }
 
 # Task runner. Invoke with `uv run poe <task>` (e.g. `uv run poe check`).
 [tool.poe.tasks]
@@ -72,19 +72,19 @@ fresh = { sequence = ["down", "up"], help = "Recreate the stack from scratch" }
 [tool.pyright]
 typeCheckingMode = "standard"
 pythonVersion = "3.12"
-include = ["kernels", "apps"]
+include = ["libs", "apps"]
 exclude = ["**/.venv", "**/__pycache__", "archive"]
-# The kernel is an installable package (import `orders_kernel`); thin apps run
+# The kernel is an installable package (import `orders`); thin apps run
 # from their own directory and import the kernel. Console keeps its `from app...`
 # layout, so its root is its own app dir.
 executionEnvironments = [
-  { root = "kernels/python" },
-  { root = "apps/orders-api/python" },
-  { root = "apps/workers/python/workflow" },
-  { root = "apps/workers/python/activity" },
-  { root = "apps/codec-server/python" },
-  { root = "apps/console/python" },
-  { root = "apps/mock-api/python" },
+  { root = "libs/orders/python" },
+  { root = "apps/business/orders-api/python" },
+  { root = "apps/temporal/workers/python/workflow" },
+  { root = "apps/temporal/workers/python/activity" },
+  { root = "apps/temporal/codec-server/python" },
+  { root = "apps/demo/console/python" },
+  { root = "apps/demo/mock-api/python" },
 ]
 
 [tool.pytest.ini_options]

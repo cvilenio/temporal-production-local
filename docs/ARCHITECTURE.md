@@ -44,29 +44,32 @@ entirely by the connection profile (env), see [Connection profiles](#connection-
 ## Repository layout
 
 ```
-kernels/                      Shared "kernel" code — ONE place per language.
-  python/                       uv workspace package `orders-kernel`.
-    orders_kernel/                workflows/ activities/ clients/ db/ shared/
-                                  services/ config.py containers.py resources.py
-                                  api.py (FastAPI app)  worker.py (profiles + runner)
-    pyproject.toml                Owns the concrete library versions (single source of truth).
-  go/  typescript/  java/       (future) same shape: a reusable lib per language.
-
-apps/                         THIN deployment units, grouped by TYPE.
-  workers/                      Temporal workers (poll task queues); scales per language.
-    python/
+apps/                         THIN deployment units — what you DEPLOY. Grouped by class.
+  temporal/                     Temporal platform deploys.
+    workers/python/
       workflow/  main.py          run_worker("workflow")
       activity/  main.py          run_worker("activity")
       (activity-cpu/, activity-io/ … add a profile + a dir — see Worker fleet)
-  orders-api/python/            Temporal-adjacent: REST client that starts/signals workflows.
-  codec-server/python/          Temporal-adjacent: remote codec proxy (scaffold).
-  console/python/               Non-temporal: operator UI (HTMX + SSE).
-  mock-api/python/              Non-temporal: external-system simulator.
+    codec-server/python/        Temporal-adjacent: remote codec proxy (scaffold).
+  business/                     Customer-like apps (business logic; only a Temporal client).
+    orders-api/python/            REST gateway that starts/signals workflows.
+  demo/                         Not required to run Temporal in prod (local/demo tooling).
+    console/python/               Operator UI (HTMX + SSE).
+    mock-api/python/              External-system simulator.
+
+libs/                         Shared code — what apps IMPORT. Use case ABOVE language.
+  orders/                       the orders domain (polyglot pieces stay together).
+    python/                       uv workspace package `orders`.
+      orders/                workflows/ activities/ clients/ db/ shared/
+                                    services/ config.py containers.py resources.py
+                                    api.py (FastAPI app)  worker.py (profiles + runner)
+      pyproject.toml                Owns the concrete library versions (single source of truth).
+    go/  typescript/              (future) same use case, other languages — side by side.
 
 images/
-  app.Dockerfile                Configurable image; build args pick the dep group +
-                                entrypoint. Kernel is always present so the workspace
-                                resolves. App definitions stay lightweight.
+  python.Dockerfile             Configurable image; build args pick the dep group +
+                                entrypoint. Kernel always present so the workspace
+                                resolves. App definitions stay lightweight. (one per language)
 
 deploy/
   terraform/                    Control plane: kind cluster, Temporal Cloud, ArgoCD install.
@@ -76,8 +79,14 @@ deploy/
 config/                       Connection profiles (local-k8s | cloud) → env.
 compose/                      Self-hosted Temporal + observability for the fast,
                               no-Kubernetes local quick-start (docker-compose.yml).
-docs/                         This file, ADRs, runbooks, rollout plan.
+docs/  ai_checkpoints/        Design docs + ADRs; cross-session work log.
+pyproject.toml  uv.lock       Python workspace anchor (root).
 ```
+
+Top level reads at a glance: **`apps/`** (what you deploy, grouped by class:
+Temporal / business / demo) · **`libs/`** (what they share) · **`images/`** (how they
+build) · **`deploy/`** (how they ship). The deployable-vs-library line uses the names a
+newcomer already knows (`apps/` + `libs/`, per the Nx / uv monorepo convention).
 
 ### Why shared-kernel + thin apps
 
@@ -94,22 +103,23 @@ is a few lines that import the kernel and start one thing. This matches the prov
   (`samples-java`).
 - **Go** — lib package + thin `worker/main.go` + `constants.go` (`samples-go`).
 
-The image follows the same shape: `images/app.Dockerfile` always installs the kernel
+The image follows the same shape: `images/python.Dockerfile` always installs the kernel
 (the "base") and then copies a thin app directory (the "definition"). Build args select
 the uv dependency group and the entrypoint, so each app's footprint in the Dockerfile is
-zero — only `docker-compose.yml` / the Helm chart names them.
+zero — only `docker-compose.yml` / the Helm chart names them. One configurable image per
+language (`images/<lang>.Dockerfile`).
 
 ---
 
 ## Worker fleet (scales per language and per resource profile)
 
-A worker is described by a **profile** in `orders_kernel.worker.WORKER_PROFILES`:
+A worker is described by a **profile** in `orders.worker.WORKER_PROFILES`:
 
 ```python
 WorkerProfile(name, task_queue, workflows=[...], activity_groups=(...))
 ```
 
-Each profile maps to one thin app under `apps/workers/<lang>/<name>/`. Today:
+Each profile maps to one thin app under `apps/temporal/workers/<lang>/<name>/`. Today:
 
 | Profile | Task queue | Hosts |
 |---|---|---|
@@ -128,7 +138,7 @@ separate task queues, scaled and tuned independently. The kernel comments show t
 Versioning uses the modern **Worker Deployment Versioning** model (Server ≥ 1.28 / CLI ≥
 1.4; our server is 1.31, SDK pinned `temporalio>=1.28,<1.29`).
 
-- **Deployment identity is a worker option.** `orders_kernel.worker` reads
+- **Deployment identity is a worker option.** `orders.worker` reads
   `TEMPORAL_DEPLOYMENT_NAME` and `TEMPORAL_WORKER_BUILD_ID` from the environment and, when
   present, builds a `WorkerDeploymentConfig`. Absent (local/compose), the worker stays
   version-agnostic — behavior is unchanged.
@@ -151,7 +161,7 @@ See ADR-0004 and `deploy/charts/orders-workers`.
 Unchanged in model from the current stack (see `OBSERVABILITY.md`), carried onto kind:
 
 - **PUSH (OTLP gRPC):** traces → Tempo, logs → Loki, business metrics → Prometheus, via the
-  OpenTelemetry Collector. `orders_kernel.shared.telemetry` initializes the providers and
+  OpenTelemetry Collector. `orders.shared.telemetry` initializes the providers and
   the Temporal `Runtime`.
 - **PULL (Prometheus scrape):** Temporal SDK operational metrics + Temporal server metrics.
 - On kind, the colleague reference (`alexandreroman/temporal-k8s`) supplies a turnkey
@@ -163,7 +173,7 @@ Unchanged in model from the current stack (see `OBSERVABILITY.md`), carried onto
 
 ## Connection profiles
 
-`orders_kernel.config.Settings` is the single source of connection config (one-stop
+`orders.config.Settings` is the single source of connection config (one-stop
 config). Local is the default; Cloud is opt-in via env:
 
 | Setting (env) | Local default | Temporal Cloud |

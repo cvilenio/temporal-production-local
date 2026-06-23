@@ -13,7 +13,7 @@ task-queue compatibility-set API is superseded.
 
 ## Decision
 
-- **Kernel:** `orders_kernel.worker` reads `TEMPORAL_DEPLOYMENT_NAME` and
+- **Kernel:** `orders.worker` reads `TEMPORAL_DEPLOYMENT_NAME` and
   `TEMPORAL_WORKER_BUILD_ID` from env and builds a `WorkerDeploymentConfig` when present;
   unset → version-agnostic (local/compose unchanged).
 - **Kubernetes:** use the **Temporal Worker Controller** (`kind: WorkerDeployment` CRD +

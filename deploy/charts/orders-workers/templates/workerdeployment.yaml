@@ -1,6 +1,6 @@
 # One WorkerDeployment per worker profile. The controller injects
 # TEMPORAL_DEPLOYMENT_NAME + TEMPORAL_WORKER_BUILD_ID (Build ID = pod-template
-# hash) into each pod; orders_kernel.worker turns those into a
+# hash) into each pod; orders.worker turns those into a
 # WorkerDeploymentConfig. Shipping a version = bump the image tag in values.yaml.
 # NOTE: confirm field names against your Worker Controller version (temporal.io/v1alpha1).
 {{- range .Values.workers }}
