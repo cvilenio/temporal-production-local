@@ -18,9 +18,19 @@ venv/
 *.tfstate.*
 *.tfvars
 !*.tfvars.example
+# Saved plan files can embed sensitive planned values
+*.plan
+*.tfplan
 
-# Secrets / Temporal Cloud credentials (keep out of git)
-.keys/
+# Secrets / Temporal Cloud credentials (keep out of git).
+# Ignore the CONTENTS of .secrets/ but track its README + structure so the layout
+# (keys/, terraform/) exists on a fresh clone.
+.secrets/**
+!.secrets/README.md
+!.secrets/keys/
+!.secrets/keys/.gitkeep
+!.secrets/terraform/
+!.secrets/terraform/.gitkeep
 *.key
 *.pem
 *-apikey*

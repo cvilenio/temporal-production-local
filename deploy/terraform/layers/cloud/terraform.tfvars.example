@@ -1,0 +1,38 @@
+# Copy to terraform.tfvars (git-ignored) and adjust. The bootstrap API key is NOT set
+# here — export it instead: `export TEMPORAL_CLOUD_API_KEY=...` (or TF_VAR_temporal_cloud_api_key).
+
+# account_id is NOT set here — it is account-identifying. Supply it via
+# TF_VAR_account_id by sourcing .secrets/account.env before terraform commands.
+
+# Keyed by full namespace name (<domain>-<env>). Add new business domains as new
+# keys, e.g. payments-nonprod / payments-prod.
+namespaces = {
+  "ziggymart-nonprod" = {
+    retention_days       = 14
+    service_account_name = "orders-workers-nonprod"
+    api_key_display_name = "orders-workers-nonprod-key"
+    api_key_expiry_time  = "2027-06-23T00:00:00Z"
+    # Orders workload's custom search attributes (the OrderWorkflow upserts these).
+    search_attributes = {
+      OrderId     = "Text"
+      TraceId     = "Text"
+      OrderStatus = "Keyword"
+    }
+    # create_api_key     = true             # default; false → mint via tcld out-of-band
+    # namespace_permission = "write"         # default
+    # account_access     = "read"            # default
+    # regions            = ["aws-us-east-1"] # default
+  }
+
+  "ziggymart-prod" = {
+    retention_days       = 30
+    service_account_name = "orders-workers-prod"
+    api_key_display_name = "orders-workers-prod-key"
+    api_key_expiry_time  = "2027-06-23T00:00:00Z"
+    search_attributes = {
+      OrderId     = "Text"
+      TraceId     = "Text"
+      OrderStatus = "Keyword"
+    }
+  }
+}

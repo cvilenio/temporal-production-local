@@ -64,10 +64,27 @@ lint = { sequence = [
 ], help = "All static checks (no fixes)" }
 check = { sequence = ["lint", "test"], help = "Full gate: lint + test" }
 
-# Compose lifecycle (ported from the old Makefile).
-up = { cmd = "docker compose up --build", help = "Build and start the stack" }
-down = { cmd = "docker compose down -v", help = "Stop the stack and drop volumes" }
-fresh = { sequence = ["down", "up"], help = "Recreate the stack from scratch" }
+# =============================================================================
+# Compose lifecycle — one app stack, swappable Temporal backend.
+#
+# Each task SOURCES its connection profile into the compose process so the
+# backend is deterministic regardless of any TEMPORAL_* in the host shell
+# (.envrc/direnv targets host-direct runs, not compose). `down` must use the
+# same -f set as the matching `up`. Bring the stack down before switching modes.
+#
+#   Local OSS  : poe up         (base + compose/oss-server.yml)
+#   Cloud nonprod: poe up-cloud
+#   Cloud prod : poe up-cloud-prod
+# =============================================================================
+
+up = { shell = "set -a; . config/local-oss.env; set +a; docker compose -f docker-compose.yml -f compose/oss-server.yml up --build", help = "Local OSS server + apps" }
+down = { shell = "docker compose -f docker-compose.yml -f compose/oss-server.yml down -v", help = "Stop the local-OSS stack and drop volumes" }
+fresh = { sequence = ["down", "up"], help = "Recreate the local-OSS stack" }
+
+up-cloud = { shell = "set -a; . .secrets/keys/cloud-nonprod.env; set +a; docker compose -f docker-compose.yml up --build", help = "Apps against Temporal Cloud (nonprod)" }
+up-cloud-prod = { shell = "set -a; . .secrets/keys/cloud-prod.env; set +a; docker compose -f docker-compose.yml up --build", help = "Apps against Temporal Cloud (prod)" }
+down-cloud = { shell = "docker compose -f docker-compose.yml down -v", help = "Stop the Cloud-backed app stack and drop volumes" }
+fresh-cloud = { sequence = ["down-cloud", "up-cloud"], help = "Recreate the Cloud (nonprod) app stack" }
 
 [tool.pyright]
 typeCheckingMode = "standard"

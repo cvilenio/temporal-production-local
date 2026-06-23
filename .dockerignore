@@ -23,7 +23,7 @@ __pycache__/
 # Secrets / local env — never bake into an image
 .env
 .envrc
-.keys/
+.secrets/
 
 # Not needed at build/runtime
 archive/
