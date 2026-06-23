@@ -47,7 +47,7 @@
       "id": 1,
       "options": {
         "mode": "markdown",
-        "content": "\nCustomer API calls that **create or modify** workflow state. The hot path: a caller is blocked\nwaiting for the response, so these surface in alerts fast. **SLO p99 < 200ms** (yellow), 1s (red).\n\nTranslated from `the signal flow`. Per-namespace and internal storage panels dropped\n(see Overview). Errors shown by operation (OSS `service_errors` has no `error_type` label).\n"
+        "content": "\nClient API calls that **create or modify** workflow state. The hot path: a caller is blocked\nwaiting for the response, so these surface in alerts fast. Suggested thresholds: **p99 200ms** (yellow), 1s (red).\n\nErrors shown by operation (OSS `service_errors` has no `error_type` label).\n"
       }
     },
     {
@@ -291,7 +291,7 @@
     {
       "type": "timeseries",
       "title": "Persistence Latency p99 by Operation",
-      "description": "reference splits Cassandra hot-path here. On Postgres this is the persistence API layer.",
+      "description": "On Postgres the storage hot-path collapses to the persistence API layer.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

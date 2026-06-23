@@ -67,7 +67,7 @@ services:
       # Pre-built Temporal dashboards (server + SDK) plus custom Ziggymart board
       - ./compose/observability/grafana/provisioning/dashboards/ziggymart.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/ziggymart.yaml:ro
       - ./compose/observability/grafana/dashboards:/var/lib/grafana/dashboards/ziggymart:ro
-      # Temporal Critical Flows dashboards (reference translation: overview + 3 flows + worker tuning)
+      # Temporal Critical Flows dashboards (overview + 3 flows + worker tuning)
       - ./compose/observability/grafana/provisioning/dashboards/critical.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/critical.yaml:ro
       - ./compose/observability/grafana/dashboards-critical:/var/lib/grafana/dashboards/critical:ro
       # Persist Grafana state, Prometheus TSDB, Tempo blocks, Loki chunks

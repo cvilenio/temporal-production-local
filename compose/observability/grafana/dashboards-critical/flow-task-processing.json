@@ -47,7 +47,7 @@
       "id": 1,
       "options": {
         "mode": "markdown",
-        "content": "\nTemporal's **internal engine** processing background tasks (`TransferActive`, `TimerActive`) that\ngenerate work for polling workers. Watch **TransferActive vs TimerActive independently** \u2014 a\nbacklog in either stalls workflow progress even when the frontend looks healthy.\n\nTranslated from `the task flow`. internal storage-engine lock panels dropped\n(internal); OSS `ShardInfo` lock + `HistoryCacheGetOrCreate` cache latency retained.\n"
+        "content": "\nTemporal's **internal engine** processing background tasks (`TransferActive`, `TimerActive`) that\ngenerate work for polling workers. Watch **TransferActive vs TimerActive independently** \u2014 a\nbacklog in either stalls workflow progress even when the frontend looks healthy.\n\nUses OSS `ShardInfo` lock latency + `HistoryCacheGetOrCreate` cache latency.\n"
       }
     },
     {
@@ -162,7 +162,7 @@
     {
       "type": "timeseries",
       "title": "Task Processing Latency p50 by Task Type",
-      "description": "p50 alongside p99 (reference shows both per task type).",
+      "description": "p50 alongside p99, per task type.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

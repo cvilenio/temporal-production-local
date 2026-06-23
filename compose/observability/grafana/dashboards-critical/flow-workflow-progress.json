@@ -47,7 +47,7 @@
       "id": 1,
       "options": {
         "mode": "markdown",
-        "content": "\nFrontend operations for **workers polling** for work (`Poll*`) and **completing** it (`Respond*`).\nThis is the server side of worker activity \u2014 pair it with the **Worker Tuning** dashboard for the\nSDK/worker view (slots, sticky cache, schedule-to-start).\n\nTranslated from `the progress flow`.\n\n> **Caveat:** reference uses `service_latency` for `Respond*` (excludes time the worker is\n> responsible for). OSS has **no** such variant \u2014 the latency below **includes worker time**.\n"
+        "content": "\nFrontend operations for **workers polling** for work (`Poll*`) and **completing** it (`Respond*`).\nThis is the server side of worker activity \u2014 pair it with the **Worker Tuning** dashboard for the\nSDK/worker view (slots, sticky cache, schedule-to-start).\n\n> **Caveat:** OSS `service_latency` for `Respond*` **includes** the time the worker is responsible\n> for, so treat the latency below as worker-inclusive.\n"
       }
     },
     {
