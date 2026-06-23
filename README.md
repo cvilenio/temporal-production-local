@@ -4,6 +4,12 @@ This repository contains a full end-to-end demonstration of a retail order proce
 
 It is designed to showcase how Temporal solves the problem of **ambiguous side-effects** (e.g. an external API times out, but you aren't sure if it succeeded), **saga compensation**, **signal-driven cancellation**, and **dead-letter handling**.
 
+> **Layout & design:** this README documents the demo's behavior. For the repository
+> structure (shared-kernel polyglot monorepo), the kind + Terraform + ArgoCD lifecycle,
+> worker versioning, and the Temporal Cloud switch, see
+> [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and the ADRs in [`docs/adr/`](docs/adr/).
+> Apps live under `apps/`, shared code under `kernels/`, deployment under `deploy/`.
+
 ## Architecture
 
 ![Architecture](https://via.placeholder.com/800x400.png?text=Retail+Demo+Architecture)
@@ -138,5 +144,7 @@ docker compose down -v
 ```
 
 ## What is excluded?
-- **Codec Server:** Used in production to redact PII from Event History.
 - **External Pub-Sub:** Notifications use direct Postgres writes for demo simplicity.
+
+A **Codec Server** scaffold is now included (`apps/codec-server/`, ADR-0006) — replace its
+placeholder codec with AEAD before any real use.

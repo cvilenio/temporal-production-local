@@ -1,0 +1,22 @@
+# App-of-apps: ArgoCD watches deploy/argocd/applications/ and reconciles each
+# Application it finds there. Point repoURL at this repository.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/cvilenio/temporal-platform-demo # TODO: confirm
+    targetRevision: main
+    path: deploy/argocd/applications
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

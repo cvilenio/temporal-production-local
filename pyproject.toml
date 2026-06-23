@@ -5,19 +5,16 @@ requires-python = ">=3.12,<3.13"
 dependencies = []
 
 [dependency-groups]
-orders-service = [
-    "asyncpg>=0.29.0",
-    "dependency-injector>=4.49",
-    "fastapi==0.111.0",
-    "httpx>=0.27.0",
-    "opentelemetry-api>=1.25",
-    "opentelemetry-exporter-otlp-proto-grpc>=1.25",
-    "opentelemetry-sdk>=1.25",
-    "pydantic-settings>=2.14.0",
-    "pydantic==2.7.1",
-    "sqlalchemy[asyncio]>=2.0.30,<3",
-    "temporalio>=1.28,<1.29",
-    "uvicorn==0.29.0",
+# Apps that build on the shared Python kernel just depend on it; the kernel's
+# own pyproject (kernels/python) owns the concrete library versions — single
+# source of truth. Worker and API apps are thin definitions on top.
+workers = ["orders-kernel"]
+orders-api = ["orders-kernel"]
+codec-server = [
+  "fastapi==0.111.0",
+  "uvicorn==0.29.0",
+  "pydantic==2.7.1",
+  "temporalio>=1.28,<1.29",
 ]
 retail-demo-console = [
   "asyncpg>=0.29.0",
@@ -43,7 +40,14 @@ dev = [
 ]
 
 [tool.uv]
-default-groups = ["orders-service", "retail-demo-console", "mock-api", "dev"]
+default-groups = ["workers", "orders-api", "codec-server", "retail-demo-console", "mock-api", "dev"]
+
+# The Python shared kernel is a workspace package; apps depend on it by name.
+[tool.uv.workspace]
+members = ["kernels/python"]
+
+[tool.uv.sources]
+orders-kernel = { workspace = true }
 
 # Task runner. Invoke with `uv run poe <task>` (e.g. `uv run poe check`).
 [tool.poe.tasks]
@@ -68,14 +72,19 @@ fresh = { sequence = ["down", "up"], help = "Recreate the stack from scratch" }
 [tool.pyright]
 typeCheckingMode = "standard"
 pythonVersion = "3.12"
-include = ["orders-service", "retail-demo-console", "mock-api"]
+include = ["kernels", "apps"]
 exclude = ["**/.venv", "**/__pycache__", "archive"]
-# Each service runs from its own directory, so imports resolve relative to that
-# root (e.g. orders-service uses `from shared...`, console uses `from app...`).
+# The kernel is an installable package (import `orders_kernel`); thin apps run
+# from their own directory and import the kernel. Console keeps its `from app...`
+# layout, so its root is its own app dir.
 executionEnvironments = [
-  { root = "orders-service" },
-  { root = "retail-demo-console" },
-  { root = "mock-api" },
+  { root = "kernels/python" },
+  { root = "apps/orders-api/python" },
+  { root = "apps/workers/python/workflow" },
+  { root = "apps/workers/python/activity" },
+  { root = "apps/codec-server/python" },
+  { root = "apps/console/python" },
+  { root = "apps/mock-api/python" },
 ]
 
 [tool.pytest.ini_options]

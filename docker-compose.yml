@@ -283,9 +283,10 @@ services:
   mock-api:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: images/app.Dockerfile
       args:
-        APP: mock-api
+        APP_GROUP: mock-api
+        APP_PATH: apps/mock-api/python
         APP_MODULE: main:app
         APP_PORT: "8000"
     container_name: mock-api
@@ -308,9 +309,10 @@ services:
   orders-service:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: images/app.Dockerfile
       args:
-        APP: orders-service
+        APP_GROUP: orders-api
+        APP_PATH: apps/orders-api/python
         APP_MODULE: main:app
         APP_PORT: "8000"
     container_name: orders-service
@@ -356,13 +358,14 @@ services:
   orders-workflow-worker:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: images/app.Dockerfile
       args:
-        APP: orders-service
-        APP_MODULE: main:app
-        APP_PORT: "8000"
+        APP_GROUP: workers
+        APP_PATH: apps/workers/python/workflow
+        APP_MODULE: main
+        APP_CMD: python
     container_name: orders-workflow-worker
-    command: ["python", "worker.py", "--role", "workflow"]
+    command: ["python", "main.py"]
     depends_on:
       temporal:
         condition: service_healthy
@@ -390,13 +393,14 @@ services:
   orders-activity-worker:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: images/app.Dockerfile
       args:
-        APP: orders-service
-        APP_MODULE: main:app
-        APP_PORT: "8000"
+        APP_GROUP: workers
+        APP_PATH: apps/workers/python/activity
+        APP_MODULE: main
+        APP_CMD: python
     container_name: orders-activity-worker
-    command: ["python", "worker.py", "--role", "activity"]
+    command: ["python", "main.py"]
     depends_on:
       temporal:
         condition: service_healthy
@@ -431,9 +435,10 @@ services:
   retail-demo-console:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: images/app.Dockerfile
       args:
-        APP: retail-demo-console
+        APP_GROUP: retail-demo-console
+        APP_PATH: apps/console/python
         APP_MODULE: app.main:app
         APP_PORT: "8086"
     container_name: retail-demo-console
@@ -466,6 +471,30 @@ services:
       timeout: 3s
       retries: 3
       start_period: 20s
+
+  # ===========================================================================
+  # APPLICATION — TEMPORAL CODEC SERVER  (scaffold)
+  # Remote codec the Temporal UI/CLI call to decode encrypted Payloads.
+  # See apps/codec-server. Replace the placeholder codec with AEAD before real
+  # use. Port 8085 → container 8000.
+  # ===========================================================================
+
+  codec-server:
+    build:
+      context: .
+      dockerfile: images/app.Dockerfile
+      args:
+        APP_GROUP: codec-server
+        APP_PATH: apps/codec-server/python
+        APP_MODULE: main:app
+        APP_PORT: "8000"
+    container_name: codec-server
+    environment:
+      - CODEC_UI_ORIGIN=http://localhost:8082
+    networks:
+      - temporal-network
+    ports:
+      - "8085:8000"
 
   # ===========================================================================
   # DEV ADMIN UIs  (non-critical — convenience tools only)
