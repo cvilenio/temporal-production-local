@@ -1,0 +1,35 @@
+# Build context excludes. The image installs deps via `uv sync` from
+# pyproject.toml + uv.lock, so none of the local tooling/state below belongs
+# in the context that gets shipped to the daemon.
+
+# Local virtualenv — rebuilt inside the image; 200M+ if shipped.
+.venv/
+**/.venv/
+
+# Python caches / artifacts
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# VCS and editor cruft
+.git/
+.gitignore
+.DS_Store
+
+# Secrets / local env — never bake into an image
+.env
+.envrc
+.keys/
+
+# Not needed at build/runtime
+archive/
+deploy/
+docs/
+ai_checkpoints/
+*.md
+.github/
+.claude/
