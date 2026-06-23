@@ -30,3 +30,6 @@ venv/
 .idea/
 .vscode/
 *.swp
+
+# Local-only sensitive-marker denylist for the pre-commit hook (never commit)
+.githooks/patterns.local
