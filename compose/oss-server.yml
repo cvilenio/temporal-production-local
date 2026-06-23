@@ -1,0 +1,196 @@
+# =============================================================================
+# OSS Temporal server — local backend LAYER for docker-compose.yml
+# =============================================================================
+#
+# Overlay this on the base to run a self-hosted Temporal server locally:
+#
+#   docker compose -f docker-compose.yml -f compose/oss-server.yml up
+#   (or: poe up)
+#
+# It adds the Temporal cluster (server + its Postgres + schema/namespace/search-
+# attribute bootstrap + Web UI) and re-attaches the app services' dependency on
+# the server. Omit this file to run the apps against Temporal Cloud instead.
+#
+# Network/volume definitions come from the base file — this layer is always
+# combined with docker-compose.yml, never run alone.
+#
+#   postgresql ──► temporal-admin-tools ──► temporal ──► temporal-create-namespace
+#                                                  │           └► temporal-search-attributes
+#                                                  └► temporal-ui ──► ui-proxy
+#   pgweb-temporal → postgresql   (dev admin UI)
+# =============================================================================
+
+services:
+
+  # ── Temporal cluster: persistence ────────────────────────────────────────
+  postgresql:
+    image: postgres:${POSTGRESQL_VERSION}
+    container_name: temporal-postgresql
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+    ports:
+      - "5432:5432"
+    networks:
+      - temporal-network
+    volumes:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  # ── Temporal cluster: schema bootstrap (one-shot) ─────────────────────────
+  temporal-admin-tools:
+    image: temporalio/admin-tools:${TEMPORAL_ADMINTOOLS_VERSION}
+    container_name: temporal-admin-tools
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=postgresql
+      - SQL_PASSWORD=temporal
+    networks:
+      - temporal-network
+    volumes:
+      - ./compose/scripts:/scripts
+    entrypoint: ["/bin/sh"]
+    command: /scripts/setup-postgres.sh
+    restart: on-failure:6
+
+  # ── Temporal cluster: server ──────────────────────────────────────────────
+  temporal:
+    image: temporalio/server:${TEMPORAL_VERSION}
+    container_name: temporal
+    depends_on:
+      temporal-admin-tools:
+        condition: service_completed_successfully
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=postgresql
+      - BIND_ON_IP=0.0.0.0
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+      - PROMETHEUS_ENDPOINT=0.0.0.0:9091
+    networks:
+      - temporal-network
+    ports:
+      - "7233:7233"
+    volumes:
+      - ./compose/dynamicconfig:/etc/temporal/config/dynamicconfig
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "7233"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 30s
+
+  # ── Temporal cluster: namespace + search-attribute bootstrap (one-shot) ───
+  temporal-create-namespace:
+    image: temporalio/admin-tools:${TEMPORAL_ADMINTOOLS_VERSION}
+    container_name: temporal-create-namespace
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - DEFAULT_NAMESPACE=ziggymart
+    networks:
+      - temporal-network
+    volumes:
+      - ./compose/scripts:/scripts
+    entrypoint: ["/bin/sh"]
+    command: /scripts/create-namespace.sh
+    restart: on-failure:5
+
+  temporal-search-attributes:
+    image: temporalio/admin-tools:${TEMPORAL_ADMINTOOLS_VERSION}
+    container_name: temporal-search-attributes
+    depends_on:
+      temporal-create-namespace:
+        condition: service_completed_successfully
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    networks:
+      - temporal-network
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        until temporal operator search-attribute list --namespace ziggymart; do
+          echo "Waiting for namespace ziggymart..."; sleep 2;
+        done;
+        temporal operator search-attribute create --name OrderId     --type Text    --namespace ziggymart || true;
+        temporal operator search-attribute create --name TraceId     --type Text    --namespace ziggymart || true;
+        temporal operator search-attribute create --name OrderStatus --type Keyword --namespace ziggymart || true;
+    restart: on-failure:5
+
+  # ── Temporal cluster: Web UI ──────────────────────────────────────────────
+  temporal-ui:
+    image: temporalio/ui:${TEMPORAL_UI_VERSION}
+    container_name: temporal-ui
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000,http://localhost:5174
+      - TEMPORAL_CSRF_COOKIE_INSECURE=true
+    networks:
+      - temporal-network
+    ports:
+      - "8082:8080"
+
+  ui-proxy:
+    image: nginx:alpine
+    container_name: temporal-ui-proxy
+    depends_on:
+      - temporal-ui
+    networks:
+      - temporal-network
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./compose/deployment/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+
+  # ── Dev admin UI: temporal DB browser ─────────────────────────────────────
+  pgweb-temporal:   # http://localhost:8084
+    image: sosedoff/pgweb
+    container_name: pgweb-temporal
+    depends_on:
+      - postgresql
+    environment:
+      - DATABASE_URL=postgres://temporal:temporal@postgresql:5432/temporal?sslmode=disable
+    networks:
+      - temporal-network
+    ports:
+      - "8084:8081"
+    restart: always
+
+  # ── Re-attach the app services to the local server + point the console at
+  #    the embedded Temporal UI. These fragments MERGE onto the base services. ─
+  orders-service:
+    depends_on:
+      temporal:
+        condition: service_healthy
+
+  orders-workflow-worker:
+    depends_on:
+      temporal:
+        condition: service_healthy
+
+  orders-activity-worker:
+    depends_on:
+      temporal:
+        condition: service_healthy
+
+  retail-demo-console:
+    environment:
+      - TEMPORAL_UI_EMBED_URL=http://localhost:8081

@@ -1,79 +1,62 @@
 # =============================================================================
-# Ziggymart Retail Demo — Docker Compose
+# Ziggymart Retail Demo — Docker Compose (BASE, backend-agnostic)
 # =============================================================================
 #
-# Startup dependency chain:
+# This file defines the application stack ONLY. It does NOT define a Temporal
+# backend. The apps read their Temporal connection from env, defaulting to a
+# local OSS server at temporal:7233 / namespace ziggymart:
 #
-#   postgresql ──► temporal-admin-tools (schema init, one-shot)
-#                         │
-#                         ▼
-#                      temporal (server)
-#                    ┌────┴─────────────────────────────┐
-#                    │                                  │
-#          temporal-create-namespace          temporal-ui ──► ui-proxy
-#                    │
-#          temporal-search-attributes
+#   TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE, TEMPORAL_TLS, TEMPORAL_API_KEY
+#
+# Run modes (prefer the `poe` wrappers, which encode these):
+#
+#   Local OSS  : docker compose -f docker-compose.yml -f compose/oss-server.yml up
+#                (compose/oss-server.yml adds the Temporal server + its deps)
+#   Temporal Cloud :
+#                docker compose -f docker-compose.yml \
+#                  --env-file .secrets/keys/cloud-nonprod.env up
+#                (no local server; apps connect out to Cloud)
+#
+# The same env contract carries to kind/Helm later (k8s Secret instead of an
+# env-file) — see docs/RUNMODES.md.
 #
 #   lgtm (grafana/otel-lgtm) — OTel Collector + Prometheus + Tempo + Loki + Grafana
-#     ◄── OTLP push (traces, logs, business metrics)  from orders-service / workers
-#     ◄── Prometheus scrape (Temporal server + SDK metrics)
-#     Grafana UI: http://localhost:3000  (admin / admin)
-#
-#   orders-db ──► orders-service ──► orders-workflow-worker
-#              │         │           orders-activity-worker
+#   orders-db ──► orders-service ──► orders-workflow-worker / orders-activity-worker
 #              │         └─────────► retail-demo-console
-#              │
-#   mock-api ──┘ (consumed by workers; no upstream deps)
-#
-#   Dev admin UIs (non-critical):
-#     pgweb-orders   → orders-db
-#     pgweb-temporal → postgresql
-#
+#   mock-api ──┘ (consumed by workers)
+#   pgweb-orders → orders-db   (dev admin UI)
 # =============================================================================
 
 services:
 
   # ===========================================================================
   # OBSERVABILITY — LGTM STACK
-  # Single all-in-one container: OpenTelemetry Collector + Prometheus + Tempo +
-  # Loki + Grafana with all datasources pre-wired.
-  #
-  #   Grafana UI:    http://localhost:3000  (admin / admin)
-  #   OTLP gRPC:     lgtm:4317  (internal — traces, logs, business metrics push)
-  #   OTLP HTTP:     lgtm:4318  (internal)
-  #
-  # Prometheus inside lgtm ALSO scrapes Temporal server + SDK metrics endpoints
-  # via the mounted prometheus.yaml (pull pipeline for operational metrics).
+  # OpenTelemetry Collector + Prometheus + Tempo + Loki + Grafana, all-in-one.
+  #   Grafana UI: http://localhost:3000   OTLP: lgtm:4317/4318 (internal)
+  # Prometheus inside lgtm also scrapes Temporal server + SDK metrics (when the
+  # local OSS server is running) via the mounted prometheus.yaml.
   # ===========================================================================
 
   lgtm:
     image: grafana/otel-lgtm:latest
     container_name: lgtm
     environment:
-      # Allow anonymous admin access so the UI opens without a login prompt
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
       - GF_AUTH_DISABLE_LOGIN_FORM=false
-      # Drop X-Frame-Options so Grafana can be embedded in the demo console iframe
       - GF_SECURITY_ALLOW_EMBEDDING=true
     networks:
       - temporal-network
     ports:
-      - "3000:3000"   # Grafana UI
+      - "3000:3000"
     volumes:
-      # Custom Prometheus scrape config (replaces the built-in one).
-      # Adds scrape jobs for Temporal server metrics and SDK pull metrics.
       - ./compose/observability/prometheus/prometheus.yaml:/otel-lgtm/prometheus.yaml:ro
-      # Pre-built Temporal dashboards (server + SDK) plus custom Ziggymart board
       - ./compose/observability/grafana/provisioning/dashboards/ziggymart.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/ziggymart.yaml:ro
       - ./compose/observability/grafana/dashboards:/var/lib/grafana/dashboards/ziggymart:ro
-      # Temporal Critical Flows dashboards (overview + 3 flows + worker tuning)
       - ./compose/observability/grafana/provisioning/dashboards/critical.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/critical.yaml:ro
       - ./compose/observability/grafana/dashboards-critical:/var/lib/grafana/dashboards/critical:ro
-      # Persist Grafana state, Prometheus TSDB, Tempo blocks, Loki chunks
       - lgtm-data:/data
     healthcheck:
-      # otel-lgtm writes /tmp/ready once all internal components are up
       test: ["CMD-SHELL", "test -f /tmp/ready"]
       interval: 5s
       timeout: 3s
@@ -81,176 +64,9 @@ services:
       start_period: 20s
 
   # ===========================================================================
-  # TEMPORAL CLUSTER — PERSISTENCE
-  # Postgres instance used exclusively by the Temporal server for workflow
-  # state, history, and visibility storage.
-  # ===========================================================================
-
-  postgresql:
-    image: postgres:${POSTGRESQL_VERSION}
-    container_name: temporal-postgresql
-    environment:
-      POSTGRES_USER: temporal
-      POSTGRES_PASSWORD: temporal
-    ports:
-      - "5432:5432"
-    networks:
-      - temporal-network
-    volumes:
-      - /var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U temporal"]
-      interval: 5s
-      timeout: 5s
-      retries: 60
-      start_period: 30s
-
-  # ===========================================================================
-  # TEMPORAL CLUSTER — SCHEMA BOOTSTRAP  (one-shot)
-  # Runs setup-postgres.sh to apply Temporal's DB schema via tctl/admin-tools.
-  # Completes and exits; temporal server waits on service_completed_successfully.
-  # ===========================================================================
-
-  temporal-admin-tools:
-    image: temporalio/admin-tools:${TEMPORAL_ADMINTOOLS_VERSION}
-    container_name: temporal-admin-tools
-    depends_on:
-      postgresql:
-        condition: service_healthy
-    environment:
-      - DB=postgres12
-      - DB_PORT=5432
-      - POSTGRES_USER=temporal
-      - POSTGRES_PWD=temporal
-      - POSTGRES_SEEDS=postgresql
-      - SQL_PASSWORD=temporal
-    networks:
-      - temporal-network
-    volumes:
-      - ./compose/scripts:/scripts
-    entrypoint: ["/bin/sh"]
-    command: /scripts/setup-postgres.sh
-    restart: on-failure:6
-
-  # ===========================================================================
-  # TEMPORAL CLUSTER — SERVER
-  # Core Temporal service: frontend, history, matching, and worker services.
-  # Exposes gRPC API on port 7233 (used by SDK clients and workers).
-  # ===========================================================================
-
-  temporal:
-    image: temporalio/server:${TEMPORAL_VERSION}
-    container_name: temporal
-    depends_on:
-      temporal-admin-tools:
-        condition: service_completed_successfully
-    environment:
-      - DB=postgres12
-      - DB_PORT=5432
-      - POSTGRES_USER=temporal
-      - POSTGRES_PWD=temporal
-      - POSTGRES_SEEDS=postgresql
-      - BIND_ON_IP=0.0.0.0
-      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
-      # Expose combined Temporal server Prometheus metrics on port 9091.
-      # Prometheus inside lgtm scrapes this via temporal:9091/metrics.
-      - PROMETHEUS_ENDPOINT=0.0.0.0:9091
-    networks:
-      - temporal-network
-    ports:
-      - "7233:7233"
-    volumes:
-      - ./compose/dynamicconfig:/etc/temporal/config/dynamicconfig
-    healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "7233"]
-      interval: 5s
-      timeout: 3s
-      retries: 60
-      start_period: 30s
-
-  # ===========================================================================
-  # TEMPORAL CLUSTER — NAMESPACE BOOTSTRAP  (one-shot)
-  # Creates the "ziggymart" namespace, then registers the custom search
-  # attributes (OrderId, TraceId, OrderStatus) required by the demo workflows.
-  # Both containers exit after completion.
-  # ===========================================================================
-
-  temporal-create-namespace:
-    image: temporalio/admin-tools:${TEMPORAL_ADMINTOOLS_VERSION}
-    container_name: temporal-create-namespace
-    depends_on:
-      temporal:
-        condition: service_healthy
-    environment:
-      - TEMPORAL_ADDRESS=temporal:7233
-      - DEFAULT_NAMESPACE=ziggymart
-    networks:
-      - temporal-network
-    volumes:
-      - ./compose/scripts:/scripts
-    entrypoint: ["/bin/sh"]
-    command: /scripts/create-namespace.sh
-    restart: on-failure:5
-
-  temporal-search-attributes:
-    image: temporalio/admin-tools:${TEMPORAL_ADMINTOOLS_VERSION}
-    container_name: temporal-search-attributes
-    depends_on:
-      temporal-create-namespace:
-        condition: service_completed_successfully
-    environment:
-      - TEMPORAL_ADDRESS=temporal:7233
-    networks:
-      - temporal-network
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - >
-        until temporal operator search-attribute list --namespace ziggymart; do
-          echo "Waiting for namespace ziggymart..."; sleep 2;
-        done;
-        temporal operator search-attribute create --name OrderId     --type Text    --namespace ziggymart || true;
-        temporal operator search-attribute create --name TraceId     --type Text    --namespace ziggymart || true;
-        temporal operator search-attribute create --name OrderStatus --type Keyword --namespace ziggymart || true;
-    restart: on-failure:5
-
-  # ===========================================================================
-  # TEMPORAL CLUSTER — WEB UI
-  # temporal-ui: official Temporal Web UI (port 8082 → container 8080).
-  # ui-proxy:    nginx reverse proxy in front of the UI (port 8081).
-  # ===========================================================================
-
-  temporal-ui:
-    image: temporalio/ui:${TEMPORAL_UI_VERSION}
-    container_name: temporal-ui
-    depends_on:
-      temporal:
-        condition: service_healthy
-    environment:
-      - TEMPORAL_ADDRESS=temporal:7233
-      - TEMPORAL_CORS_ORIGINS=http://localhost:3000,http://localhost:5174
-      - TEMPORAL_CSRF_COOKIE_INSECURE=true
-    networks:
-      - temporal-network
-    ports:
-      - "8082:8080"
-
-  ui-proxy:
-    image: nginx:alpine
-    container_name: temporal-ui-proxy
-    depends_on:
-      - temporal-ui
-    networks:
-      - temporal-network
-    ports:
-      - "8081:8081"
-    volumes:
-      - ./compose/deployment/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-
-  # ===========================================================================
   # APPLICATION — DATA STORE
-  # Postgres instance for the Ziggymart orders application (separate from
-  # the Temporal cluster DB above). Exposed on host port 5433 to avoid
-  # collision with temporal-postgresql on 5432.
+  # Postgres for the Ziggymart orders application (separate from any Temporal
+  # cluster DB). Host port 5433.
   # ===========================================================================
 
   orders-db:
@@ -275,9 +91,7 @@ services:
 
   # ===========================================================================
   # APPLICATION — EXTERNAL SERVICE SIMULATOR
-  # Simulates downstream APIs (inventory, shipping, payment) with configurable
-  # latency and hang behaviour, used by activity workers during demos.
-  # Port 8001 → container 8000.
+  # Simulates downstream APIs (inventory, shipping, payment). Port 8001 → 8000.
   # ===========================================================================
 
   mock-api:
@@ -302,8 +116,8 @@ services:
 
   # ===========================================================================
   # APPLICATION — ORDERS API SERVICE
-  # FastAPI service that exposes the orders REST API and issues Temporal
-  # workflow signals/starts. Port 8002 → container 8000.
+  # FastAPI service exposing the orders REST API; starts/signals Temporal
+  # workflows. Port 8002 → 8000. Temporal backend is selected via env.
   # ===========================================================================
 
   orders-service:
@@ -317,20 +131,20 @@ services:
         APP_PORT: "8000"
     container_name: orders-service
     depends_on:
-      temporal:
-        condition: service_healthy
       orders-db:
         condition: service_healthy
       lgtm:
         condition: service_healthy
     environment:
-      - TEMPORAL_ADDRESS=temporal:7233
-      - TEMPORAL_NAMESPACE=ziggymart
+      # Temporal backend — defaults target the local OSS server; override via
+      # --env-file (Cloud) or compose/oss-server.yml (local OSS).
+      - TEMPORAL_ADDRESS=${TEMPORAL_ADDRESS:-temporal:7233}
+      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-ziggymart}
+      - TEMPORAL_TLS=${TEMPORAL_TLS:-false}
+      - TEMPORAL_API_KEY=${TEMPORAL_API_KEY:-}
       - DATABASE_URL=postgresql+asyncpg://admin:password@orders-db:5432/orders_db
-      # Observability — all three signals (traces, logs, business metrics) push here
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://lgtm:4317
       - OTEL_SERVICE_NAME=orders-service
-      # SDK operational metrics are pulled by Prometheus on this port
       - SDK_METRICS_PORT=9000
     networks:
       - temporal-network
@@ -345,14 +159,9 @@ services:
 
   # ===========================================================================
   # APPLICATION — TEMPORAL WORKERS
-  # Workflows and Activities run in dedicated worker processes to allow
-  # independent scaling and prevent blocking activities from starving workflow
-  # orchestration.
-  #
   #   orders-workflow-worker  polls orders-workflow-task-queue → hosts OrderWorkflow
-  #   orders-activity-worker  polls orders-activity-task-queue → hosts all activities
-  #
-  # Both workers share the same Docker image; --role selects the task queue.
+  #   orders-activity-worker  polls orders-activity-task-queue → hosts activities
+  # Same image; the entrypoint dir selects the role. Temporal backend via env.
   # ===========================================================================
 
   orders-workflow-worker:
@@ -367,8 +176,6 @@ services:
     container_name: orders-workflow-worker
     command: ["python", "main.py"]
     depends_on:
-      temporal:
-        condition: service_healthy
       orders-db:
         condition: service_healthy
       orders-service:
@@ -378,8 +185,10 @@ services:
       lgtm:
         condition: service_healthy
     environment:
-      - TEMPORAL_ADDRESS=temporal:7233
-      - TEMPORAL_NAMESPACE=ziggymart
+      - TEMPORAL_ADDRESS=${TEMPORAL_ADDRESS:-temporal:7233}
+      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-ziggymart}
+      - TEMPORAL_TLS=${TEMPORAL_TLS:-false}
+      - TEMPORAL_API_KEY=${TEMPORAL_API_KEY:-}
       - DATABASE_URL=postgresql+asyncpg://admin:password@orders-db:5432/orders_db
       - MOCK_API_URL=http://mock-api:8000
       - ORDERS_SERVICE_URL=http://orders-service:8000
@@ -402,8 +211,6 @@ services:
     container_name: orders-activity-worker
     command: ["python", "main.py"]
     depends_on:
-      temporal:
-        condition: service_healthy
       orders-db:
         condition: service_healthy
       orders-service:
@@ -413,8 +220,10 @@ services:
       lgtm:
         condition: service_healthy
     environment:
-      - TEMPORAL_ADDRESS=temporal:7233
-      - TEMPORAL_NAMESPACE=ziggymart
+      - TEMPORAL_ADDRESS=${TEMPORAL_ADDRESS:-temporal:7233}
+      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-ziggymart}
+      - TEMPORAL_TLS=${TEMPORAL_TLS:-false}
+      - TEMPORAL_API_KEY=${TEMPORAL_API_KEY:-}
       - DATABASE_URL=postgresql+asyncpg://admin:password@orders-db:5432/orders_db
       - MOCK_API_URL=http://mock-api:8000
       - ORDERS_SERVICE_URL=http://orders-service:8000
@@ -427,9 +236,8 @@ services:
 
   # ===========================================================================
   # APPLICATION — DEMO CONSOLE
-  # FastAPI + HTMX dashboard for driving and observing the retail demo.
-  # Mounts the Docker socket (read-only) to stream container logs in-browser.
-  # Port 8086.
+  # FastAPI + HTMX dashboard. Mounts the Docker socket (read-only) to stream
+  # container logs. Port 8086.
   # ===========================================================================
 
   retail-demo-console:
@@ -455,8 +263,9 @@ services:
       - LOG_BUFFER_SIZE=500
       - MESSAGE_POLL_INTERVAL_SECONDS=3
       - ORDERS_SERVICE_TIMEOUT_SECONDS=60
-      # Browser-reachable URLs for the embedded tool UIs (resolved client-side)
-      - TEMPORAL_UI_EMBED_URL=http://localhost:8081
+      # Browser-reachable URLs for embedded tool UIs. The Temporal UI is only
+      # present in local-OSS mode; compose/oss-server.yml sets it there.
+      - TEMPORAL_UI_EMBED_URL=${TEMPORAL_UI_EMBED_URL:-}
       - GRAFANA_EMBED_URL=http://localhost:3000
       - PGWEB_EMBED_URL=http://localhost:8083
     networks:
@@ -475,8 +284,7 @@ services:
   # ===========================================================================
   # APPLICATION — TEMPORAL CODEC SERVER  (scaffold)
   # Remote codec the Temporal UI/CLI call to decode encrypted Payloads.
-  # See apps/codec-server. Replace the placeholder codec with AEAD before real
-  # use. Port 8085 → container 8000.
+  # Placeholder codec — replace with AEAD before real use. Port 8085 → 8000.
   # ===========================================================================
 
   codec-server:
@@ -497,9 +305,8 @@ services:
       - "8085:8000"
 
   # ===========================================================================
-  # DEV ADMIN UIs  (non-critical — convenience tools only)
-  # pgweb instances for browsing both Postgres databases from a browser.
-  # These have no upstream dependents and can be omitted in production.
+  # DEV ADMIN UI  (non-critical)
+  # pgweb for the orders DB. The temporal-DB browser lives in oss-server.yml.
   # ===========================================================================
 
   pgweb-orders:   # orders-db browser  →  http://localhost:8083
@@ -513,19 +320,6 @@ services:
       - temporal-network
     ports:
       - "8083:8081"
-    restart: always
-
-  pgweb-temporal:   # temporal DB browser  →  http://localhost:8084
-    image: sosedoff/pgweb
-    container_name: pgweb-temporal
-    depends_on:
-      - postgresql
-    environment:
-      - DATABASE_URL=postgres://temporal:temporal@postgresql:5432/temporal?sslmode=disable
-    networks:
-      - temporal-network
-    ports:
-      - "8084:8081"
     restart: always
 
 # =============================================================================

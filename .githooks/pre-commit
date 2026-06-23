@@ -87,6 +87,13 @@ Flag anything unsafe to publish, including:
 - credentials, API keys, tokens, private keys, or internal meeting recording links
 Do NOT flag ordinary open-source code, public documentation, or obvious local-demo passwords
 (e.g. POSTGRES_PASSWORD=temporal in a compose file).
+Do NOT flag obvious PLACEHOLDER or redaction tokens, even when they sit exactly where a real
+secret would go. Treat these as already-redacted, never as leaks:
+- angle-bracket placeholders: <account-id>, <your-account>, <namespace-id>, <token>, <region>
+- template/example tokens: REDACTED, CHANGEME, xxxx/******, your-*, my-*, example.com, foo/bar
+A line like "TEMPORAL_NAMESPACE=ziggymart.<account-id>" or "guts.<account-id>.txt" is SAFE — the
+real value is not present. Judge only the literal text given; do not imagine the real value
+behind a placeholder, and ignore removed/old content (you only receive added lines).
 Respond with EXACTLY one line that is either "VERDICT: CLEAN" or "VERDICT: BLOCK". If BLOCK, add
 one bullet per finding beneath it.
 PROMPT
