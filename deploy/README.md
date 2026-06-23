@@ -24,7 +24,7 @@ kubectl apply -f deploy/argocd/root-app.yaml   # (Terraform can also do this in 
 
 | Path | State | Notes |
 |---|---|---|
-| `terraform/kind-config.yaml` | **concrete** | port maps for Temporal gRPC (7233) + OTLP (4318); Podman-friendly |
+| `terraform/kind-config.yaml` | **concrete** | port maps for Temporal gRPC (7233) + OTLP (4318) |
 | `terraform/versions.tf` | **concrete** | provider pins |
 | `terraform/main.tf`, `cloud.tf` | skeleton | provider blocks + resources with TODOs |
 | `argocd/root-app.yaml` | skeleton | app-of-apps pointing at `applications/` |
@@ -40,4 +40,4 @@ rollout semantics from `alexandreroman/temporal-versioning-demo`.
 ## Prerequisites
 
 kind, kubectl, helm, terraform, the Temporal Worker Controller (installed via Terraform/
-ArgoCD; depends on cert-manager). Container runtime: Podman or Docker.
+ArgoCD; depends on cert-manager). Container runtime: Docker.
