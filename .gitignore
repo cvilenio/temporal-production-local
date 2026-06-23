@@ -1,6 +1,5 @@
 # OS
 .DS_Store
-guts.<account-id>.txt
 
 # Python
 __pycache__/
@@ -10,6 +9,21 @@ __pycache__/
 venv/
 .env
 .env.*
+.pytest_cache/
+.ruff_cache/
+
+# Terraform (deploy/terraform)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+
+# Secrets / Temporal Cloud credentials (keep out of git)
+guts.<account-id>.txt
+*.key
+*.pem
+*-apikey*
 
 # IDE
 .idea/

@@ -1,0 +1,54 @@
+# Values for the official Temporal Helm chart (go.temporal.io/helm-charts).
+# Starting point adapted from alexandreroman/temporal-k8s — verify against the
+# chart version you pin in the Application. Backed by CloudNativePG (an external
+# Postgres the chart connects to), not the chart's bundled Cassandra/Postgres.
+#
+# Self-hosted backend for the local-k8s profile (ADR-0003). Sized for a ~16 GB host.
+
+server:
+  replicaCount: 1
+  config:
+    numHistoryShards: 4 # dev value; production uses 512+
+    persistence:
+      default:
+        driver: sql
+        sql:
+          driver: postgres12
+          host: temporal-postgresql-rw # CNPG read-write service
+          port: 5432
+          database: temporal
+          user: temporal
+          # password from the CNPG-generated secret; wire via existingSecret
+      visibility:
+        driver: sql
+        sql:
+          driver: postgres12
+          host: temporal-postgresql-rw
+          port: 5432
+          database: temporal_visibility
+  metrics:
+    prometheusEndpoint: "0.0.0.0:9090" # scraped via a PodMonitor (chart emits none)
+
+# Disable the bundled datastores — CNPG provides Postgres.
+cassandra:
+  enabled: false
+prometheus:
+  enabled: false
+grafana:
+  enabled: false # observability is a separate chart (kube-prometheus-stack + OTel)
+elasticsearch:
+  enabled: false
+
+schema:
+  createDatabase:
+    enabled: true
+  setup:
+    enabled: true
+  update:
+    enabled: true
+
+web:
+  enabled: true
+
+# First install pulls several images and runs schema jobs serially — bump the
+# Application/helm timeout to ~15m to avoid a spurious failure.

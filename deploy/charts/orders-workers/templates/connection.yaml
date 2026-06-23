@@ -1,0 +1,14 @@
+# Temporal Worker Controller Connection — how the managed workers reach the
+# frontend. Referenced by each WorkerDeployment below.
+# NOTE: confirm field names against your Worker Controller version (temporal.io/v1alpha1).
+apiVersion: temporal.io/v1alpha1
+kind: Connection
+metadata:
+  name: orders
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  hostPort: {{ .Values.connection.hostPort | quote }}
+  {{- if .Values.connection.tls }}
+  mutualTLSSecret: {{ .Values.connection.apiKeySecret | default "orders-temporal-tls" }}
+  {{- end }}

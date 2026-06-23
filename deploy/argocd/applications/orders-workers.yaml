@@ -1,0 +1,26 @@
+# Example Application — the versioned orders worker fleet (Worker Controller CRDs).
+# Copy this file per workload (temporal-server, observability, orders-api, console,
+# mock-api, codec-server) changing source.path and destination.namespace.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: orders-workers
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/cvilenio/temporal-platform-demo # TODO: confirm
+    targetRevision: main
+    path: deploy/charts/orders-workers
+    helm:
+      valueFiles:
+        - values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: orders
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

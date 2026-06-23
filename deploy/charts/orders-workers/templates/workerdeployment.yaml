@@ -1,0 +1,44 @@
+# One WorkerDeployment per worker profile. The controller injects
+# TEMPORAL_DEPLOYMENT_NAME + TEMPORAL_WORKER_BUILD_ID (Build ID = pod-template
+# hash) into each pod; orders_kernel.worker turns those into a
+# WorkerDeploymentConfig. Shipping a version = bump the image tag in values.yaml.
+# NOTE: confirm field names against your Worker Controller version (temporal.io/v1alpha1).
+{{- range .Values.workers }}
+---
+apiVersion: temporal.io/v1alpha1
+kind: WorkerDeployment
+metadata:
+  name: {{ .deploymentName }}
+  labels:
+    app.kubernetes.io/name: {{ .deploymentName }}
+    app.kubernetes.io/component: worker
+spec:
+  connection: orders                     # -> Connection above
+  workerOptions:
+    temporalNamespace: {{ $.Values.connection.temporalNamespace | quote }}
+    deploymentName: {{ .deploymentName | quote }}
+  replicas: {{ .replicas }}
+  rollout:
+    strategy: {{ $.Values.rollout.strategy }}
+  sunset:
+    scaledownDelay: {{ $.Values.sunset.scaledownDelay | quote }}
+    deleteDelay: {{ $.Values.sunset.deleteDelay | quote }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .deploymentName }}
+    spec:
+      containers:
+        - name: worker
+          image: "{{ .image.repository }}:{{ .image.tag }}"
+          command: {{ .command | toJson }}
+          env:
+            - name: TEMPORAL_ADDRESS
+              value: {{ $.Values.connection.hostPort | quote }}
+            - name: TEMPORAL_NAMESPACE
+              value: {{ $.Values.connection.temporalNamespace | quote }}
+            - name: TEMPORAL_TLS
+              value: {{ $.Values.connection.tls | quote }}
+            # TEMPORAL_DEPLOYMENT_NAME and TEMPORAL_WORKER_BUILD_ID are injected
+            # by the Worker Controller — do not set them here.
+{{- end }}

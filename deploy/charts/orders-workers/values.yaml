@@ -1,0 +1,37 @@
+# Connection to the Temporal frontend. Self-hosted-on-kind by default; for Cloud,
+# set tls/apiKeySecret and point hostPort at the Cloud endpoint (ADR-0003/0005).
+connection:
+  hostPort: temporal-frontend.temporal.svc:7233
+  temporalNamespace: ziggymart
+  tls: false
+  # apiKeySecret: orders-cloud-apikey   # (cloud) secret holding the API key
+
+# Rollout strategy for every WorkerDeployment:
+#   Manual      — versions register Inactive; a UI/SDK promotes/ramps them.
+#   Progressive — the controller ramps automatically (GitOps owns the rollout).
+rollout:
+  strategy: Manual
+
+# Keep drained versions alive long enough that rollback routes to a live worker.
+sunset:
+  scaledownDelay: 30m
+  deleteDelay: 2h
+
+# One entry per worker profile (mirrors orders_kernel.worker.WORKER_PROFILES and
+# apps/workers/python/<name>/). Each profile is its own image (the entrypoint is
+# baked at build time via APP_PATH), so each gets its own image tag = version.
+workers:
+  - name: workflow
+    deploymentName: orders-workflow
+    replicas: 1
+    image:
+      repository: ghcr.io/cvilenio/orders-worker-workflow
+      tag: "1.0" # bump to ship a new version
+    command: ["python", "main.py"]
+  - name: activity
+    deploymentName: orders-activity
+    replicas: 2
+    image:
+      repository: ghcr.io/cvilenio/orders-worker-activity
+      tag: "1.0"
+    command: ["python", "main.py"]
