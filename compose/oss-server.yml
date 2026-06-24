@@ -94,6 +94,12 @@ services:
       start_period: 30s
 
   # ── Temporal cluster: namespace + search-attribute bootstrap (one-shot) ───
+  #
+  # NON-PROD CONVENIENCE. These one-shot containers stand in for declarative
+  # delivery locally. The search-attribute set is rendered from the shared spec
+  # (config/temporal/namespaces.yaml) by `poe up`, so it stays in lockstep with
+  # the Cloud namespaces. The production-grade equivalent on kind is an
+  # Argo-managed bootstrap Job rendered from the SAME spec (see ADR-0007).
   temporal-create-namespace:
     image: temporalio/admin-tools:${TEMPORAL_ADMINTOOLS_VERSION}
     container_name: temporal-create-namespace
@@ -121,15 +127,11 @@ services:
       - TEMPORAL_ADDRESS=temporal:7233
     networks:
       - temporal-network
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - >
-        until temporal operator search-attribute list --namespace ziggymart; do
-          echo "Waiting for namespace ziggymart..."; sleep 2;
-        done;
-        temporal operator search-attribute create --name OrderId     --type Text    --namespace ziggymart || true;
-        temporal operator search-attribute create --name TraceId     --type Text    --namespace ziggymart || true;
-        temporal operator search-attribute create --name OrderStatus --type Keyword --namespace ziggymart || true;
+    volumes:
+      - ./compose/scripts:/scripts
+      - ./config/temporal:/spec:ro
+    entrypoint: ["/bin/sh"]
+    command: /scripts/bootstrap-search-attributes.sh
     restart: on-failure:5
 
   # ── Temporal cluster: Web UI ──────────────────────────────────────────────

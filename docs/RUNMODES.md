@@ -48,6 +48,8 @@ modes** (they share host ports and one Compose project).
 - **`compose/oss-server.yml`** — the OSS backend *layer*: Temporal server + its Postgres +
   schema/namespace/search-attribute bootstrap + Web UI, and re-attaches the apps'
   `depends_on: temporal`. Omit it to run against Cloud.
+- **`config/temporal/namespaces.yaml`** — shared namespace/search-attr/retention spec; the
+  single source of truth read by both Cloud (Terraform) and OSS (the bootstrap renderer).
 - **`config/local-oss.env`** — local-OSS connection profile (tracked; no secrets).
 - **`.secrets/keys/cloud-{nonprod,prod}.env`** — Cloud profiles (git-ignored; hold the
   worker API key). Generated from `deploy/terraform/layers/cloud` outputs.
@@ -69,13 +71,24 @@ payments-nonprod    payments-prod       # a future domain — just add map keys
 ```
 
 Convention: `<domain>-<env>`. Each entry gets its own namespace + least-privilege worker
-service account + API key. A new business case = new keys in the `namespaces` map + its own
-app stack (its own `TEMPORAL_NAMESPACE` profile); the orders app is simply the first domain.
+service account + API key. A new business case = add it to the shared spec (below) + add its
+Cloud overlay entries + its own app stack (its own `TEMPORAL_NAMESPACE` profile); the orders
+app is simply the first domain.
 
-Custom **search attributes** per namespace are part of namespace setup: declared in the
-cloud layer (`search_attributes` map → `temporalcloud_namespace_search_attribute`) and
-applied by Terraform. OSS does the equivalent automatically via the
-temporal-search-attributes bootstrap container.
+## One spec, no Cloud↔OSS drift
+
+Namespace identity, custom **search attributes**, and per-env retention live once in
+`config/temporal/namespaces.yaml` — the single source of truth both backends read (ADR-0007):
+
+- **Cloud:** `deploy/terraform/layers/cloud` reads the spec via `yamldecode()` and merges a
+  Cloud-only overlay (`cloud_overlay`: service account, API key, regions) on top.
+- **OSS (Compose):** `poe up` runs `compose/scripts/render-oss-bootstrap.py` to render the
+  spec to a shell file the `temporal-search-attributes` container loops over.
+
+The Compose bootstrap containers are a **non-prod local convenience**. The production-grade
+equivalent on kind is an **Argo-managed Job rendered from the same spec** (ADR-0007), with
+OSS auth (mTLS + JWT) as a follow-on (ADR-0008). Edit a search attribute once in the spec and
+it surfaces in both the Cloud `terraform plan` and the next OSS `poe up`.
 
 ## When kind replaces Compose-OSS
 

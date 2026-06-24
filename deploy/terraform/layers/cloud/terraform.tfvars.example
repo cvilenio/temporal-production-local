@@ -4,20 +4,16 @@
 # account_id is NOT set here — it is account-identifying. Supply it via
 # TF_VAR_account_id by sourcing .secrets/account.env before terraform commands.
 
-# Keyed by full namespace name (<domain>-<env>). Add new business domains as new
-# keys, e.g. payments-nonprod / payments-prod.
-namespaces = {
+# Cloud-ONLY overlay, keyed by full namespace name (`<domain>-<env>`). The SHARED
+# config (retention, search attributes) lives in config/temporal/namespaces.yaml
+# and is merged in via locals — do NOT repeat it here. To add a business domain,
+# add it to the spec, then add one overlay entry per env below (e.g.
+# payments-nonprod / payments-prod).
+cloud_overlay = {
   "ziggymart-nonprod" = {
-    retention_days       = 14
     service_account_name = "orders-workers-nonprod"
     api_key_display_name = "orders-workers-nonprod-key"
     api_key_expiry_time  = "2027-06-23T00:00:00Z"
-    # Orders workload's custom search attributes (the OrderWorkflow upserts these).
-    search_attributes = {
-      OrderId     = "Text"
-      TraceId     = "Text"
-      OrderStatus = "Keyword"
-    }
     # create_api_key     = true             # default; false → mint via tcld out-of-band
     # namespace_permission = "write"         # default
     # account_access     = "read"            # default
@@ -25,14 +21,8 @@ namespaces = {
   }
 
   "ziggymart-prod" = {
-    retention_days       = 30
     service_account_name = "orders-workers-prod"
     api_key_display_name = "orders-workers-prod-key"
     api_key_expiry_time  = "2027-06-23T00:00:00Z"
-    search_attributes = {
-      OrderId     = "Text"
-      TraceId     = "Text"
-      OrderStatus = "Keyword"
-    }
   }
 }

@@ -1,0 +1,40 @@
+# =============================================================================
+# Temporal platform spec — single source of truth for namespace identity,
+# custom search attributes, and per-env retention.
+#
+# Backend-agnostic ON PURPOSE. Both backends read THIS file so they cannot drift:
+#   - Temporal Cloud : deploy/terraform/layers/cloud reads it via yamldecode()
+#     and maps each domain×env to a `<domain>-<env>` Cloud namespace, merging a
+#     small Cloud-only overlay (service account, API key, regions) on top.
+#   - Local OSS      : compose/scripts/render-oss-bootstrap.py renders it to a
+#     shell-friendly file that the bootstrap container loops over (no yq/jq in
+#     the admin-tools image). On kind this same file feeds an Argo-managed Job.
+#
+# The Cloud/OSS provisioning *mechanisms* differ by necessity (Cloud namespaces
+# are control-plane SaaS objects; OSS namespaces live in the running frontend) —
+# see ADR-0007. This spec keeps the *config* identical regardless.
+#
+# Naming: Cloud uses `<domain>-<env>` (one account, many namespaces). Local OSS
+# uses the bare `<domain>` (the cluster IS the env), so the OSS renderer picks a
+# single env per cluster (default: nonprod).
+# =============================================================================
+
+domains:
+  ziggymart:
+    # Orders workload's custom search attributes (OrderWorkflow upserts these).
+    # The drift-prone bit: previously duplicated in oss-server.yml AND tfvars.
+    search_attributes:
+      OrderId: Text
+      TraceId: Text
+      OrderStatus: Keyword
+    environments:
+      nonprod:
+        retention_days: 14
+      prod:
+        retention_days: 30
+
+# How the local OSS cluster maps onto the spec. The cluster is a single
+# environment, so it provisions one bare-named namespace per domain.
+oss:
+  # Which env's retention the local OSS namespace mirrors.
+  environment: nonprod
