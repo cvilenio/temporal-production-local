@@ -8,7 +8,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/cvilenio/temporal-platform-demo # TODO: confirm
+    repoURL: https://github.com/cvilenio/temporal-production-local
     targetRevision: main
     path: deploy/argocd/applications
     directory:
