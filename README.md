@@ -1,151 +1,334 @@
-# Temporal Retail Demo
+# temporal-production-local
 
-This repository contains a full end-to-end demonstration of a retail order processing workflow orchestrated by Temporal, along with a mock external API and a real-time console.
+> A production-shaped Temporal platform that runs entirely on your machine — `kind` +
+> Terraform + ArgoCD, backed by Temporal Cloud. GitOps delivery, worker versioning, an
+> observability and operator-visibility plane, and a real workflow use case — with the
+> reasoning behind each choice made explicit.
 
-It is designed to showcase how Temporal solves the problem of **ambiguous side-effects** (e.g. an external API times out, but you aren't sure if it succeeded), **saga compensation**, **signal-driven cancellation**, and **dead-letter handling**.
+## What this is
 
-> **Layout & design:** this README documents the demo's behavior. For the repository
-> structure (shared-kernel polyglot monorepo), the kind + Terraform + ArgoCD lifecycle,
-> worker versioning, and the Temporal Cloud switch, see
-> [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and the ADRs in [`docs/adr/`](docs/adr/).
-> Apps live under `apps/` (grouped by class: `temporal/`, `business/`, `demo/`), shared
-> code under `libs/`, deployment under `deploy/`.
+`temporal-production-local` is an opinionated, end-to-end example of running Temporal the
+way a real platform team would — assembled into a single repository you can clone, stand
+up locally, and tinker with freely.
 
-## Architecture
+Everything runs in a local Kubernetes cluster (`kind`). The one piece that lives in the
+real world is the Temporal Service itself, provided by Temporal Cloud. The goal is to get
+as close to a genuine production deployment as possible without provisioning (or paying
+for) cloud infrastructure beyond Temporal Cloud.
 
-![Architecture](https://via.placeholder.com/800x400.png?text=Retail+Demo+Architecture)
+This is one way to build a production Temporal platform — not the only way, and not a
+canonical reference. It encodes a set of deliberate choices about tooling, structure, and
+operational practice, with the reasoning made explicit so you can adopt, adapt, or argue
+with it.
 
-### Order ID Model
+## Why it exists
 
-This demo uses a single customer-friendly order ID that replaces both a UUIDv7 internal key and a separate display ID:
+This repository began as an onboarding capstone: a hands-on way to explore and demonstrate
+production readiness — the domain I own as a Platform Architect at Temporal — by actually
+building it rather than reading about it.
 
-1. **Order ID:** Format `ORD-{16 Crockford Base32 chars}` (e.g. `ORD-01K8XYZ1A2B3C4D5`), 20 characters total.
-   - **Time-sortable:** First 10 chars encode a 48-bit millisecond timestamp (lexical sort = chronological sort).
-   - **Customer-friendly:** Crockford Base32 excludes ambiguous characters (`I`, `L`, `O`, `U`) so `0` and `O` can't be confused when read aloud to a support rep.
-   - **Collision-resistant:** Final 6 chars encode a 32-bit random value (~4.3B unique IDs per millisecond).
-   - Used directly as both the Postgres primary key and the Temporal search attribute (`OrderId`).
-2. **Workflow ID:** A separate column in the `orders` table that stores the Temporal workflow handle. Today it mirrors the order ID, but maintaining it as a distinct field leaves room to change the ID strategy later without touching the workflow lookup path.
-3. **Trace ID:** A W3C-compliant 32-character hex string representing the distributed trace, stored in Postgres and mapped to the `TraceId` search attribute in Temporal.
+It is intended to outlive that original purpose. Two audiences:
 
-The system consists of five primary components:
-1. **Orders Service:** A FastAPI application exposing endpoints to start, track, and cancel orders.
-2. **Workflow Worker:** A dedicated worker polling `orders-workflow-task-queue`. It hosts the deterministic `OrderWorkflow` orchestration logic.
-3. **Activity Worker:** A dedicated worker polling `orders-activity-task-queue`. It hosts all non-deterministic side-effects (API calls, DB persistence).
-4. **Mock API:** A standalone service simulating external systems (Payment, Inventory, Shipping). It enforces idempotency via headers and conditionally injects latency to simulate failures.
-5. **Retail Demo Console:** A real-time UI that allows you to submit batches of orders and monitor their progress via SSE (Server-Sent Events) fed directly from the business database.
-6. **Postgres (Orders DB):** Stores the actual `orders` table. The activities transactionally write to this database.
+- **Me** — a living workbench for exploring SDK behavior, versioning strategy, worker
+  tuning, observability, and operational patterns across the Temporal stack.
+- **Anyone working with production Temporal** — a concrete, runnable reference for how the
+  pieces fit together, useful when onboarding to an account or reasoning about a
+  customer's setup.
 
-### Worker Topology & Best Practices
+## Scope and philosophy
 
-This demo illustrates the best practice of separating **Workflows** and **Activities** into dedicated worker fleets. While they share the same codebase and container image, they are started with different roles:
+A few principles shape what belongs here and what doesn't.
 
-- **Workflow Worker (`--role workflow`):** CPU-bound, handles orchestration. It benefits from "Sticky Execution" (caching workflow state in memory).
-- **Activity Worker (`--role activity`):** IO-bound, handles side-effects. It can be scaled independently to handle heavy external API traffic without starving the workflow orchestrator.
+**Production-shaped, fully local.** Every component is wired the way it would be in
+production — GitOps delivery, declarative infrastructure, observability, encryption,
+access control — and the entire stack stands up on a laptop. Where local and production
+genuinely diverge, the divergence is documented rather than hidden.
 
-These workers communicate via separate Task Queues (`orders-workflow-task-queue` and `orders-activity-task-queue`), allowing for precise task routing and isolation.
+**Temporal Cloud is the real backend.** The repository integrates against an actual
+Temporal Cloud namespace. This keeps the integration honest: real TLS, real namespace
+configuration, real codec endpoint registration, real per-user access semantics.
 
-### The "Three-Layer Write" Pattern
-This demo explicitly highlights a production-grade activity pattern. For every logical step (e.g. "Create Shipment"), the workflow executes three distinct activities:
-1. `create_shipment` - External call to the mock API.
-2. `persist_shipment` - Local database update to Postgres.
-3. `update_customer_status` - Atomically updates the order's status and customer-facing message.
+**Opinionated, with reasoning shown.** Tooling choices (`kind`, Terraform, ArgoCD) are
+deliberate and explained. The intent is not to be exhaustive about every possible
+toolchain, but to be coherent and defensible about one.
 
-Each of these has its own independently tuned Retry Policy.
+**Honest about its edges.** This is not a deployment running on real cloud compute, and it
+doesn't pretend to be. The value is in the shape and wiring of a production system, made
+fully reproducible and tunable on a single machine. The status table below states plainly
+what is built and proven versus what is still planned — nothing here is claimed working
+that isn't.
 
-## Prerequisites
-- Docker & Docker Compose
-- `uv` (optional, for local Python development)
+---
 
-## Running the Demo
+## What's built today vs. planned
 
-Start the entire stack using Docker Compose:
+This project is built in checkpoints (see `ai_checkpoints/`). The single proven,
+end-to-end path is **kind workers + Temporal Cloud**. Be guided by this table, not by the
+vision above:
 
-```bash
-docker compose up -d
-```
+| Capability | Status |
+|---|---|
+| **kind workers → Temporal Cloud** (ArgoCD + Worker Controller, digest-pinned) | ✅ **working — the flagship path**, live-verified |
+| Terraform control plane (kind cluster, Cloud namespaces + API keys, ArgoCD) | ✅ working |
+| GitOps delivery + worker versioning (Worker Deployment / Build IDs) | ✅ working |
+| Operator visibility plane (console aggregating Temporal UI, Headlamp, ArgoCD UI) | ✅ working (kind + Cloud) |
+| Local OCI delivery + offline-resumable cluster (zot, stop/start) | ✅ working |
+| Retail order workflow (saga, signals, idempotent vs. write-then-verify retries) | ✅ working |
+| **Observability / metrics on kind** | 🚧 **not wired / unproven** — metrics have only been exercised on the Compose-OSS path; treat kind metrics as not yet working |
+| App tier (orders API, mock API, console) on kind | 🚧 planned — runs in Compose today |
+| Self-hosted Temporal **server** on kind (the OSS backend) | 🚧 planned — not wired |
+| Polyglot workers (Go / TypeScript / Java) | 🚧 planned — Python only today; the layout is polyglot-ready |
+| Encryption codec + codec server (client-side decode, per-user access) | 🧱 scaffold only — placeholder codec; replace with real AEAD before any sensitive use (ADR-0006) |
+| Codec proxy (payload encoding at the proxy layer) | 🚧 planned |
+| Alerting | 🚧 planned |
 
-### Available Services
+### Run-mode matrix
 
-| Service | URL | Purpose |
-|---|---|---|
-| **Demo Console** | http://localhost:8086 | The main operator UI. Trigger orders and watch real-time status. |
-| **Temporal UI** | http://localhost:8082 | View the workflow execution history and event logs. |
-| **pgweb (Orders)** | http://localhost:8083 | Inspect the `orders` table in Postgres. |
-| **pgweb (Temporal)** | http://localhost:8084 | Inspect Temporal's internal backing store. |
+"Apps" run on your laptop; "backend" is where the Temporal Service itself lives.
 
-## Operator Observability
+| Apps run on | Temporal backend  | Command                                  | Status |
+|-------------|-------------------|------------------------------------------|--------|
+| **kind**    | **Temporal Cloud**| `just platform-up` + `just up-cloud`     | ✅ **the supported path** |
+| Compose     | Local OSS server  | `just up`                                | ⚠️ workflow runs; see caveat below |
+| Compose     | Temporal Cloud    | `just up-cloud`                          | ⚠️ workflow runs; see caveat below |
+| kind        | Local OSS server  | (in-cluster `temporal-server` chart)     | 🚧 planned — not wired |
 
-This demo uses **Temporal Search Attributes** to surface business state in the platform UI.
+> **Compose caveat (important).** The Compose paths still start and run the order
+> workflow, and Compose-OSS is the only place metrics have been exercised. **But the demo
+> console has evolved toward the cluster plane** — it now carries Headlamp and ArgoCD tabs
+> that are inert without a kind cluster, and its run-mode awareness is tuned for the
+> kind + Cloud path. Treat Compose as a workflow/SDK quick-start, **not** a polished
+> end-to-end demo. The console is not (yet) tailored back to Compose.
 
-- **OrderId**: The order ID (e.g. `ORD-01K8XYZ1A2B3C4D5`).
-- **OrderStatus**: The current lifecycle status (e.g. `inventory_reserved`, `cancelled_with_issues`).
-- **TraceId**: The W3C trace ID for end-to-end tracing.
+---
 
-Operators can filter workflows in the Temporal Web UI using these attributes (e.g., `OrderStatus = "cancelled_with_issues"`) to identify workflows requiring manual intervention.
+## Getting started: 0 → kind workers on Temporal Cloud
 
-## Demo Scenarios
+This is the supported path. Budget ~15–20 minutes the first time (image builds and the
+initial registry warm-up dominate). Every step is idempotent and safe to re-run.
 
-From the **Demo Console (http://localhost:8086)**, navigate to the Orders page.
+### 1. Prerequisites
 
-### Happy Path
-1. Select **"Happy Path"** and click **"Trigger scenarios"**. The order will complete in milliseconds.
+Install these CLIs (Homebrew names in parentheses):
 
-### Shipping Response Lost (Ghost Label)
-2. Select **"Shipping Response Lost"** and click **"Trigger scenarios"**.
-   - The mock API hangs on the first call, exceeding Temporal's `start_to_close_timeout` (3s).
-   - The label was actually created in the background, so the workflow's read-after-write verification finds it and recovers.
+- **Docker** (`docker`) with Docker Desktop or an equivalent daemon running.
+- **kind** (`kind`) — local Kubernetes in Docker.
+- **kubectl** (`kubectl`).
+- **Terraform** ≥ 1.6 (`terraform`).
+- **Helm** (`helm`).
+- **crane** (`crane`, from `go-containerregistry`) — reads image digests for pinning.
+- **jq** (`jq`).
+- **just** (`just`) — the task front door.
+- **uv** (`uv`) — the Python toolchain/runner.
 
-### Shipping Timeout Recovered on Retry (Flaky API)
-3. Select **"Shipping Timeout Recovered on Retry"** and click **"Trigger scenarios"**.
-   - The mock API hangs on the first call, causing a Temporal timeout.
-   - Verification finds no label, so the workflow explicitly retries the create activity.
-   - The second attempt succeeds and the workflow continues.
+You also need a **Temporal Cloud account** and a **bootstrap API key** with account-level
+(namespace-admin) scope. Generate one in the Temporal Cloud UI (*Settings → API Keys*) or
+with `tcld apikey create`.
 
-### Shipping Unrecoverable (Lost Label)
-4. Select **"Shipping Timeout Unrecoverable"** and click **"Trigger scenarios"**.
-   - The mock API hangs twice. After two cycles of timeout + verify (not_found), the workflow gives up.
-   - The workflow runs **saga compensation**: it calls `release_inventory` to undo the reservation.
-   - The order transitions to `shipping_failed`.
+> **Why a bootstrap key?** Terraform uses it once to create your namespaces and to mint the
+> least-privilege *worker* API keys the workers actually run with. The bootstrap key is
+> never committed and never reaches the cluster.
 
-### Inventory Flaky (Temporal Retry Policy)
-5. Select **"Inventory Flaky (Temporal Retry)"** and click **"Trigger scenarios"**.
-   - The inventory service returns transient 503 errors on the first two attempts.
-   - Temporal's **Retry Policy** automatically handles these retries under the hood (visible in the History UI).
-   - The third attempt succeeds without the workflow being aware of the flakiness.
+### 2. Put your Cloud credentials in `.secrets/` (never committed)
 
-### Batch Cancellation
-6. Submit any mixed batch, then on the **Tracking** page click **"Cancel All In-Flight"** on a batch.
-   - The backend sends a `cancel_order` signal to every in-flight workflow.
-   - Each signalled workflow runs its saga compensation stack and transitions to `cancelled`.
-
-## Retry Patterns in This Workflow
-
-This demo showcases two distinct ways to handle retries:
-
-1. **Temporal Retry Policy:** Used where the external API is **idempotent** (like our Payment and Inventory mocks). If an activity fails with a retryable error, Temporal handles the backoff and retry transparently.
-2. **Workflow-Level Explicit Retries:** Used where the external API is **non-idempotent** or brittle (like our Shipping mock). To prevent duplicate side-effects (e.g., double-charging or double-shipping), the workflow follows a "Write-then-Verify" pattern, manually checking the status before deciding whether it is safe to retry the write.
-
-## Failure Injection
-
-The mock API uses deterministic payload magic strings to trigger failures:
-
-| Trigger | Where | Failure Mode |
-|---|---|---|
-| `Ghost` in address | `POST /shipping/request` | Hang once (write lands), then succeed (read-after-write demo) |
-| `Flaky` in address | `POST /shipping/request` | Hang once (no write), then succeed on second create attempt |
-| `Lost` in address | `POST /shipping/request` | Hang always (no write, triggers saga after 2 cycles) |
-| `Flaky` in item_id | `POST /inventory/reserve` | Return 503 twice, then 200 (retry policy demo) |
-
-## Troubleshooting
-
-If you are upgrading from a previous version, wipe your local volumes:
+The `.secrets/` directory is git-ignored except for its layout placeholders. Create two
+small env files there:
 
 ```bash
-docker compose down -v
+# Your Temporal Cloud account id (the short suffix), kept out of git.
+echo 'export TF_VAR_account_id=<your-account-id>' > .secrets/account.env
+
+# Your bootstrap (account-admin) API key, read by the Terraform provider.
+echo 'export TEMPORAL_CLOUD_API_KEY=<your-bootstrap-key>' > .secrets/keys/bootstrap.env
+
+chmod 700 .secrets
 ```
 
-## What is excluded?
-- **External Pub-Sub:** Notifications use direct Postgres writes for demo simplicity.
+See [`.secrets/README.md`](.secrets/README.md) for the full layout and the rule that this
+directory holds the only copy of some secrets (Terraform state lives here too).
 
-A **Codec Server** scaffold is now included (`apps/codec-server/`, ADR-0006) — replace its
-placeholder codec with AEAD before any real use.
+### 3. Provision Temporal Cloud (namespaces, worker keys, search attributes)
+
+This is the **control-plane base layer**. It pulls only the `temporalcloud` provider and
+needs no cluster present.
+
+```bash
+cd deploy/terraform/layers/cloud
+cp terraform.tfvars.example terraform.tfvars   # git-ignored; edit the overlay if you like
+source ../../../../.secrets/account.env        # TF_VAR_account_id
+source ../../../../.secrets/keys/bootstrap.env # TEMPORAL_CLOUD_API_KEY
+
+terraform init
+terraform plan -out=cloud.plan
+terraform apply cloud.plan
+cd -
+```
+
+This creates the `ziggymart-nonprod` / `ziggymart-prod` namespaces, a least-privilege
+worker service account + API key per namespace, and the `OrderId` / `OrderStatus` /
+`TraceId` custom search attributes — all from the shared spec in
+`config/temporal/namespaces.yaml`. State is written to `.secrets/terraform/cloud.tfstate`
+and **contains the worker API key in plaintext** — treat it as a credential. Full detail:
+[`deploy/terraform/layers/cloud/README.md`](deploy/terraform/layers/cloud/README.md).
+
+### 4. Bring up the kind cluster and deploy the workers
+
+One command does the whole local lifecycle: create the kind cluster + local OCI registry,
+mirror third-party charts, run the CI gate (lint, typecheck, test, build + push worker
+images), publish the workers Helm chart, pin the workers by image digest, and apply the
+cluster Terraform layer (which reads the Cloud layer's state, writes the worker API key as
+a Kubernetes Secret, and seeds the ArgoCD Applications):
+
+```bash
+just platform-up
+```
+
+The cluster layer wires the workers to Cloud automatically — it reads the **regional**
+Cloud endpoint and the worker API key from the Cloud layer's outputs and injects them via
+a Secret that the Worker Controller mounts. By default the cluster mirrors the
+`ziggymart-nonprod` namespace. The workers are delivered as a
+`temporal.io/WorkerDeployment`, so the deployed version is content-addressed by digest.
+
+Verify the workers reconciled:
+
+```bash
+just k get applications -n argocd            # orders-workers should be Synced/Healthy
+just k get pods -n orders                    # workflow + activity worker pods Running
+```
+
+### 5. Bring up the app tier (Compose) pointed at the same Cloud namespace
+
+The orders API, mock external API, and console run in Compose for now. Point them at your
+Cloud namespace by writing a worker connection profile from the Cloud layer outputs, then
+start the stack:
+
+```bash
+# Derive the nonprod connection profile from the Cloud layer outputs.
+cd deploy/terraform/layers/cloud
+cat > ../../../../.secrets/keys/cloud-nonprod.env <<EOF
+export TEMPORAL_ADDRESS=$(terraform output -json endpoints          | jq -r '.["ziggymart-nonprod"]')
+export TEMPORAL_NAMESPACE=$(terraform output -json namespace_handles | jq -r '.["ziggymart-nonprod"]')
+export TEMPORAL_TLS=true
+export TEMPORAL_API_KEY=$(terraform output -json api_key_tokens     | jq -r '.["ziggymart-nonprod"]')
+EOF
+cd -
+
+just up-cloud          # app tier, sourcing the profile above
+just headlamp-reload   # nudge the cluster explorer to pick up the kubeconfig (optional)
+```
+
+> **Known edge — two worker fleets.** `just up-cloud` currently also starts the Compose
+> worker containers, which poll the **same** Cloud namespace and task queues as the kind
+> workers. Orders still complete, but either fleet may execute them — so this does not by
+> itself *prove* the kind workers did the work. Until a Compose app-tier-only override
+> lands, confirm execution on the kind side with
+> `just k logs -n orders -l app.kubernetes.io/name=orders-activity` (or watch the kind
+> pods) rather than assuming.
+
+### 6. Open the consoles and run an order
+
+| UI | URL | What it is |
+|---|---|---|
+| **Demo Console** | http://localhost:8086 | Operator UI — trigger orders, watch live status, jump to every other UI. |
+| **ArgoCD** | http://localhost:8088 | GitOps delivery state for the workers (framed via the console). |
+| **Headlamp** | http://localhost:8087 | Kubernetes cluster explorer (pods, logs) for the kind cluster. |
+| **Temporal Cloud UI** | (link-out from the console) | Workflow history — the hosted Cloud UI opens in a new tab. |
+
+From the **Demo Console**, open the Orders page, select **"Happy Path"**, and click
+**Trigger scenarios**. The order is orchestrated by the kind workers against your Cloud
+namespace; watch it complete in the console and inspect its history in the Cloud UI.
+
+> Metrics/observability (Grafana) are wired only on the Compose-OSS path today and are
+> **not** yet proven on kind — see the status table.
+
+### Going offline (planes, demos with no network)
+
+A *warmed* cluster runs fully offline — **stop, don't delete**:
+
+```bash
+just cluster-stop     # docker stop nodes + registry; all state preserved
+# ... offline ...
+just cluster-start    # resumes with zero network
+```
+
+`just cluster-down` deletes the cluster (for reclaiming resources) and a deleted cluster
+**cannot** be recreated offline. The air-gap contract is detailed in
+[`docs/RUNMODES.md`](docs/RUNMODES.md) and ADR-0013.
+
+---
+
+## Other run modes
+
+The fastest path to *see the workflow run* — no Kubernetes, self-hosted Temporal in
+Compose (read the Compose caveat above first):
+
+```bash
+just up        # local OSS Temporal server + app + LGTM observability
+just down      # stop and drop volumes
+```
+
+Or run the app tier in Compose against Temporal Cloud (no kind): `just up-cloud`. The full
+backend × topology matrix, the connection-profile contract, and the direnv footgun are
+documented in [`docs/RUNMODES.md`](docs/RUNMODES.md).
+
+---
+
+## What the workflow demonstrates
+
+The retail `OrderWorkflow` is intentionally built to show production patterns, not a toy
+happy path:
+
+- **Three-layer write per step.** Each logical step (e.g. "create shipment") is three
+  independently-retried activities: the external call, the Postgres persist, and the
+  customer-facing status update.
+- **Idempotent vs. non-idempotent retries.** Idempotent external calls (payment,
+  inventory) lean on the **Temporal retry policy**; the non-idempotent shipping call uses
+  a **workflow-level write-then-verify** loop to avoid duplicate side-effects.
+- **Saga compensation** on unrecoverable failure (e.g. release reserved inventory).
+- **Signal-driven cancellation** of in-flight orders, with compensation.
+- **Search attributes** (`OrderId`, `OrderStatus`, `TraceId`) so operators can filter
+  workflows by business state.
+- **Deterministic failure injection** via magic strings in the order payload (`Ghost`,
+  `Flaky`, `Lost`) to reproduce ambiguous-side-effect, transient-503, and
+  unrecoverable-timeout scenarios on demand.
+
+The full scenario walk-through lives in [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md). The
+order-ID model and worker topology are described in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+---
+
+## Repository layout
+
+```
+apps/        Thin deployment units, grouped by class: temporal/ (workers, codec scaffold),
+             business/ (orders API), demo/ (console, mock API).
+libs/        Shared-kernel code apps import (the orders domain: workflows, activities,
+             clients, DB, telemetry). Polyglot-ready; Python today.
+images/      One configurable Dockerfile per language.
+deploy/      How it ships: terraform/ (control plane), argocd/ (app-of-apps), charts/.
+config/      Connection profiles + the shared namespace/dependency specs.
+compose/     Self-hosted Temporal + observability for the no-Kubernetes quick-start.
+docs/        ARCHITECTURE.md, RUNMODES.md, DEMO_SCRIPT.md, SHIP_PLAN.md, and adr/.
+ai_checkpoints/  Cross-session work log (read newest-first for current state).
+```
+
+---
+
+## Documentation map
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the durable target design (two planes,
+  connection profiles, worker versioning, observability model).
+- [`docs/RUNMODES.md`](docs/RUNMODES.md) — every run mode, backend selection, the offline
+  contract.
+- [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md) — the guided scenario walk-through.
+- [`docs/SHIP_PLAN.md`](docs/SHIP_PLAN.md) — a sample 30–60 day Cloud rollout plan.
+- [`OBSERVABILITY.md`](OBSERVABILITY.md) — the observability model (proven on Compose-OSS;
+  see the status table for kind).
+- [`docs/adr/`](docs/adr/) — numbered decision records (the *why* behind each choice).
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — commit conventions and contribution flow.
+
+---
+
+*This is a personal project built to explore and demonstrate production Temporal patterns.
+It is not an official Temporal reference implementation.*
