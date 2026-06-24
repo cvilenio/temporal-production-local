@@ -1,7 +1,8 @@
 # 0004 — Temporal Cloud base layer + swappable run modes
 
-- **Status:** **LANDED (2026-06-23).** Two Cloud namespaces live; `happy_path` order verified
-  end-to-end against Cloud nonprod; Compose split into backend-agnostic base + OSS layer.
+- **Status:** **LANDED (2026-06-23, committed `55b2e60`).** Two Cloud namespaces live;
+  `happy_path` order verified end-to-end against Cloud nonprod; Compose split into
+  backend-agnostic base + OSS layer. Account id redacted from all git history (force-pushed).
 - **Date:** 2026-06-23
 
 ## Done this session
@@ -29,6 +30,19 @@
   tracks only the README + `.gitkeep`s; `.dockerignore` updated. Cloud-layer local backend
   writes `.secrets/terraform/cloud.tfstate`. State recovery = `terraform import` (Cloud is
   source of truth) + rotate the key (secret not recoverable); see `layers/cloud/README.md`.
+- **Account id** lives only in `.secrets/account.env` (git-ignored): `TF_VAR_account_id`
+  feeds `var.account_id` (no committed default). Source it before any terraform command in
+  `layers/cloud`. Tracked files/docs use the `<account-id>` placeholder.
+
+### Security / git hygiene
+- The real account id (`<account-id>`) had leaked into committed history (pre-existing files +
+  this session's drafts) and was **already pushed**. Redacted across all 25 commits with
+  `git filter-repo --replace-text` (→ `<account-id>`) and **force-pushed** `main`. Verified:
+  0 occurrences in any local/remote ref or reflog; old objects gc'd. Repo is PRIVATE, 0 forks.
+  Residual: GitHub may retain unreachable old SHAs until it GCs (low risk; ask Support to
+  expedite if needed). It's an account *identifier*, not a credential — keys were never committed.
+- Pre-commit guard (`.githooks/pre-commit`) taught to ignore obvious placeholder/redaction
+  tokens (`<account-id>`, `REDACTED`, `example.com`, …) so it stops flagging its own redactions.
 
 ### Compose: backend-agnostic base + OSS layer + poe
 - `docker-compose.yml` is now apps/workers/observability only; `TEMPORAL_*` via
@@ -66,7 +80,11 @@
 
 ## Next
 - Quick `poe up` OSS smoke test (only `docker compose config` was validated this session).
+- Tidy cosmetic residual: the history redaction mangled a `.gitignore` glob into
+  `*.<account-id>.txt` (a dead literal glob); real cred files live under the fully-ignored
+  `.secrets/`. Drop or fix that line.
 - Build `layers/cluster` (kind + ArgoCD + Cloud-API-key k8s Secret) — the local-kind flavor.
 - Worker chart `connection.yaml` needs an API-key/env-injection branch for Cloud on kind.
 - Promote this session's decisions to ADRs.
-- Tear down the still-running cloud-nonprod compose stack with `poe down-cloud` when done.
+
+Compose stack already brought down (`down -v`); cloud namespaces persist (Terraform state).
