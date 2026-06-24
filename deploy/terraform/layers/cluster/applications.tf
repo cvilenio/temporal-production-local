@@ -1,42 +1,12 @@
-# On-cluster control plane. Terraform owns exactly three things here:
-#   1. ArgoCD (the delivery tool) + the GitOps bootstrap.
-#   2. The orders k8s namespace.
-#   3. The Cloud worker API-key Secret — the credential handoff from the cloud layer.
-#
-# Everything that RUNS on the cluster is reconciled by ArgoCD (ADR-0002). The one
-# nuance: the orders-workers Application carries the account-bearing namespace
-# handle + endpoint, which must not live in git (see .githooks/pre-commit). Those
-# come from cloud state, so the control plane (this layer) seeds that Application
-# with the values injected — ArgoCD still reconciles it; git never sees the
-# account id. Secret-free platform add-ons (cert-manager, worker-controller) are
-# delivered the pure-GitOps way via the root app-of-apps reading deploy/argocd/applications/.
-
-resource "kubernetes_namespace" "orders" {
-  metadata {
-    name = var.orders_namespace
-  }
-}
-
-# Worker API key as an Opaque Secret. Key `api-key` matches the chart's
-# apiKeySecretRef.key; the Worker Controller injects it as TEMPORAL_API_KEY.
-resource "kubernetes_secret" "orders_cloud_apikey" {
-  metadata {
-    name      = var.cloud_apikey_secret_name
-    namespace = kubernetes_namespace.orders.metadata[0].name
-  }
-  type = "Opaque"
-  data = {
-    "api-key" = local.worker_api_key
-  }
-}
+# The ArgoCD Applications this layer seeds: the committed, secret-free platform
+# add-ons (cert-manager, worker-controller[-crds]) plus the injected orders-workers
+# Application. The add-ons are delivered the pure-GitOps way; orders-workers carries
+# the account-bearing namespace handle + endpoint, which must not live in git
+# (see .githooks/pre-commit), so it is seeded here from cloud state. ArgoCD still
+# reconciles all of them; git never sees the account id.
 
 locals {
   apps_dir = "${path.module}/../../../argocd/applications"
-
-  # Single source of truth for third-party versions (config/dependencies.yaml),
-  # read the same way the cloud layer reads namespaces.yaml.
-  deps           = yamldecode(file("${path.module}/../../../../config/dependencies.yaml"))
-  chart_versions = { for name, c in local.deps.charts : name => c.version }
 
   # Secret-free platform add-on Applications (cert-manager, worker-controller[-crds])
   # are defined declaratively as committed YAML under deploy/argocd/applications/ —
@@ -118,45 +88,6 @@ locals {
 
   # Every Application TF seeds: the committed add-ons + the injected orders-workers.
   all_applications = { for app in concat(local.addon_applications, [local.orders_workers_application]) : app.metadata.name => app }
-}
-
-# ArgoCD, installed imperatively — the only thing not delivered by ArgoCD itself.
-# extraObjects seeds the two Applications above in the same release (rendered after
-# the Application CRD is installed, so no kubernetes_manifest CRD-timing problem).
-resource "helm_release" "argocd" {
-  name             = "argocd"
-  repository       = local.deps.charts["argo-cd"].repo
-  chart            = "argo-cd"
-  version          = local.chart_versions["argo-cd"]
-  namespace        = var.argocd_namespace
-  create_namespace = true
-
-  # - server.insecure: serve the UI/API over plain HTTP locally (reach it with
-  #   `just k -n argocd port-forward svc/argocd-server 8080:80`). Not for prod.
-  # - repositories.local-charts: the in-cluster OCI registry, plain-HTTP + insecure,
-  #   so ArgoCD pulls every chart locally (no GitHub/public-internet).
-  # Applications are seeded separately (kubectl_manifest) so they apply AFTER the
-  # Application CRD this release installs.
-  values = [
-    yamlencode({
-      configs = {
-        params = {
-          "server.insecure" = true
-        }
-        repositories = {
-          local-charts = {
-            name      = "local-charts"
-            url       = var.oci_charts_repo
-            type      = "helm"
-            enableOCI = "true"
-            insecure  = "true"
-          }
-        }
-      }
-    })
-  ]
-
-  depends_on = [kubernetes_secret.orders_cloud_apikey]
 }
 
 # Seed the ArgoCD Applications after the release installs the Application CRD.
