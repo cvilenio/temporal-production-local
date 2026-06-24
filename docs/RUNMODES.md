@@ -33,18 +33,25 @@ backend deterministic regardless of the host shell:
 
 | Task              | Sources                          | Compose files                              |
 |-------------------|----------------------------------|--------------------------------------------|
-| `up` / `fresh`    | `config/local-oss.env`           | `docker-compose.yml` + `compose/oss-server.yml` |
-| `up-cloud`        | `.secrets/keys/cloud-nonprod.env`| `docker-compose.yml`                       |
-| `up-cloud-prod`   | `.secrets/keys/cloud-prod.env`   | `docker-compose.yml`                       |
+| `up` / `fresh`    | `config/local-oss.env`           | base + `compose/workers.yml` + `compose/oss-server.yml` |
+| `up-cloud`        | `.secrets/keys/cloud-nonprod.env`| base + `compose/workers.yml`               |
+| `up-cloud-prod`   | `.secrets/keys/cloud-prod.env`   | base + `compose/workers.yml`               |
+| `up-cloud-kind`   | `.secrets/keys/cloud-nonprod.env`| base only (kind runs the workers)          |
 | `down` / `down-cloud` | —                            | (matching set; `-v` drops volumes)         |
 
-`down` must use the same `-f` set as its `up`. **Bring the stack down before switching
-modes** (they share host ports and one Compose project).
+`down` must use the same `-f` set as its `up` (`down-cloud` uses base + workers, which
+also tears down a base-only `up-cloud-kind` stack). **Bring the stack down before
+switching modes** (they share host ports and one Compose project). When both worker and
+OSS layers are present, `workers.yml` precedes `oss-server.yml` — the OSS layer merges
+`depends_on: temporal` onto the worker services.
 
 ## Files
 
-- **`docker-compose.yml`** — base: apps, workers, observability, orders-db. No Temporal
+- **`docker-compose.yml`** — base: the host platform/visibility plane (app services,
+  console, observability, orders-db, kind cluster observers). NOT the workers. No Temporal
   backend; `TEMPORAL_*` default to the local OSS server.
+- **`compose/workers.yml`** — the worker *tier* layer: the orders workflow + activity
+  workers. Included on the pure-Compose paths; omitted on the kind path (kind runs them).
 - **`compose/oss-server.yml`** — the OSS backend *layer*: Temporal server + its Postgres +
   schema/namespace/search-attribute bootstrap + Web UI, and re-attaches the apps'
   `depends_on: temporal`. Omit it to run against Cloud.
