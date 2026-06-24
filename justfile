@@ -46,6 +46,10 @@ up-cloud:
 up-cloud-prod:
     uv run poe up-cloud-prod
 
+# Host app tier + visibility for the kind+Cloud path (kind owns the workers).
+up-cloud-kind:
+    uv run poe up-cloud-kind
+
 # Stop the Cloud-backed app stack.
 down-cloud:
     uv run poe down-cloud
@@ -172,4 +176,5 @@ platform-up:
     just headlamp-reload 2>/dev/null || true
     echo "platform up."
     echo "  Console (all UIs): http://localhost:8086   ArgoCD: http://localhost:8088   Headlamp: http://localhost:8087"
-    echo "  (If the console stack wasn't running, start it with 'just up-cloud' then 'just headlamp-reload'.)"
+    echo "  (If the host stack wasn't running, start it with 'just up-cloud-kind' then 'just headlamp-reload'."
+    echo "   up-cloud-kind runs the app tier + visibility WITHOUT workers — the cluster runs those.)"

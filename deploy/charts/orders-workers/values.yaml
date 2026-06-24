@@ -8,7 +8,9 @@
 connection:
   # API keys REQUIRE the regional endpoint, e.g. us-east-1.aws.api.temporal.io:7233.
   # The namespace endpoint (<ns>.<acct>.tmprl.cloud:7233) rejects API keys.
-  hostPort: "<regional-endpoint>:7233"
+  # Placeholder kept schema-valid (CRD pattern ^[a-zA-Z0-9.-]+:[0-9]+$) so
+  # `helm template` + kubeconform pass; the cluster layer overrides it at apply.
+  hostPort: "regional-endpoint.example:7233"
   temporalNamespace: "ziggymart-nonprod.<account-id>"
   tls: true
   # API-key auth (default for this repo's Cloud namespaces — api_key_auth=true).
@@ -17,11 +19,25 @@ connection:
   apiKeySecretKey: api-key
   # mtlsSecret: orders-temporal-tls   # (alternative) mTLS Connection instead of API key
 
-# Rollout strategy for every WorkerDeployment:
-#   Manual      — versions register Inactive; a UI/SDK promotes/ramps them.
-#   Progressive — the controller ramps automatically (GitOps owns the rollout).
+# Rollout strategy for every WorkerDeployment (see ADR-0004):
+#   AllAtOnce   — controller promotes a healthy version to Current at 100%. The
+#                 first version of a fresh deployment becomes Current immediately,
+#                 so `platform-up` yields a routable cluster with no manual step.
+#   Progressive — controller ramps by `steps:` (+ optional gate workflow); on a
+#                 cold start the steps are skipped and v1 goes Current at once.
+#                 (Requires adding a `steps:` block to the chart template.)
+#   Manual      — versions register Inactive; a human runs `temporal worker
+#                 deployment set-current-version` for EVERY version, including the
+#                 first. A cold cluster then has no Current version and versioned
+#                 workflows sit pending. Use only when you want to gate promotion
+#                 by hand. NOTE: any manual set-current-version makes the controller
+#                 back off (LastModifierIdentity ≠ controller); hand ownership back
+#                 with metadata `temporal.io/ignore-last-modifier: true` or by
+#                 deleting the Worker Deployment from the server and redeploying.
+# Default AllAtOnce: this is a local/non-prod env where the happy path must just
+# work; Progressive is the prod-grade upgrade when demoing safe canary rollouts.
 rollout:
-  strategy: Manual
+  strategy: AllAtOnce
 
 # Keep drained versions alive long enough that rollback routes to a live worker.
 sunset:

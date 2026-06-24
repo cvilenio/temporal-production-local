@@ -8,16 +8,21 @@
 #
 #   TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE, TEMPORAL_TLS, TEMPORAL_API_KEY
 #
+# This base is the HOST PLATFORM/VISIBILITY PLANE: app services, console,
+# observability, and the kind cluster observers. The Temporal worker tier is a
+# separate opt-in layer (compose/workers.yml) so the kind paths — where the
+# cluster runs the workers — don't run a duplicate fleet here.
+#
 # Run modes (prefer the `poe` wrappers, which encode these):
 #
-#   Local OSS  : docker compose -f docker-compose.yml -f compose/oss-server.yml up
-#                (compose/oss-server.yml adds the Temporal server + its deps)
-#   Temporal Cloud :
-#                docker compose -f docker-compose.yml \
-#                  --env-file .secrets/keys/cloud-nonprod.env up
-#                (no local server; apps connect out to Cloud)
+#   Local OSS    : base + compose/workers.yml + compose/oss-server.yml   (poe up)
+#                  (oss-server.yml adds the Temporal server + its deps)
+#   Compose→Cloud: base + compose/workers.yml                            (poe up-cloud)
+#                  (no local server; apps + workers connect out to Cloud)
+#   kind + Cloud : base ONLY                                  (poe up-cloud-kind)
+#                  (kind runs the workers; host runs app tier + visibility)
 #
-# The same env contract carries to kind/Helm later (k8s Secret instead of an
+# The same env contract carries to kind/Helm (a k8s Secret instead of an
 # env-file) — see docs/RUNMODES.md.
 #
 #   lgtm (grafana/otel-lgtm) — OTel Collector + Prometheus + Tempo + Loki + Grafana
@@ -157,82 +162,10 @@ services:
       retries: 30
       start_period: 30s
 
-  # ===========================================================================
-  # APPLICATION — TEMPORAL WORKERS
-  #   orders-workflow-worker  polls orders-workflow-task-queue → hosts OrderWorkflow
-  #   orders-activity-worker  polls orders-activity-task-queue → hosts activities
-  # Same image; the entrypoint dir selects the role. Temporal backend via env.
-  # ===========================================================================
-
-  orders-workflow-worker:
-    build:
-      context: .
-      dockerfile: images/python.Dockerfile
-      args:
-        APP_GROUP: workers
-        APP_PATH: apps/temporal/workers/python/workflow
-        APP_MODULE: main
-        APP_CMD: python
-    container_name: orders-workflow-worker
-    command: ["python", "main.py"]
-    depends_on:
-      orders-db:
-        condition: service_healthy
-      orders-service:
-        condition: service_healthy
-      mock-api:
-        condition: service_started
-      lgtm:
-        condition: service_healthy
-    environment:
-      - TEMPORAL_ADDRESS=${TEMPORAL_ADDRESS:-temporal:7233}
-      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-ziggymart}
-      - TEMPORAL_TLS=${TEMPORAL_TLS:-false}
-      - TEMPORAL_API_KEY=${TEMPORAL_API_KEY:-}
-      - DATABASE_URL=postgresql+asyncpg://admin:password@orders-db:5432/orders_db
-      - MOCK_API_URL=http://mock-api:8000
-      - ORDERS_SERVICE_URL=http://orders-service:8000
-      - PYTHONUNBUFFERED=1
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://lgtm:4317
-      - OTEL_SERVICE_NAME=orders-workflow-worker
-      - SDK_METRICS_PORT=9000
-    networks:
-      - temporal-network
-
-  orders-activity-worker:
-    build:
-      context: .
-      dockerfile: images/python.Dockerfile
-      args:
-        APP_GROUP: workers
-        APP_PATH: apps/temporal/workers/python/activity
-        APP_MODULE: main
-        APP_CMD: python
-    container_name: orders-activity-worker
-    command: ["python", "main.py"]
-    depends_on:
-      orders-db:
-        condition: service_healthy
-      orders-service:
-        condition: service_healthy
-      mock-api:
-        condition: service_started
-      lgtm:
-        condition: service_healthy
-    environment:
-      - TEMPORAL_ADDRESS=${TEMPORAL_ADDRESS:-temporal:7233}
-      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-ziggymart}
-      - TEMPORAL_TLS=${TEMPORAL_TLS:-false}
-      - TEMPORAL_API_KEY=${TEMPORAL_API_KEY:-}
-      - DATABASE_URL=postgresql+asyncpg://admin:password@orders-db:5432/orders_db
-      - MOCK_API_URL=http://mock-api:8000
-      - ORDERS_SERVICE_URL=http://orders-service:8000
-      - PYTHONUNBUFFERED=1
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://lgtm:4317
-      - OTEL_SERVICE_NAME=orders-activity-worker
-      - SDK_METRICS_PORT=9000
-    networks:
-      - temporal-network
+  # NOTE: the Temporal workers (orders-workflow-worker / orders-activity-worker)
+  # live in compose/workers.yml, NOT here. They are an opt-in layer so the kind
+  # paths (where the cluster runs the workers) don't double up the fleet. See
+  # that file and docs/RUNMODES.md.
 
   # ===========================================================================
   # APPLICATION — DEMO CONSOLE

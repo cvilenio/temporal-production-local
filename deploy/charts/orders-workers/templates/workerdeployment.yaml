@@ -28,6 +28,10 @@ spec:
       labels:
         app.kubernetes.io/name: {{ .deploymentName }}
     spec:
+      # Dedicated per-profile KSA (templates/serviceaccount.yaml), token not
+      # mounted — workers reach only the Temporal frontend, never the k8s API.
+      serviceAccountName: {{ .deploymentName }}
+      automountServiceAccountToken: false
       containers:
         - name: worker
           # Prefer an immutable digest (content-addressed → Build ID changes iff

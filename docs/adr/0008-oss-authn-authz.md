@@ -93,6 +93,29 @@ OSS identity planes (no Terraform→Temporal path exists, per ADR-0007):
   or an mTLS cert the claim mapper maps to admin) to reach the secured frontend.
 - **Data-plane identity** = **workers**, with mTLS transport + a **worker-scoped** JWT.
 
+### Kubernetes pod identity (kind) — named KSAs now, Workload Identity Federation deferred
+
+The two identity planes above are about *Temporal* auth. On kind there is a third, lower
+identity: the **Kubernetes ServiceAccount** each worker pod runs as. By default the Worker
+Controller's pods would inherit the namespace `default` KSA with its token auto-mounted.
+
+- **Decision: one dedicated KSA per worker profile, `automountServiceAccountToken: false`**
+  (`deploy/charts/orders-workers/templates/serviceaccount.yaml`; `serviceAccountName` set on
+  the `WorkerDeployment` pod template — supported by the v1alpha1 CRD podSpec at the pinned
+  app 1.7.0). The win is blast-radius: these workers only egress to the Temporal frontend and
+  never call the k8s API, so not mounting the token removes the one thing a `default` SA
+  exposes — a projected token a compromised pod could replay against the API server.
+- **Temporal Cloud auth does not flow through the KSA.** It is the API-key Secret on the
+  `Connection` (above). The KSA isolates k8s-side permissions only; the two are orthogonal.
+- **Workload Identity Federation is intentionally NOT emulated here.** WIF federates a KSA →
+  cloud IAM (GKE Workload Identity → GCP SA, or IRSA). It has no faithful local target: (1)
+  Temporal Cloud does not accept GCP/OIDC-federated identities in the worker auth path — it
+  takes an API key or mTLS, neither of which WIF replaces; (2) the only other prod-GKE use,
+  pulling from Artifact Registry / Secret Manager, is served locally by **zot over plain HTTP
+  with no auth** (ADR-0011/0013), so there is no cloud IAM to federate to. Half-emulating WIF
+  would require inventing a cloud IAM the air-gap-local delivery model deliberately omits.
+  Documented as the prod-GKE overlay a real deployment adds; not built.
+
 ### Parity is at the contract, not the mechanism
 
 Cloud and OSS keep **one connection contract**, two secret types. The Worker Controller

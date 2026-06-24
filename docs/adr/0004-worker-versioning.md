@@ -20,9 +20,20 @@ task-queue compatibility-set API is superseded.
   `kind: Connection`). The controller injects the env vars and derives the Build ID from the
   pod-template hash, so **shipping a version = a new image tag**. No edits to the worker pod
   spec.
-- **Rollout:** start with the controller's `Manual` strategy (UI/SDK drives ramp via
-  `SetCurrentVersion` / `SetRampingVersion`); switch to `Progressive` when we want ArgoCD to
-  own the ramp.
+- **Rollout:** default to the controller's **`AllAtOnce`** strategy. (Originally `Manual`,
+  changed after a live kind+Cloud run: `Manual` registers every version `Inactive` and needs
+  a human `set-current-version` for *each* version — including the first — so a freshly
+  provisioned cluster has **no Current version** and versioned workflows sit pending forever.
+  `AllAtOnce` auto-promotes the first healthy version, so `just platform-up` yields a routable
+  cluster with no manual step.) `Progressive` (with `steps:` + an optional gate workflow) is
+  the prod-grade upgrade for demoing safe canary rollouts; both non-`Manual` strategies skip
+  the ramp on a cold start and promote v1 immediately. Reserve `Manual` for hand-gated
+  promotion.
+  - **Ownership caveat:** a manual `set-current-version` (or `set-ramping-version`) sets the
+    server's `LastModifierIdentity` away from the controller, which then backs off and stops
+    managing routing for that deployment. Hand control back with the version metadata
+    `temporal.io/ignore-last-modifier: true`, or delete the Worker Deployment from the server
+    and redeploy clean.
 - **Workflow behavior:** plan to mark `OrderWorkflow` `PINNED` so in-flight orders never
   replay against new code; compatible in-place edits use `workflow.patched(...)` only on
   AUTO_UPGRADE workflows. Not yet enabled — tracked as follow-up.
