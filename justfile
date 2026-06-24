@@ -149,8 +149,8 @@ chart-publish:
 k *args:
     @KUBECONFIG={{kubeconfig}} kubectl {{args}}
 
-# Restart host-plane Headlamp so it reloads the kubeconfig (it reads it once at
-# startup). Run after `cluster-up` if the console host stack was already up.
+# Force Headlamp to re-read the kubeconfig now. Headlamp already WATCHES it and
+# auto-loads the cluster within ~10s, so this is only an immediate-refresh shortcut.
 headlamp-reload:
     @docker restart headlamp >/dev/null && echo "headlamp restarted — kubeconfig reloaded"
 

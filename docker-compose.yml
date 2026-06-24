@@ -337,9 +337,10 @@ services:
 
   # Headlamp — web K8s explorer (pods, live logs, exec, events). Reads the
   # CONTAINER-reachable kubeconfig that cluster-up.sh writes (host rewritten to
-  # host.docker.internal, TLS verify skipped). Headlamp loads the kubeconfig at
-  # startup and does NOT watch it; if you bring up kind after this container,
-  # run `just headlamp-reload` to pick up the cluster.
+  # host.docker.internal, TLS verify skipped). Headlamp WATCHES the kubeconfig
+  # and auto-loads the cluster within ~10s of it appearing — so bringing up kind
+  # after this container needs no restart. (`just headlamp-reload` only forces an
+  # immediate refresh.)
   headlamp:
     image: ghcr.io/headlamp-k8s/headlamp:latest
     container_name: headlamp

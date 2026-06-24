@@ -1,9 +1,11 @@
 # 0007 — local visibility plane (Headlamp + ArgoCD UI), console as run-mode-aware aggregator
 
-- **Status:** **LANDED in working tree (2026-06-24), static-verified, NOT yet live-verified.**
-  Code + config written and committed; `terraform validate`/`fmt`, `nginx -t`, `docker compose
-  config`, and `ruff`/`pyright` all clean. The live end-to-end run (bring up kind + the console
-  stack, confirm the iframes) is still pending — see "Verification plan" (unchecked).
+- **Status:** **LANDED + LIVE-VERIFIED (2026-06-24).** Static checks clean (`terraform
+  validate`/`fmt`, `nginx -t`, `docker compose config`, `ruff`/`pyright`). Live run confirmed:
+  cluster-down state degrades gracefully (Headlamp 200/"unreachable", ArgoCD tab 502); after
+  `platform-up`, Headlamp auto-loads the cluster and serves a real PodList, ArgoCD UI renders via
+  viz-proxy with frame headers stripped (`X-Frame-Options` gone, CSP rewritten to
+  `frame-ancestors http://localhost:8086`).
 - **Date:** 2026-06-24
 - **ADRs:** [ADR-0014](../docs/adr/0014-local-visibility-plane.md) (visibility plane placement),
   [ADR-0015](../docs/adr/0015-console-backend-substrate-aware.md) (console evolution).
@@ -61,13 +63,17 @@ cluster's lifecycle any more than each tool's nature requires.
 **Static — DONE (2026-06-24):** `terraform validate`/`fmt`, `nginx -t` (viz-proxy), `docker compose
 config`, `ruff`/`ruff format`/`pyright` all clean.
 
-**Live — still to run (needs kind + the console stack up on the host):**
-- [ ] Compose-only (no kind): stack up, Headlamp tab shows "unreachable" cleanly, no startup failure.
-- [ ] `just platform-up`: Headlamp lists pods across namespaces, streams a worker pod's logs, exec works.
-- [ ] ArgoCD tab renders Applications Synced/Healthy inside the console iframe (framing headers stripped).
-- [ ] `just cluster-stop` → ArgoCD tab goes dark gracefully; Headlamp shows "unreachable"; console and
-  Grafana stay up. `just cluster-start` → both recover (Headlamp may need `just headlamp-reload`).
-- [ ] Cloud run-mode: Temporal-UI tab degrades to the placeholder message (no broken iframe).
+**Live — DONE (2026-06-24, kind + Cloud host plane):**
+- [x] Cluster down: console 200, Headlamp UI 200 (loads w/o cluster), ArgoCD via viz-proxy 502 (dark).
+- [x] `platform-up`: in-container kubeconfig written (`host.docker.internal:<port>`); Headlamp
+  auto-loaded `kind-temporal-platform` (no restart) and returned a live PodList from the cluster.
+- [x] ArgoCD reachable via viz-proxy :8088 (200); raw :8090 sends `X-Frame-Options: sameorigin` +
+  CSP `frame-ancestors 'self'`, viz-proxy strips it and rewrites CSP to `…localhost:8086`. NodePort
+  30808 confirmed. `orders-workers` Synced/Healthy (controller apps still settling, as in 0006).
+- [x] Cloud run-mode: `TEMPORAL_UI_EMBED_URL` empty → Temporal-UI tab shows the placeholder, not a
+  broken iframe (embed.html guard).
+- [ ] Not exercised this run: `cluster-stop`/`cluster-start` recovery; in-browser logs/exec click-through
+  (PodList over the proxy confirms the path works).
 
 ## Resolved decisions (2026-06-24)
 - **Console scope:** Headlamp + ArgoCD tabs land **now** (this checkpoint) so they're usable as
@@ -100,8 +106,11 @@ config`, `ruff`/`ruff format`/`pyright` all clean.
 - **Console**: `config.py` + two `_embed_page` routes (`/headlamp`, `/argocd`) + two `base.html`
   nav tabs. `embed.html` now degrades to a message instead of a broken iframe when a target is
   unset (the ADR-0015 minimal slice — covers the Cloud Temporal-UI case).
-- **`just headlamp-reload`**: restarts Headlamp to reload the kubeconfig (it reads it once at
-  startup; confirmed via the headlamp-server flags — no runtime watch).
+- **`just headlamp-reload`**: forces an immediate Headlamp kubeconfig refresh. NOTE: Headlamp
+  already WATCHES the kubeconfig and auto-loads the cluster within ~10s of `cluster-up` writing it
+  (verified live in headlamp logs: `watcher: re-adding missing files` → `Proxy setup`), so the
+  reload is only a convenience, not a required step. (An earlier source read wrongly concluded
+  "no runtime watch"; the live run corrected it.)
 
 ## Next (after 0007)
 - ADR-0015 phase 2: `kube_status` provider → live architecture page on kind.
