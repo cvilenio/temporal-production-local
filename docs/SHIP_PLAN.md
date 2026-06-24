@@ -17,6 +17,16 @@
   * Wire the Temporal Python SDK to export OpenTelemetry metrics (workflow duration, activity latency, error rates) to Ziggymart's existing Datadog/Prometheus stack.
   * Create Datadog dashboards mirroring current business KPIs (Orders Processed/Min, Error Rates).
   * Update CI/CD pipelines to build and deploy Temporal Worker containers alongside the existing API services.
+    * **In this repo today:** the build+gate logic lives in `just ci` → `poe ci`
+      (`lint → typecheck → test → build worker images → push to the registry`), with images tagged
+      by git SHA so each is immutable and maps to a Worker Controller Build ID. CD is ArgoCD + the
+      Worker Controller (Build-ID ramps). A GitHub Actions workflow would be a thin wrapper calling
+      `poe ci` (identical steps local and remote; runnable locally via `act`) — deferred.
+    * **Next workstream — the Temporal-specific gate:** a replay/NDE suite that runs recorded
+      production/staging histories through the SDK `Replayer` against the new worker code and fails
+      the build on non-determinism, wired into `poe ci`'s `test` step. The canonical "catch NDEs
+      before deploy" control; it pairs with Worker Versioning (gate at build; ship a new Build ID
+      when a change is genuinely incompatible). Not yet built.
 
 ## Phase 2: Shadow Mode & Verification (Days 15-30)
 

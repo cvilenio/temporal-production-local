@@ -1,0 +1,12 @@
+# Advertises the local registry to in-cluster tooling per KEP-1755, so anything
+# that honors it (and humans) know images are at localhost:5001. Applied by
+# deploy/kind/cluster-up.sh. https://kind.sigs.k8s.io/docs/user/local-registry/
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: local-registry-hosting
+  namespace: kube-public
+data:
+  localRegistryHosting.v1: |
+    host: "localhost:5001"
+    help: "https://kind.sigs.k8s.io/docs/user/local-registry/"

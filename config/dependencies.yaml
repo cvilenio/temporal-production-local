@@ -1,0 +1,43 @@
+# Single source of truth for the kind / local-OCI delivery stack's third-party
+# dependency versions. Same "one spec, no drift" pattern as
+# config/temporal/namespaces.yaml (ADR-0007).
+#
+# Consumers:
+#   - deploy/kind/{cluster-up,mirror-deps}.sh  — via compose/scripts/render-deps.py
+#     which renders this file to config/.generated/deps.env (git-ignored) that the
+#     scripts source. (`just render-deps`, run automatically by the cluster recipes.)
+#   - deploy/terraform/layers/cluster           — reads this file via yamldecode():
+#     injects each add-on Application's targetRevision (keyed by chart name), and
+#     sets the ArgoCD chart version + the registry-proxy nginx image.
+#
+# NOT here: pull-through *routing* (which upstream serves each repo prefix) lives in
+# deploy/kind/zot-config.json; cached image *versions* are not pinned (on-demand,
+# any tag). Compose/Temporal-server versions live in .env (a separate run mode).
+
+registry:
+  # The local OCI registry itself (zot) — image tag used by cluster-up.sh.
+  zot_version: v2.1.18
+
+# Helm charts ArgoCD serves from the local registry. The `version` is authoritative:
+# mirror-deps pushes it, and the cluster layer sets each Application's targetRevision
+# to it (key = the chart name in the Application's spec.source.chart).
+charts:
+  cert-manager:
+    version: v1.20.2
+    repo: https://charts.jetstack.io # classic Helm repo -> explicit mirror push
+  temporal-worker-controller:
+    version: "0.26.0"
+    oci: oci://docker.io/temporalio/temporal-worker-controller
+  temporal-worker-controller-crds:
+    version: "0.26.0"
+    oci: oci://docker.io/temporalio/temporal-worker-controller-crds
+  argo-cd:
+    version: "9.7.0" # bootstrap; installed by the Terraform helm_release
+    repo: https://argoproj.github.io/argo-helm
+
+images:
+  # TLS proxy that fronts the HTTP registry for ArgoCD (registry-proxy.tf).
+  # Pulled through zot on demand; pinned here for reproducibility.
+  nginx:
+    repository: localhost:5001/library/nginx
+    tag: "1.27-alpine"

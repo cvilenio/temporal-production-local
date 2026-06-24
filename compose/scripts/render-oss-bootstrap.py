@@ -34,7 +34,9 @@ def main() -> int:
     retention_days = domain["environments"][oss_env]["retention_days"]
 
     # Space-separated NAME=TYPE pairs — trivial for sh to split and loop.
-    attrs = " ".join(f"{name}={typ}" for name, typ in domain["search_attributes"].items())
+    attrs = " ".join(
+        f"{name}={typ}" for name, typ in domain["search_attributes"].items()
+    )
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(

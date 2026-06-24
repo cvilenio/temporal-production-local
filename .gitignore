@@ -14,6 +14,8 @@ venv/
 
 # Rendered from config/temporal/namespaces.yaml by the OSS bootstrap; ephemeral.
 config/temporal/.generated/
+# Rendered from config/dependencies.yaml by render-deps.py; ephemeral.
+config/.generated/
 
 # Terraform (deploy/terraform)
 .terraform/

@@ -1,8 +1,8 @@
 # One WorkerDeployment per worker profile. The controller injects
-# TEMPORAL_DEPLOYMENT_NAME + TEMPORAL_WORKER_BUILD_ID (Build ID = pod-template
-# hash) into each pod; orders.worker turns those into a
-# WorkerDeploymentConfig. Shipping a version = bump the image tag in values.yaml.
-# NOTE: confirm field names against your Worker Controller version (temporal.io/v1alpha1).
+# TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE, TEMPORAL_API_KEY (from the Connection's
+# apiKeySecretRef), TEMPORAL_DEPLOYMENT_NAME and TEMPORAL_WORKER_BUILD_ID (Build
+# ID = pod-template hash) into every pod — do NOT set those here. Shipping a new
+# version = bump the image tag. Field names match temporal.io/v1alpha1.
 {{- range .Values.workers }}
 ---
 apiVersion: temporal.io/v1alpha1
@@ -13,10 +13,10 @@ metadata:
     app.kubernetes.io/name: {{ .deploymentName }}
     app.kubernetes.io/component: worker
 spec:
-  connection: orders                     # -> Connection above
   workerOptions:
+    connectionRef:
+      name: orders                      # -> Connection above
     temporalNamespace: {{ $.Values.connection.temporalNamespace | quote }}
-    deploymentName: {{ .deploymentName | quote }}
   replicas: {{ .replicas }}
   rollout:
     strategy: {{ $.Values.rollout.strategy }}
@@ -30,15 +30,15 @@ spec:
     spec:
       containers:
         - name: worker
-          image: "{{ .image.repository }}:{{ .image.tag }}"
+          # Prefer an immutable digest (content-addressed → Build ID changes iff
+          # image content changes); fall back to a tag when no digest is pinned.
+          image: "{{ .image.repository }}{{ if .image.digest }}@{{ .image.digest }}{{ else }}:{{ .image.tag }}{{ end }}"
           command: {{ .command | toJson }}
+          {{- if $.Values.connection.tls }}
+          # API-key connections require TLS. The controller injects API_KEY +
+          # the address/namespace/version envs but not TLS, so set it here.
           env:
-            - name: TEMPORAL_ADDRESS
-              value: {{ $.Values.connection.hostPort | quote }}
-            - name: TEMPORAL_NAMESPACE
-              value: {{ $.Values.connection.temporalNamespace | quote }}
             - name: TEMPORAL_TLS
-              value: {{ $.Values.connection.tls | quote }}
-            # TEMPORAL_DEPLOYMENT_NAME and TEMPORAL_WORKER_BUILD_ID are injected
-            # by the Worker Controller — do not set them here.
+              value: "true"
+          {{- end }}
 {{- end }}

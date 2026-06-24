@@ -1,0 +1,62 @@
+{
+  "distSpecVersion": "1.1.0",
+  "storage": {
+    "rootDirectory": "/var/lib/registry",
+    "dedupe": true,
+    "gc": true,
+    "gcDelay": "1h",
+    "gcInterval": "2h",
+    "retention": {
+      "dryRun": false,
+      "policies": [
+        {
+          "repositories": ["**"],
+          "deleteUntagged": true,
+          "keepTags": [
+            { "patterns": [".*"], "mostRecentlyPushedCount": 10 },
+            { "patterns": [".*"], "pulledWithin": "720h" }
+          ]
+        }
+      ]
+    }
+  },
+  "http": {
+    "address": "0.0.0.0",
+    "port": "5000"
+  },
+  "log": {
+    "level": "warn"
+  },
+  "extensions": {
+    "sync": {
+      "enable": true,
+      "registries": [
+        {
+          "urls": ["https://registry-1.docker.io"],
+          "onDemand": true,
+          "tlsVerify": true,
+          "content": [
+            { "prefix": "library/**" },
+            { "prefix": "temporalio/**" }
+          ]
+        },
+        {
+          "urls": ["https://quay.io"],
+          "onDemand": true,
+          "tlsVerify": true,
+          "content": [
+            { "prefix": "jetstack/**" }
+          ]
+        },
+        {
+          "urls": ["https://registry.k8s.io"],
+          "onDemand": true,
+          "tlsVerify": true,
+          "content": [
+            { "prefix": "kubebuilder/**" }
+          ]
+        }
+      ]
+    }
+  }
+}

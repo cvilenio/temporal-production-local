@@ -1,0 +1,31 @@
+# cert-manager — required by the Temporal Worker Controller's validating webhook
+# (WorkerResourceTemplate TLS). Secret-free, public chart → delivered the
+# pure-GitOps way by the root app-of-apps. sync-wave -2: lands before the
+# controller (wave -1) and the workload (wave 0).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  project: default
+  source:
+    # Local OCI mirror (deploy/kind/mirror-deps.sh) — no public-internet pull.
+    # targetRevision is injected by the cluster layer from config/dependencies.yaml.
+    repoURL: registry-tls.kube-public.svc:5000/charts
+    chart: cert-manager
+    helm:
+      valuesObject:
+        crds:
+          enabled: true # install cert-manager's own CRDs with the chart
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

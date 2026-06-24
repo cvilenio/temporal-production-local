@@ -1,6 +1,7 @@
 # Temporal Worker Controller Connection — how the managed workers reach the
-# frontend. Referenced by each WorkerDeployment below.
-# NOTE: confirm field names against your Worker Controller version (temporal.io/v1alpha1).
+# frontend. Referenced by each WorkerDeployment's workerOptions.connectionRef.
+# Field names match temporal.io/v1alpha1 (Worker Controller >= chart 0.20 / app
+# 1.3): exactly one of apiKeySecretRef or mutualTLSSecretRef (XValidation enforces).
 apiVersion: temporal.io/v1alpha1
 kind: Connection
 metadata:
@@ -9,6 +10,14 @@ metadata:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
 spec:
   hostPort: {{ .Values.connection.hostPort | quote }}
-  {{- if .Values.connection.tls }}
-  mutualTLSSecret: {{ .Values.connection.apiKeySecret | default "orders-temporal-tls" }}
+  {{- if .Values.connection.apiKeySecret }}
+  # Cloud API-key auth. The token Secret is created by the cluster layer
+  # (Terraform), keyed by `api-key`. Requires the REGIONAL endpoint in hostPort.
+  apiKeySecretRef:
+    name: {{ .Values.connection.apiKeySecret | quote }}
+    key: {{ .Values.connection.apiKeySecretKey | default "api-key" | quote }}
+  {{- else if .Values.connection.mtlsSecret }}
+  # mTLS auth (alternative). Secret of type kubernetes.io/tls (tls.crt/tls.key).
+  mutualTLSSecretRef:
+    name: {{ .Values.connection.mtlsSecret | quote }}
   {{- end }}
