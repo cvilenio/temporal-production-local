@@ -266,9 +266,10 @@ services:
       # Browser-reachable URLs for embedded tool UIs. The Temporal UI is only
       # present in local-OSS mode; compose/oss-server.yml sets it there.
       - TEMPORAL_UI_EMBED_URL=${TEMPORAL_UI_EMBED_URL:-}
-      # Cloud mode (no local UI): the nav links out to the hosted Cloud console,
-      # deep-linked to the namespace. Namespace is the full <name>.<account-id>
-      # handle from the connection profile; TEMPORAL_UI_EXTERNAL_URL can override.
+      # Cloud mode (no local UI): the nav links out to the hosted Cloud console's
+      # namespaces list (several namespaces are live at once). TEMPORAL_NAMESPACE
+      # just signals "pointed at Cloud"; TEMPORAL_UI_EXTERNAL_URL can override the
+      # target.
       - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-}
       - TEMPORAL_UI_EXTERNAL_URL=${TEMPORAL_UI_EXTERNAL_URL:-}
       - GRAFANA_EMBED_URL=http://localhost:3000
