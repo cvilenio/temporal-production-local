@@ -80,7 +80,13 @@
         <!-- Divider between app pages and embedded tool UIs -->
         <div class="w-6 border-t border-borderSubtle"></div>
 
-        <a href="/temporal-ui" title="Temporal Web UI" class="relative group p-2 rounded-md transition-colors {% if active == 'temporal-ui' %}text-accent{% else %}text-textMuted hover:text-textPrimary{% endif %}">
+        {# Cloud mode (no frameable local UI): link out to the hosted Cloud console in a
+           named tab (reused on repeat clicks). OSS mode: open the in-console iframe page. #}
+        {% set temporal_external = temporal_cloud_url and not temporal_embed_url %}
+        <a href="{{ temporal_cloud_url if temporal_external else '/temporal-ui' }}"
+           {% if temporal_external %}target="temporal-cloud" rel="noopener noreferrer"{% endif %}
+           title="{{ 'Temporal Cloud ↗' if temporal_external else 'Temporal Web UI' }}"
+           class="relative group p-2 rounded-md transition-colors {% if active == 'temporal-ui' %}text-accent{% else %}text-textMuted hover:text-textPrimary{% endif %}">
             {% if active == 'temporal-ui' %}<div class="absolute left-[-16px] top-1/2 transform -translate-y-1/2 h-8 w-[3px] bg-accent rounded-r-full"></div>{% endif %}
             <!-- Temporal Symbol — Simple-Icons "temporal" -->
             <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">

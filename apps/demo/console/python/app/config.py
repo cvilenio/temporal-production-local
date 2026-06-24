@@ -21,6 +21,25 @@ class Settings(BaseSettings):
     headlamp_embed_url: str = "http://localhost:8087"
     argocd_embed_url: str = "http://localhost:8088"
 
+    # Cloud mode: the Temporal UI is the hosted Cloud console, which can't be
+    # iframed (X-Frame-Options: SAMEORIGIN) and uses OAuth — so the nav links
+    # out to it in a new tab instead. temporal_namespace is the full account-
+    # bearing handle (<name>.<account-id>); the deep link is derived from it.
+    # An explicit temporal_ui_external_url overrides the derivation.
+    temporal_namespace: str = ""
+    temporal_ui_external_url: str = ""
+
+    @property
+    def temporal_cloud_url(self) -> str:
+        if self.temporal_ui_external_url:
+            return self.temporal_ui_external_url
+        if self.temporal_namespace:
+            return (
+                f"https://cloud.temporal.io/namespaces/"
+                f"{self.temporal_namespace}/workflows"
+            )
+        return ""
+
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )

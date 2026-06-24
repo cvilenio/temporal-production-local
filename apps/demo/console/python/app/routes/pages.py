@@ -8,6 +8,13 @@ from ..scenarios import SCENARIOS
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
+# Nav rail needs these on every page (base.html). The Temporal icon links to the
+# local Web UI iframe in OSS mode, or out to the hosted Cloud console in Cloud
+# mode (which can't be framed). Exposed as Jinja globals so each route doesn't
+# have to thread them through its context.
+templates.env.globals["temporal_embed_url"] = settings.temporal_ui_embed_url
+templates.env.globals["temporal_cloud_url"] = settings.temporal_cloud_url
+
 
 @router.get("/", response_class=RedirectResponse)
 async def index():
