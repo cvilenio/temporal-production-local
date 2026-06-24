@@ -37,6 +37,7 @@ dev = [
     "pyright>=1.1.410",
     "pytest-timeout>=2.4.0",
     "poethepoet>=0.46.0",
+    "pyyaml>=6.0",  # render-oss-bootstrap.py reads the shared namespace spec
 ]
 
 [tool.uv]
@@ -77,7 +78,8 @@ check = { sequence = ["lint", "test"], help = "Full gate: lint + test" }
 #   Cloud prod : poe up-cloud-prod
 # =============================================================================
 
-up = { shell = "set -a; . config/local-oss.env; set +a; docker compose -f docker-compose.yml -f compose/oss-server.yml up --build", help = "Local OSS server + apps" }
+render-oss-bootstrap = { cmd = "python compose/scripts/render-oss-bootstrap.py", help = "Render the shared spec to the OSS bootstrap env file" }
+up = { shell = "python compose/scripts/render-oss-bootstrap.py; set -a; . config/local-oss.env; set +a; docker compose -f docker-compose.yml -f compose/oss-server.yml up --build", help = "Local OSS server + apps" }
 down = { shell = "docker compose -f docker-compose.yml -f compose/oss-server.yml down -v", help = "Stop the local-OSS stack and drop volumes" }
 fresh = { sequence = ["down", "up"], help = "Recreate the local-OSS stack" }
 

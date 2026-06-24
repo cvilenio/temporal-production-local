@@ -10,13 +10,17 @@ variable "account_id" {
   type        = string
 }
 
-# Keyed by the FULL namespace name (e.g. ziggymart-nonprod) so multiple business
-# domains can coexist on the one account — add ziggymart-prod, payments-nonprod, etc.
-# as new keys. The <domain>-<env> convention encodes the environment in the name.
-variable "namespaces" {
-  description = "Map of namespace name -> Temporal Cloud namespace config. One namespace + service account (+ optional API key) is provisioned per entry."
+# Cloud-only overlay, keyed by the FULL namespace name (`<domain>-<env>`, e.g.
+# ziggymart-nonprod). The SHARED config (retention, search attributes) lives in
+# config/temporal/namespaces.yaml and is merged in via locals (see main.tf) — do
+# NOT duplicate it here. This overlay carries only the fields with no OSS analog:
+# the worker service account, the API key, and region placement.
+#
+# There must be one entry per `<domain>-<env>` produced by the spec. Add a new
+# business domain by adding it to the spec AND adding its overlay entries here.
+variable "cloud_overlay" {
+  description = "Per-namespace Cloud-only settings (service account, API key, regions), keyed by `<domain>-<env>`. Shared config comes from the spec, not here."
   type = map(object({
-    retention_days       = number
     service_account_name = string
     api_key_display_name = string
     api_key_expiry_time  = string
@@ -24,6 +28,5 @@ variable "namespaces" {
     namespace_permission = optional(string, "write")
     account_access       = optional(string, "read")
     regions              = optional(list(string), ["aws-us-east-1"])
-    search_attributes    = optional(map(string), {})
   }))
 }

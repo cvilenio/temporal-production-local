@@ -880,6 +880,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-timeout" },
+    { name = "pyyaml" },
     { name = "ruff" },
 ]
 mock-api = [
@@ -918,6 +919,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-timeout", specifier = ">=2.4.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "ruff" },
 ]
 mock-api = [

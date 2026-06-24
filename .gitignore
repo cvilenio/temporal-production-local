@@ -12,6 +12,9 @@ venv/
 .pytest_cache/
 .ruff_cache/
 
+# Rendered from config/temporal/namespaces.yaml by the OSS bootstrap; ephemeral.
+config/temporal/.generated/
+
 # Terraform (deploy/terraform)
 .terraform/
 *.tfstate
