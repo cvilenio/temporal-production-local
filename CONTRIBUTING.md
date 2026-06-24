@@ -87,3 +87,29 @@ security fix) get a short high-level entry under `## [Unreleased]` in `CHANGELOG
 ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format: Added / Changed /
 Deprecated / Breaking Changes / Fixed / Security). Internal-only changes (refactors,
 tests, CI, docs) need no entry. Optional for this demo repo, but keep it if present.
+
+## Terraform file layout
+
+Terraform reads every `*.tf` in a directory as one merged config, so file
+boundaries are purely for human readers. Use them.
+
+- **No `main.tf`.** A catch-all file named for nothing tells a reader nothing.
+  Each file is named for the bundle of resources it holds.
+- **Scope by concern, not by resource type.** A file groups resources that share
+  a purpose; it is not one-file-per-`resource`. `orders-namespace.tf` holding a
+  `kubernetes_namespace` plus the Secret seeded into it is right; splitting those
+  two apart, or lumping them with unrelated ArgoCD resources, is not.
+- **Name the file for its contents.** The name should answer "what's in here?"
+  without opening it. Prefer specific over generic — `third-party-versions.tf`,
+  not `dependencies.tf` (dependencies on what? of what kind?). `argocd.tf`,
+  `applications.tf`, `registry-proxy.tf`, `remote-state.tf` are good; `infra.tf`,
+  `resources.tf`, `misc.tf` are `main.tf` by another name.
+- **Keep the conventional meta-files** as their own files: `variables.tf`,
+  `outputs.tf`, `providers.tf`, `versions.tf`, `backend.tf`. These are already
+  content-named and every reader expects them.
+- **`locals` live with the resources they serve.** Co-locate a `locals` block in
+  the file whose resources consume it. Extract shared locals into their own
+  content-named file (e.g. `third-party-versions.tf`) only when more than one
+  file reads them.
+
+Filenames use hyphens (`remote-state.tf`), matching the existing layers/modules.
