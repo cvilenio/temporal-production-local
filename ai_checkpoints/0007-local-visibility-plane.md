@@ -1,8 +1,9 @@
 # 0007 — local visibility plane (Headlamp + ArgoCD UI), console as run-mode-aware aggregator
 
-- **Status:** **PLANNED (2026-06-24) — not started.** This checkpoint is a forward plan, not a
-  record of landed work. It captures scope before implementation so the design (ADR-0014,
-  ADR-0015) and the build are reviewable separately.
+- **Status:** **LANDED in working tree (2026-06-24), static-verified, NOT yet live-verified.**
+  Code + config written and committed; `terraform validate`/`fmt`, `nginx -t`, `docker compose
+  config`, and `ruff`/`pyright` all clean. The live end-to-end run (bring up kind + the console
+  stack, confirm the iframes) is still pending — see "Verification plan" (unchecked).
 - **Date:** 2026-06-24
 - **ADRs:** [ADR-0014](../docs/adr/0014-local-visibility-plane.md) (visibility plane placement),
   [ADR-0015](../docs/adr/0015-console-backend-substrate-aware.md) (console evolution).
@@ -56,14 +57,17 @@ cluster's lifecycle any more than each tool's nature requires.
 - Mirroring Headlamp/ArgoCD into the air-gap boundary (host plane is non-prod; ADR-0013 boundary
   stays the cluster plane).
 
-## Verification plan (to run when built)
-- Compose-only (no kind): stack up, Headlamp tab shows "unreachable" cleanly, no startup failure.
-- `just platform-up`: Headlamp lists pods across namespaces, streams a worker pod's logs, exec works.
-- ArgoCD tab renders Applications Synced/Healthy inside the console iframe (framing headers stripped).
-- `just cluster-stop` → ArgoCD tab goes dark gracefully; Headlamp shows "unreachable"; console and
-  Grafana stay up. `just cluster-start` → both recover with no console restart.
-- Cloud run-mode: Temporal-UI tab degrades to a link-out card (no broken iframe).
-- `nginx -t`, `terraform fmt/validate`, `ruff`/`poe lint` clean.
+## Verification
+**Static — DONE (2026-06-24):** `terraform validate`/`fmt`, `nginx -t` (viz-proxy), `docker compose
+config`, `ruff`/`ruff format`/`pyright` all clean.
+
+**Live — still to run (needs kind + the console stack up on the host):**
+- [ ] Compose-only (no kind): stack up, Headlamp tab shows "unreachable" cleanly, no startup failure.
+- [ ] `just platform-up`: Headlamp lists pods across namespaces, streams a worker pod's logs, exec works.
+- [ ] ArgoCD tab renders Applications Synced/Healthy inside the console iframe (framing headers stripped).
+- [ ] `just cluster-stop` → ArgoCD tab goes dark gracefully; Headlamp shows "unreachable"; console and
+  Grafana stay up. `just cluster-start` → both recover (Headlamp may need `just headlamp-reload`).
+- [ ] Cloud run-mode: Temporal-UI tab degrades to the placeholder message (no broken iframe).
 
 ## Resolved decisions (2026-06-24)
 - **Console scope:** Headlamp + ArgoCD tabs land **now** (this checkpoint) so they're usable as
@@ -77,7 +81,27 @@ cluster's lifecycle any more than each tool's nature requires.
   not from zot — consistent with ADR-0014 decision 5 (host plane is non-prod, upstream pull allowed).
 
 ## Open before building
-- Headlamp host port assignment (avoid collision with 3000/8081/8083/8086).
+- Headlamp host port assignment (avoid collision with 3000/8081/8083/8086). **Resolved:**
+  viz-proxy publishes 8087 (Headlamp) + 8088 (ArgoCD); ArgoCD raw NodePort → host 8090.
+
+## What landed (2026-06-24)
+- **kind** (`deploy/terraform/kind-config.yaml`): extraPortMapping `30808 → host 8090` for the
+  ArgoCD server NodePort.
+- **ArgoCD** (`layers/cluster/argocd.tf`): `server.service.type=NodePort`, `nodePortHttp=30808`
+  (`server.insecure=true` was already set). Stale `port-forward` hints replaced in `outputs.tf`,
+  `RUNMODES.md`, and `just platform-up`.
+- **Container-reachable kubeconfig** (`deploy/kind/cluster-up.sh`): emits
+  `.secrets/kube/temporal-platform.incontainer.kubeconfig` with the API host rewritten to
+  `host.docker.internal` + `insecure-skip-tls-verify` (so the Compose-side Headlamp can connect).
+- **Host plane** (`docker-compose.yml`): new `headlamp` (reads the in-container kubeconfig via
+  `KUBECONFIG`) and `viz-proxy` (`nginx:alpine`, new `compose/deployment/nginx/viz-proxy.conf`)
+  services. viz-proxy strips frame headers + carries WebSocket upgrade; variable upstreams +
+  Docker resolver so it boots even when the cluster/Headlamp aren't up (502/unreachable, by design).
+- **Console**: `config.py` + two `_embed_page` routes (`/headlamp`, `/argocd`) + two `base.html`
+  nav tabs. `embed.html` now degrades to a message instead of a broken iframe when a target is
+  unset (the ADR-0015 minimal slice — covers the Cloud Temporal-UI case).
+- **`just headlamp-reload`**: restarts Headlamp to reload the kubeconfig (it reads it once at
+  startup; confirmed via the headlamp-server flags — no runtime watch).
 
 ## Next (after 0007)
 - ADR-0015 phase 2: `kube_status` provider → live architecture page on kind.

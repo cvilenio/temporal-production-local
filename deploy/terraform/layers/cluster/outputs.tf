@@ -4,7 +4,7 @@ output "orders_namespace" {
 }
 
 output "argocd_namespace" {
-  description = "Kubernetes namespace ArgoCD runs in. Reach the UI via: just k -n argocd port-forward svc/argocd-server 8080:80"
+  description = "Kubernetes namespace ArgoCD runs in. UI is on host :8090 (NodePort), framed in the demo console at http://localhost:8088 via viz-proxy (ADR-0014)."
   value       = helm_release.argocd.namespace
 }
 

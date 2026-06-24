@@ -111,7 +111,8 @@ just chart-publish                                  # publish orders-workers cha
 terraform -chdir=deploy/terraform/layers/cluster init && \
 terraform -chdir=deploy/terraform/layers/cluster apply   # pass TF_VAR_worker_image_digests to pin by digest
 
-# ArgoCD UI (plain HTTP, local): just k -n argocd port-forward svc/argocd-server 8080:80
+# ArgoCD UI: http://localhost:8090 (kind NodePort) — framed in the demo console at
+# http://localhost:8088 (via viz-proxy). Cluster explorer (Headlamp): console :8087. (ADR-0014)
 ```
 
 Things worth knowing:

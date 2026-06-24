@@ -268,6 +268,11 @@ services:
       - TEMPORAL_UI_EMBED_URL=${TEMPORAL_UI_EMBED_URL:-}
       - GRAFANA_EMBED_URL=http://localhost:3000
       - PGWEB_EMBED_URL=http://localhost:8083
+      # Cluster-visibility UIs, fronted by viz-proxy (frame headers stripped).
+      # Always wired; the panels are live only while the kind cluster is up
+      # (Headlamp shows "unreachable", ArgoCD 502s) — see ADR-0014.
+      - HEADLAMP_EMBED_URL=http://localhost:8087
+      - ARGOCD_EMBED_URL=http://localhost:8088
     networks:
       - temporal-network
     ports:
@@ -321,6 +326,52 @@ services:
     ports:
       - "8083:8081"
     restart: always
+
+  # ===========================================================================
+  # CLUSTER VISIBILITY  (host plane, non-prod — see ADR-0014)
+  # Always-on observers into the kind cluster. They live on the host plane
+  # (Compose), NOT in kind, so they survive `cluster-stop`/teardown and can
+  # inspect a degraded cluster. Reachable through viz-proxy, which strips the
+  # frame headers so the demo console can iframe them.
+  # ===========================================================================
+
+  # Headlamp — web K8s explorer (pods, live logs, exec, events). Reads the
+  # CONTAINER-reachable kubeconfig that cluster-up.sh writes (host rewritten to
+  # host.docker.internal, TLS verify skipped). Headlamp loads the kubeconfig at
+  # startup and does NOT watch it; if you bring up kind after this container,
+  # run `just headlamp-reload` to pick up the cluster.
+  headlamp:
+    image: ghcr.io/headlamp-k8s/headlamp:latest
+    container_name: headlamp
+    environment:
+      - KUBECONFIG=/kube/temporal-platform.incontainer.kubeconfig
+    volumes:
+      - ./.secrets/kube:/kube:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - temporal-network
+    restart: unless-stopped
+
+  # viz-proxy — frame-header-stripping reverse proxy for the visibility UIs.
+  # 8087 → Headlamp (by service name); 8088 → ArgoCD (kind NodePort via
+  # host.docker.internal:8090). Separate from the OSS-only Temporal ui-proxy
+  # because these must work in every kind run mode (incl. kind + Cloud).
+  viz-proxy:
+    image: nginx:alpine
+    container_name: viz-proxy
+    depends_on:
+      - headlamp
+    ports:
+      - "8087:8087"   # Headlamp
+      - "8088:8088"   # ArgoCD UI
+    volumes:
+      - ./compose/deployment/nginx/viz-proxy.conf:/etc/nginx/nginx.conf:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - temporal-network
+    restart: unless-stopped
 
 # =============================================================================
 # NETWORKS & VOLUMES
