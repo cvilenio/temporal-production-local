@@ -30,12 +30,24 @@
     </div>
   </div>
 
+  {% if embed_url %}
   <iframe
     x-ref="frame"
     src="{{ embed_url }}"
     title="{{ title }}"
     class="flex-1 w-full border-0 bg-white"
     referrerpolicy="no-referrer"></iframe>
+  {% else %}
+  <!-- No embed target for this run mode (e.g. the Temporal UI is external in
+       Cloud mode and can't be framed). Degrade to a message, not a broken iframe. -->
+  <div class="flex-1 w-full flex items-center justify-center p-8 text-center">
+    <div class="max-w-md">
+      <p class="text-textPrimary font-semibold mb-1">{{ title }} isn't embedded in this run mode.</p>
+      <p class="text-textMuted text-sm">This view is only available when its backing service runs
+        locally. In Temporal Cloud mode, open the Cloud UI directly in your browser.</p>
+    </div>
+  </div>
+  {% endif %}
 </div>
 
 {% endblock %}

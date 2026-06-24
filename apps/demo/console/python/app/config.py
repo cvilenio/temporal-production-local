@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     temporal_ui_embed_url: str = "http://localhost:8081"
     grafana_embed_url: str = "http://localhost:3000"
     pgweb_embed_url: str = "http://localhost:8083"
+    # Cluster-visibility UIs, fronted by viz-proxy (frame headers stripped).
+    # Live only while the kind cluster is up; see ADR-0014.
+    headlamp_embed_url: str = "http://localhost:8087"
+    argocd_embed_url: str = "http://localhost:8088"
 
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"

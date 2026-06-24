@@ -74,3 +74,23 @@ async def pgweb_page(request: Request):
         title="pgweb — Orders DB",
         embed_url=settings.pgweb_embed_url,
     )
+
+
+@router.get("/headlamp", response_class=HTMLResponse)
+async def headlamp_page(request: Request):
+    return _embed_page(
+        request,
+        active="headlamp",
+        title="Headlamp — Cluster Explorer",
+        embed_url=settings.headlamp_embed_url,
+    )
+
+
+@router.get("/argocd", response_class=HTMLResponse)
+async def argocd_page(request: Request):
+    return _embed_page(
+        request,
+        active="argocd",
+        title="ArgoCD",
+        embed_url=settings.argocd_embed_url,
+    )

@@ -149,6 +149,11 @@ chart-publish:
 k *args:
     @KUBECONFIG={{kubeconfig}} kubectl {{args}}
 
+# Restart host-plane Headlamp so it reloads the kubeconfig (it reads it once at
+# startup). Run after `cluster-up` if the console host stack was already up.
+headlamp-reload:
+    @docker restart headlamp >/dev/null && echo "headlamp restarted — kubeconfig reloaded"
+
 # Full local bring-up: cluster + registry, mirror deps, CI (build/push), publish chart,
 # pin workers by digest, apply the cluster layer. One command, each step idempotent.
 platform-up:
@@ -164,4 +169,7 @@ platform-up:
     export TF_VAR_worker_image_digests="{\"workflow\":\"$wf\",\"activity\":\"$ac\"}"
     terraform -chdir=deploy/terraform/layers/cluster init -input=false
     terraform -chdir=deploy/terraform/layers/cluster apply -auto-approve
-    echo "platform up. ArgoCD UI: just k -n argocd port-forward svc/argocd-server 8080:80"
+    just headlamp-reload 2>/dev/null || true
+    echo "platform up."
+    echo "  Console (all UIs): http://localhost:8086   ArgoCD: http://localhost:8088   Headlamp: http://localhost:8087"
+    echo "  (If the console stack wasn't running, start it with 'just up-cloud' then 'just headlamp-reload'.)"

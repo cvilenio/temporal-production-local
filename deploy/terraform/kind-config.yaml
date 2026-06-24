@@ -26,5 +26,10 @@ nodes:
       - { containerPort: 30723, hostPort: 7233, protocol: TCP }
       # OTLP gRPC/HTTP receiver (host 4318 → collector)
       - { containerPort: 30418, hostPort: 4318, protocol: TCP }
+      # ArgoCD server HTTP (NodePort 30808 → host 8090). The host-plane
+      # viz-proxy fronts this and strips frame headers so the console can
+      # iframe it; the raw host port stays reachable for `open in new tab`.
+      # See ADR-0014 (local visibility plane).
+      - { containerPort: 30808, hostPort: 8090, protocol: TCP }
   - role: worker
   - role: worker

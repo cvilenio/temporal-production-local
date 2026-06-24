@@ -11,8 +11,11 @@ resource "helm_release" "argocd" {
   namespace        = var.argocd_namespace
   create_namespace = true
 
-  # - server.insecure: serve the UI/API over plain HTTP locally (reach it with
-  #   `just k -n argocd port-forward svc/argocd-server 8080:80`). Not for prod.
+  # - server.insecure: serve the UI/API over plain HTTP locally. Not for prod.
+  # - server.service: expose the UI on a fixed NodePort (30808) which the
+  #   kind config maps to host :8090. The host-plane viz-proxy (Compose)
+  #   fronts that and strips frame headers so the demo console can iframe it
+  #   (ADR-0014). Replaces the old `port-forward svc/argocd-server` hint.
   # - repositories.local-charts: the in-cluster OCI registry, plain-HTTP + insecure,
   #   so ArgoCD pulls every chart locally (no GitHub/public-internet).
   values = [
@@ -29,6 +32,12 @@ resource "helm_release" "argocd" {
             enableOCI = "true"
             insecure  = "true"
           }
+        }
+      }
+      server = {
+        service = {
+          type         = "NodePort"
+          nodePortHttp = 30808
         }
       }
     })

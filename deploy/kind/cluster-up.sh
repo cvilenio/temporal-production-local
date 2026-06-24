@@ -133,6 +133,24 @@ endpoints:
       ready: true
 EOF
 
+# 7. Emit a CONTAINER-REACHABLE kubeconfig variant for the host-plane Headlamp
+#    (ADR-0014). kind writes the API server as https://127.0.0.1:<port>, which a
+#    Compose container can't reach; rewrite the host to host.docker.internal and
+#    skip TLS verify (the API cert's SANs don't cover that name). Non-prod host
+#    plane only — never used to drive the cluster from Terraform/CLI.
+INCONTAINER_KUBECONFIG="${KUBECONFIG_PATH%.kubeconfig}.incontainer.kubeconfig"
+CLUSTER_KEY="kind-${CLUSTER_NAME}"
+server_url="$(KUBECONFIG="${KUBECONFIG_PATH}" kubectl config view -o "jsonpath={.clusters[?(@.name=='${CLUSTER_KEY}')].cluster.server}")"
+host_url="${server_url/127.0.0.1/host.docker.internal}"
+host_url="${host_url/0.0.0.0/host.docker.internal}"
+cp "${KUBECONFIG_PATH}" "${INCONTAINER_KUBECONFIG}"
+KUBECONFIG="${INCONTAINER_KUBECONFIG}" kubectl config set-cluster "${CLUSTER_KEY}" \
+  --server="${host_url}" --insecure-skip-tls-verify=true >/dev/null
+# --insecure-skip-tls-verify and a CA bundle are mutually exclusive; drop the CA.
+KUBECONFIG="${INCONTAINER_KUBECONFIG}" kubectl config unset \
+  "clusters.${CLUSTER_KEY}.certificate-authority-data" >/dev/null 2>&1 || true
+echo "==> Wrote container-reachable kubeconfig (${host_url}) -> ${INCONTAINER_KUBECONFIG}"
+
 echo
 echo "kind '${CLUSTER_NAME}' is up."
 echo "  registry   : localhost:${REGISTRY_PORT} (host push)  |  ${REGISTRY_NAME}:5000 (node pull)  |  ${REGISTRY_NAME}.kube-public.svc:5000 (in-cluster)"
