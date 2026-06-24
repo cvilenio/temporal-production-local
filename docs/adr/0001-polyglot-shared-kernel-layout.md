@@ -21,10 +21,12 @@ Organize the repo as **shared kernels per language + thin apps grouped by type**
   The importable package is just `orders`, installed editable via the uv workspace, so
   imports are flat `from orders…` regardless of filesystem depth. (`libs/` over
   `kernel/`/`src/`: the recognizable apps-vs-library signal across languages.)
-- `apps/<class>/<app>/<lang>/` — thin deployment units, grouped by **deployment class**:
-  `temporal/` (workers, codec-server), `business/` (the orders-api client/gateway), `demo/`
-  (console, mock-api — not required to run Temporal in prod). Each app imports the kernel
-  and starts one thing.
+- `apps/<class>/<app>/<lang>/` — thin deployment units, grouped by **deployment class**
+  along an ownership + required-to-run axis: `temporal/` (workers, codec-server — the
+  orchestration substrate that must run for workflows to execute), `platform/` (console —
+  platform/operability tooling a platform team runs; not required by the business logic),
+  `business/` (orders-api, mock-api — Temporal-agnostic domain apps and simulated external
+  integrations). Each app imports the kernel and starts one thing.
 - `images/<lang>.Dockerfile` — one configurable image per language; build args select the
   dependency group and entrypoint. The kernel is always installed (the "base"); the app dir
   is copied last (the "definition").

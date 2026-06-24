@@ -160,7 +160,7 @@ and ArgoCD's own bootstrap are tier-3 "warm it once," consistent with the contra
 ### Going offline (e.g. on a plane): stop, don't delete
 
 The key is **stop ≠ delete**. A stopped cluster restarts fully offline (node containerd image cache
-+ zot's `kind-registry-data` volume both persist); a *deleted* cluster can't be recreated offline
++ zot's `artifact-registry-data` volume both persist); a *deleted* cluster can't be recreated offline
 (`kindest/node`, the argo-cd chart, and ArgoCD's images are tier-3 bootstrap — see ADR-0013).
 
 ```sh

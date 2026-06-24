@@ -891,7 +891,7 @@ mock-api = [
 orders-api = [
     { name = "orders" },
 ]
-retail-demo-console = [
+platform-console = [
     { name = "asyncpg" },
     { name = "docker" },
     { name = "fastapi" },
@@ -928,7 +928,7 @@ mock-api = [
     { name = "uvicorn", specifier = "==0.29.0" },
 ]
 orders-api = [{ name = "orders", editable = "libs/orders/python" }]
-retail-demo-console = [
+platform-console = [
     { name = "asyncpg", specifier = ">=0.29.0" },
     { name = "docker", specifier = ">=7.1.0" },
     { name = "fastapi", specifier = ">=0.111.0" },

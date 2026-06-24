@@ -9,7 +9,7 @@
 # don't pull it into their group.
 #
 #   APP_GROUP   uv dependency group: workers | orders-api | codec-server
-#                                    | retail-demo-console | mock-api
+#                                    | platform-console | mock-api
 #   APP_PATH    app dir, e.g. apps/business/orders-api/python, apps/temporal/workers/python/workflow
 #   APP_MODULE  uvicorn target (main:app) or python module; workers override CMD
 #   APP_CMD     uvicorn | python

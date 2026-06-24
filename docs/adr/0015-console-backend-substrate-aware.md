@@ -7,7 +7,7 @@
 
 ## Context
 
-`retail-demo-console` was built for a single shape of the demo and bakes in three assumptions that
+`platform-console` (originally `retail-demo-console`) was built for a single shape of the demo and bakes in three assumptions that
 no longer hold now that the repo spans the full run-mode matrix (RUNMODES.md: Compose×{OSS,Cloud},
 kind×{OSS,Cloud}):
 

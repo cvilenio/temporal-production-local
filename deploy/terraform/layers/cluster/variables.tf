@@ -3,13 +3,13 @@
 variable "kubeconfig_path" {
   description = "kubeconfig for the kind cluster (written by deploy/kind/cluster-up.sh)."
   type        = string
-  default     = "../../../../.secrets/kube/temporal-platform.kubeconfig"
+  default     = "../../../../.secrets/kube/kind.kubeconfig"
 }
 
 variable "kube_context" {
   description = "kubeconfig context for the kind cluster."
   type        = string
-  default     = "kind-temporal-platform"
+  default     = "kind-kind"
 }
 
 variable "cloud_state_path" {
@@ -58,7 +58,7 @@ variable "oci_charts_repo" {
 variable "registry_service" {
   description = "Name of the in-cluster Service for the HTTP registry (created by cluster-up.sh), proxied by registry-tls."
   type        = string
-  default     = "kind-registry"
+  default     = "artifact-registry"
 }
 
 variable "orders_workers_chart_version" {

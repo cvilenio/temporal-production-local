@@ -301,8 +301,9 @@ order-ID model and worker topology are described in
 ## Repository layout
 
 ```
-apps/        Thin deployment units, grouped by class: temporal/ (workers, codec scaffold),
-             business/ (orders API), demo/ (console, mock API).
+apps/        Thin deployment units, grouped by class: temporal/ (workers, codec scaffold —
+             orchestration substrate), platform/ (console — operability tooling),
+             business/ (orders API + mock API — domain apps & simulated integrations).
 libs/        Shared-kernel code apps import (the orders domain: workflows, activities,
              clients, DB, telemetry). Polyglot-ready; Python today.
 images/      One configurable Dockerfile per language.
