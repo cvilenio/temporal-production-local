@@ -57,7 +57,10 @@ fix = { cmd = "ruff check --fix .", help = "Lint and autofix with ruff" }
 format = { cmd = "ruff format .", help = "Format code" }
 format-check = { cmd = "ruff format --check .", help = "Check formatting only" }
 typecheck = { cmd = "pyright", help = "Static type check" }
-test = { cmd = "pytest", help = "Run tests" }
+# Tolerate pytest's exit code 5 (no tests collected) so the gate stays green
+# until the first tests land (e.g. the planned replay/NDE suite). Real failures
+# (exit 1) still fail the task.
+test = { shell = "pytest; code=$?; if [ $code -eq 5 ]; then echo 'pytest: no tests collected (ok for now)'; exit 0; fi; exit $code", help = "Run tests (tolerates no-tests-yet)" }
 lint = { sequence = [
   "ruff-check",
   "format-check",
@@ -79,6 +82,7 @@ check = { sequence = ["lint", "test"], help = "Full gate: lint + test" }
 # =============================================================================
 
 render-oss-bootstrap = { cmd = "python compose/scripts/render-oss-bootstrap.py", help = "Render the shared spec to the OSS bootstrap env file" }
+render-deps = { cmd = "python compose/scripts/render-deps.py", help = "Render config/dependencies.yaml -> config/.generated/deps.env (for the kind delivery scripts)" }
 up = { shell = "python compose/scripts/render-oss-bootstrap.py; set -a; . config/local-oss.env; set +a; docker compose -f docker-compose.yml -f compose/oss-server.yml up --build", help = "Local OSS server + apps" }
 down = { shell = "docker compose -f docker-compose.yml -f compose/oss-server.yml down -v", help = "Stop the local-OSS stack and drop volumes" }
 fresh = { sequence = ["down", "up"], help = "Recreate the local-OSS stack" }
@@ -87,6 +91,57 @@ up-cloud = { shell = "set -a; . .secrets/keys/cloud-nonprod.env; set +a; docker 
 up-cloud-prod = { shell = "set -a; . .secrets/keys/cloud-prod.env; set +a; docker compose -f docker-compose.yml up --build", help = "Apps against Temporal Cloud (prod)" }
 down-cloud = { shell = "docker compose -f docker-compose.yml down -v", help = "Stop the Cloud-backed app stack and drop volumes" }
 fresh-cloud = { sequence = ["down-cloud", "up-cloud"], help = "Recreate the Cloud (nonprod) app stack" }
+
+# =============================================================================
+# CI pipeline + worker image build/push (kind path).
+#
+# Worker images are tagged with the short git SHA so each build is an immutable,
+# uniquely-addressable artifact. On kind the Temporal Worker Controller derives a
+# fresh Build ID from the pod template, so a new image tag = a new worker version.
+# REGISTRY defaults to the local registry wired to kind by `just cluster-up`.
+# Prefer the `just` front door (`just ci`); these are the Python-layer internals.
+# =============================================================================
+
+# Tag = `git describe --always --dirty` so a dirty tree is never confused with a
+# clean commit (the tag carries a `-dirty` suffix). The immutable identity is the
+# digest (see image-digests) — deploys pin by digest, the tag is for humans.
+build-images = { shell = """
+set -e
+REGISTRY="${REGISTRY:-localhost:5001}"
+TAG="$(git describe --tags --always --dirty --abbrev=12)"
+for profile in workflow activity; do
+  docker build -f images/python.Dockerfile \
+    --build-arg APP_GROUP=workers \
+    --build-arg APP_PATH=apps/temporal/workers/python/$profile \
+    --build-arg APP_MODULE=main \
+    --build-arg APP_CMD=python \
+    -t "$REGISTRY/orders-worker-$profile:$TAG" .
+done
+echo "Built $REGISTRY/orders-worker-{workflow,activity}:$TAG"
+""", help = "Build both worker images, tagged <registry>/orders-worker-<profile>:<git-describe>" }
+
+push-images = { shell = """
+set -e
+REGISTRY="${REGISTRY:-localhost:5001}"
+TAG="$(git describe --tags --always --dirty --abbrev=12)"
+for profile in workflow activity; do
+  docker push "$REGISTRY/orders-worker-$profile:$TAG"
+done
+echo "Pushed $REGISTRY/orders-worker-{workflow,activity}:$TAG"
+""", help = "Push both worker images to the local registry" }
+
+image-tag = { shell = "git describe --tags --always --dirty --abbrev=12", help = "Print the image tag (git-describe) for the current tree" }
+
+image-digests = { shell = """
+set -e
+REGISTRY="${REGISTRY:-localhost:5001}"
+TAG="$(git describe --tags --always --dirty --abbrev=12)"
+for profile in workflow activity; do
+  echo "$profile=$(crane digest "$REGISTRY/orders-worker-$profile:$TAG" --insecure)"
+done
+""", help = "Print pushed image digests (profile=sha256:...) for deploy-by-digest" }
+
+ci = { sequence = ["lint", "test", "build-images", "push-images"], help = "Local CI gate: lint + test + build + push worker images" }
 
 [tool.pyright]
 typeCheckingMode = "standard"

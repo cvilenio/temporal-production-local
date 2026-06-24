@@ -2,6 +2,7 @@ from datetime import timedelta
 from typing import Any
 
 from temporalio import workflow
+from temporalio.common import VersioningBehavior
 from temporalio.contrib.opentelemetry.workflow import completed_span as otel_span
 from temporalio.exceptions import ActivityError, ApplicationError
 
@@ -44,7 +45,10 @@ with workflow.unsafe.imports_passed_through():
     from orders.workflows.order.terminal import TERMINAL_CONFIG, TerminalReason
 
 
-@workflow.defn
+# PINNED: order processing completes in minutes (well within a deploy cycle), so
+# each execution stays on the Worker Deployment Version it started on — no patching
+# needed across versions. Required once Worker Versioning is enabled (ADR-0004).
+@workflow.defn(versioning_behavior=VersioningBehavior.PINNED)
 class OrderWorkflow:
     def __init__(self) -> None:
         self._status = OrderStatus.PENDING

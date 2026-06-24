@@ -1,0 +1,35 @@
+# Temporal Worker Controller — reconciles Connection/WorkerDeployment CRs into
+# versioned worker Deployments (Build-ID rainbow deploys). Pinned to chart 0.26.0
+# / appVersion 1.7.0. cert-manager is a soft dependency for the webhook: we let
+# cert-manager land via its own Application (wave -2) and only have the controller
+# create its Issuer/Certificate (certmanager.enabled), not install cert-manager
+# itself (certmanager.install=false). sync-wave -1: after CRDs + cert-manager,
+# before the orders workload (wave 0).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: temporal-worker-controller
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: default
+  source:
+    # Local OCI mirror (deploy/kind/mirror-deps.sh) — no public-internet pull.
+    # targetRevision is injected by the cluster layer from config/dependencies.yaml.
+    repoURL: registry-tls.kube-public.svc:5000/charts
+    chart: temporal-worker-controller
+    helm:
+      valuesObject:
+        certmanager:
+          install: false # cert-manager comes from its own Application
+          enabled: true # but DO create the webhook Issuer + Certificate
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: temporal-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

@@ -1,9 +1,21 @@
 # kind cluster for the demo platform.
 # Port mappings expose the in-cluster Temporal frontend (gRPC) and the OTLP
 # receiver on the host so local SDK clients / the CLI can connect without a
-# tunnel. Adapted from alexandreroman/temporal-k8s.
+# tunnel. Adapted from alexandreroman/temporal-k8s (Apache-2.0).
+#
+# Lifecycle is CLI-owned (deploy/kind/cluster-up.sh, driven by `just cluster-up`),
+# not the Terraform kind provider — so the kubernetes/helm providers in
+# layers/cluster read a real kubeconfig instead of depending on a not-yet-created
+# resource. See docs/adr (cluster seam) and ai_checkpoints.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
+# Let containerd resolve per-registry hosts from /etc/containerd/certs.d; the
+# cluster-up script drops a hosts.toml there pointing localhost:5001 at the
+# local registry container (kind+registry recipe).
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = "/etc/containerd/certs.d"
 nodes:
   - role: control-plane
     extraPortMappings:

@@ -15,3 +15,14 @@ Target shape (see `docs/ARCHITECTURE.md` and the approved Cloud-layer plan):
   Worker Controller PINNED build-ID versioning.
 - Each env targets its Temporal Cloud namespace (`ziggymart-<env>.<account-id>`) using the k8s
   Secret created by the [cluster layer](../cluster/README.md).
+
+## One documented exception: the orders-workers Application
+
+ArgoCD reconciles every workload, but the **orders-workers** Application is *seeded by the
+[cluster layer](../cluster/README.md)* (Terraform), not committed under
+[`deploy/argocd/applications/`](../../../argocd/applications/). Reason: it carries the
+account-bearing namespace handle + regional endpoint, which must not live in git
+(`.githooks/pre-commit`). Terraform reads those from cloud state and injects them into the
+Application's `valuesObject`; ArgoCD still does the reconciling. Secret-free add-ons
+(cert-manager, Worker Controller) remain pure-GitOps under `applications/`. Same control-plane vs
+data-plane asymmetry as ADR-0007; see ADR-0009.

@@ -1,19 +1,54 @@
-# layers/cluster — kind + ArgoCD (STUB, not built yet)
+# layers/cluster — on-cluster control plane (kind + ArgoCD + credential handoff)
 
-Out of scope for the current checkpoint. This layer will own the local **control plane
-on the cluster side**:
+Owns the local **control plane on the cluster side**:
 
-- the kind cluster (`deploy/terraform/kind-config.yaml` already has the port maps),
-- the ArgoCD install + the root app-of-apps bootstrap,
-- per-env Kubernetes namespaces (`orders-nonprod`, `orders-prod`),
-- the **Temporal Cloud API key as a k8s Secret** — the credential handoff. This layer
-  reads the [cloud layer](../cloud/README.md) outputs (`terraform_remote_state` or a
-  piped `terraform output -json`) and materializes the Secret the worker chart expects
-  (`deploy/charts/orders-workers/values.yaml` `connection.apiKeySecret`).
+- **ArgoCD** install (the only imperatively-installed component) + the GitOps
+  bootstrap (root app-of-apps seeded via the chart's `extraObjects`).
+- the **orders** Kubernetes namespace.
+- the **Temporal Cloud worker API-key Secret** (`orders-cloud-apikey`) — the
+  credential handoff. This layer reads the [cloud layer](../cloud/README.md)
+  outputs via `terraform_remote_state` and materializes the Secret the
+  orders-workers chart consumes (`apiKeySecretRef`).
 
-The **Terraform↔ArgoCD boundary** sits here: Terraform provisions the cluster, installs
-ArgoCD, and lands the credential Secret; everything *running on* the cluster is owned by
-ArgoCD (see [workloads](../workloads/README.md)).
+The kind cluster itself is **CLI-owned** (`deploy/kind/cluster-up.sh`, run via
+`just cluster-up`), not the Terraform kind provider — so the kubernetes/helm
+providers read a real kubeconfig instead of depending on a not-yet-created
+resource. See the cluster-seam ADR.
 
-Today's `deploy/terraform/main.tf` (kind + ArgoCD) is the seed for this layer and stays
-in place until this layer is built out.
+## The Terraform↔ArgoCD boundary
+
+Terraform lands the cluster prerequisites (ArgoCD, namespace, credential Secret),
+the TLS proxy that fronts the registry, and **seeds all Applications**
+(`kubectl_manifest`); everything that *runs on* the cluster is reconciled by
+ArgoCD (ADR-0002). Delivery is **local-only** (ADR-0011): ArgoCD pulls every chart
+from the local OCI registry — no GitHub/public-internet. The add-on Application
+definitions are committed YAML ([`deploy/argocd/applications/`](../../../argocd/applications/),
+read + inlined by TF); the **orders-workers** Application is injected here with the
+account-bearing namespace handle + regional endpoint + image digests from cloud
+state, so the account id never lands in git (`.githooks/pre-commit`).
+
+Files: `main.tf` (ArgoCD, namespace, Secret, seeded Apps), `registry-proxy.tf`
+(TLS proxy so ArgoCD can pull OCI charts over HTTPS), `remote-state.tf` (reads the
+cloud layer).
+
+## Usage
+
+```sh
+just platform-up   # full local bring-up (recommended): cluster + registry, mirror deps,
+                   # CI (build/push), publish chart, pin digests, terraform apply.
+
+# Reach the ArgoCD UI (plain HTTP, local only):
+just k -n argocd port-forward svc/argocd-server 8080:80
+
+# Going offline (e.g. a flight): stop (don't delete), then resume with no network.
+just cluster-stop        # before you lose connectivity
+just cluster-start       # offline — workers + apps resume from cache (ADR-0013)
+```
+
+Requires the [cloud layer](../cloud/README.md) to have been applied first (its
+state is the source of the API key, endpoint, and namespace handle).
+
+> **Delivery note:** ArgoCD pulls charts from the local registry, not git. Local
+> edits reconcile after `just chart-publish` (orders-workers) / `just mirror-deps`
+> (third-party) and a re-apply — not after a git push. Your `git push origin main`
+> is unchanged. See ADR-0011.

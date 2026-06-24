@@ -1,10 +1,21 @@
-# Connection to the Temporal frontend. Self-hosted-on-kind by default; for Cloud,
-# set tls/apiKeySecret and point hostPort at the Cloud endpoint (ADR-0003/0005).
+# Connection to the Temporal frontend.
+#
+# For kind+Cloud the account-bearing values (hostPort = regional endpoint,
+# temporalNamespace = <ns>.<account>) are injected at deploy time by the cluster
+# layer (Terraform reads them from cloud state into the ArgoCD Application's
+# valuesObject) — they are NOT committed here (account id stays out of git;
+# see .githooks/pre-commit). The placeholders below keep `helm template` runnable.
 connection:
-  hostPort: temporal-frontend.temporal.svc:7233
-  temporalNamespace: ziggymart
-  tls: false
-  # apiKeySecret: orders-cloud-apikey   # (cloud) secret holding the API key
+  # API keys REQUIRE the regional endpoint, e.g. us-east-1.aws.api.temporal.io:7233.
+  # The namespace endpoint (<ns>.<acct>.tmprl.cloud:7233) rejects API keys.
+  hostPort: "<regional-endpoint>:7233"
+  temporalNamespace: "ziggymart-nonprod.<account-id>"
+  tls: true
+  # API-key auth (default for this repo's Cloud namespaces — api_key_auth=true).
+  # apiKeySecret is the k8s Secret created by the cluster layer; key holds the token.
+  apiKeySecret: orders-cloud-apikey
+  apiKeySecretKey: api-key
+  # mtlsSecret: orders-temporal-tls   # (alternative) mTLS Connection instead of API key
 
 # Rollout strategy for every WorkerDeployment:
 #   Manual      — versions register Inactive; a UI/SDK promotes/ramps them.
@@ -20,18 +31,20 @@ sunset:
 # One entry per worker profile (mirrors orders.worker.WORKER_PROFILES and
 # apps/temporal/workers/python/<name>/). Each profile is its own image (the entrypoint is
 # baked at build time via APP_PATH), so each gets its own image tag = version.
+# Images live in the local kind registry (localhost:5001), pushed by `just ci`;
+# the cluster layer pins the tag to the freshly-built git SHA at apply time.
 workers:
   - name: workflow
     deploymentName: orders-workflow
     replicas: 1
     image:
-      repository: ghcr.io/cvilenio/orders-worker-workflow
-      tag: "1.0" # bump to ship a new version
+      repository: localhost:5001/orders-worker-workflow
+      tag: "latest" # cluster layer overrides with the git-SHA tag from `just ci`
     command: ["python", "main.py"]
   - name: activity
     deploymentName: orders-activity
     replicas: 2
     image:
-      repository: ghcr.io/cvilenio/orders-worker-activity
-      tag: "1.0"
+      repository: localhost:5001/orders-worker-activity
+      tag: "latest"
     command: ["python", "main.py"]
