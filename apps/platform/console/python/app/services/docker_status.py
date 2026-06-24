@@ -77,12 +77,12 @@ SERVICE_REGISTRY = {
         "http_probe": "http://mock-api:8000/health",
     },
     # Tooling strip
-    "retail-demo-console": {
+    "platform-console": {
         "group": "Tooling",
         "icon_key": "window",
-        "display_name": "Demo Console",
+        "display_name": "Platform Console",
         "description": "This application",
-        "http_probe": "http://retail-demo-console:8086/healthz",
+        "http_probe": "http://platform-console:8086/healthz",
     },
     "ui-proxy": {
         "group": "Tooling",

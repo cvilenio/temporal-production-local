@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
     await db.close_db()
 
 
-app = FastAPI(title="Retail Demo Console", lifespan=lifespan)
+app = FastAPI(title="Platform Console", lifespan=lifespan)
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="app/static"), name="static")

@@ -15,10 +15,10 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
 # Local registry + kind cluster names/ports (kind+registry recipe).
-registry_name := "kind-registry"
+registry_name := "artifact-registry"
 registry_port := "5001"
-cluster_name := "temporal-platform"
-kubeconfig := ".secrets/kube/temporal-platform.kubeconfig"
+cluster_name := "kind"
+kubeconfig := ".secrets/kube/kind.kubeconfig"
 
 # List recipes (default).
 default:

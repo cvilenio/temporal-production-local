@@ -22,7 +22,7 @@
 #
 #   lgtm (grafana/otel-lgtm) — OTel Collector + Prometheus + Tempo + Loki + Grafana
 #   orders-db ──► orders-service ──► orders-workflow-worker / orders-activity-worker
-#              │         └─────────► retail-demo-console
+#              │         └─────────► platform-console
 #   mock-api ──┘ (consumed by workers)
 #   pgweb-orders → orders-db   (dev admin UI)
 # =============================================================================
@@ -100,7 +100,7 @@ services:
       dockerfile: images/python.Dockerfile
       args:
         APP_GROUP: mock-api
-        APP_PATH: apps/demo/mock-api/python
+        APP_PATH: apps/business/mock-api/python
         APP_MODULE: main:app
         APP_PORT: "8000"
     container_name: mock-api
@@ -240,16 +240,16 @@ services:
   # container logs. Port 8086.
   # ===========================================================================
 
-  retail-demo-console:
+  platform-console:
     build:
       context: .
       dockerfile: images/python.Dockerfile
       args:
-        APP_GROUP: retail-demo-console
-        APP_PATH: apps/demo/console/python
+        APP_GROUP: platform-console
+        APP_PATH: apps/platform/console/python
         APP_MODULE: app.main:app
         APP_PORT: "8086"
-    container_name: retail-demo-console
+    container_name: platform-console
     depends_on:
       orders-db:
         condition: service_healthy
@@ -351,7 +351,7 @@ services:
     image: ghcr.io/headlamp-k8s/headlamp:latest
     container_name: headlamp
     environment:
-      - KUBECONFIG=/kube/temporal-platform.incontainer.kubeconfig
+      - KUBECONFIG=/kube/kind.incontainer.kubeconfig
     volumes:
       - ./.secrets/kube:/kube:ro
     extra_hosts:

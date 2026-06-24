@@ -6,8 +6,8 @@
 # =============================================================================
 set -euo pipefail
 
-CLUSTER_NAME="${CLUSTER_NAME:-temporal-platform}"
-REGISTRY_NAME="${REGISTRY_NAME:-kind-registry}"
+CLUSTER_NAME="${CLUSTER_NAME:-kind}"
+REGISTRY_NAME="${REGISTRY_NAME:-artifact-registry}"
 KUBECONFIG_PATH="${KUBECONFIG_PATH:-.secrets/kube/${CLUSTER_NAME}.kubeconfig}"
 KEEP_REGISTRY="${KEEP_REGISTRY:-true}"
 

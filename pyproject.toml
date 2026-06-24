@@ -16,7 +16,7 @@ codec-server = [
   "pydantic==2.7.1",
   "temporalio>=1.28,<1.29",
 ]
-retail-demo-console = [
+platform-console = [
   "asyncpg>=0.29.0",
   "docker>=7.1.0",
   "fastapi>=0.111.0",
@@ -41,7 +41,7 @@ dev = [
 ]
 
 [tool.uv]
-default-groups = ["workers", "orders-api", "codec-server", "retail-demo-console", "mock-api", "dev"]
+default-groups = ["workers", "orders-api", "codec-server", "platform-console", "mock-api", "dev"]
 
 # The Python shared kernel is a workspace package; apps depend on it by name.
 [tool.uv.workspace]
@@ -157,8 +157,8 @@ executionEnvironments = [
   { root = "apps/temporal/workers/python/workflow" },
   { root = "apps/temporal/workers/python/activity" },
   { root = "apps/temporal/codec-server/python" },
-  { root = "apps/demo/console/python" },
-  { root = "apps/demo/mock-api/python" },
+  { root = "apps/platform/console/python" },
+  { root = "apps/business/mock-api/python" },
 ]
 
 [tool.pytest.ini_options]

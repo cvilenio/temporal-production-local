@@ -1,6 +1,6 @@
-# Retail Demo Console
+# Platform Console
 
-A lightweight demo webapp for the Temporal retail demo. It allows users to trigger concurrent batches of order workflows (simulating happy paths and failures) and monitor real-time notifications via SSE from the backend database.
+A lightweight host-plane webapp for managing and observing the local Temporal platform across business domains. It aggregates the embedded tool UIs (Temporal UI, Grafana, pgweb, Headlamp, ArgoCD) and, for the orders demo workload, lets users trigger concurrent batches of order workflows (happy paths and failures) and monitor real-time notifications via SSE from the backend database.
 
 ## Environment Variables
 
@@ -17,7 +17,7 @@ A lightweight demo webapp for the Temporal retail demo. It allows users to trigg
 To build the Docker container:
 
 ```bash
-docker build -t retail-demo-console .
+docker build -t platform-console .
 ```
 
 ## Running
@@ -27,7 +27,7 @@ docker build -t retail-demo-console .
 If you appended the service to the existing `docker-compose.yml`, simply run:
 
 ```bash
-docker compose up -d retail-demo-console
+docker compose up -d platform-console
 ```
 
 ### Option B: Standalone Docker Run
@@ -39,7 +39,7 @@ docker run -p 8086:8086 \
   --network temporal-network \
   -e DATABASE_URL=postgresql://admin:password@orders-db:5432/orders_db \
   -e ORDERS_SERVICE_URL=http://orders-service:8000 \
-  retail-demo-console
+  platform-console
 ```
 
 Access the UI at: http://localhost:8086

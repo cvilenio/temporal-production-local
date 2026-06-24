@@ -20,7 +20,7 @@ no binaries (chart `.tgz`, images) into git.
 
 The local registry is **zot** (CNCF OCI-native) — it both **hosts our pushes** and
 **pull-through-caches** upstreams on demand. ArgoCD pulls **every** chart from it (`localhost:5001`
-host / `kind-registry:5000` node / `registry-tls.kube-public.svc:5000` in-cluster via the proxy).
+host / `artifact-registry:5000` node / `registry-tls.kube-public.svc:5000` in-cluster via the proxy).
 No GitHub, no public Helm/registry pulls during steady-state delivery.
 
 - **Third-party container images** (cert-manager, Worker Controller, kube-rbac-proxy, the proxy's
@@ -67,7 +67,7 @@ digest-pin → `terraform apply`.
 - **Disk management:** zot has `dedupe` (shared blobs stored once) plus scheduled GC (`gcInterval`/
   `gcDelay`) and `retention` policies (keep the N most-recently-pushed tags + a `pulledWithin`
   window, delete untagged) in `zot-config.json`, so cached + pushed artifacts self-prune. Manual
-  reset: `docker volume rm kind-registry-data` (rebuilt on demand). Because we deploy by digest,
+  reset: `docker volume rm artifact-registry-data` (rebuilt on demand). Because we deploy by digest,
   retention is kept generous enough not to evict a digest a running pod may re-pull.
 - **One version source:** the third-party versions (cert-manager, Worker Controller, argo-cd, zot,
   nginx) live once in `config/dependencies.yaml` — read by Terraform (`yamldecode`; injects each

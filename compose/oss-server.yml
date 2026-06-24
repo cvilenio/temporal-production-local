@@ -193,6 +193,6 @@ services:
       temporal:
         condition: service_healthy
 
-  retail-demo-console:
+  platform-console:
     environment:
       - TEMPORAL_UI_EMBED_URL=http://localhost:8081

@@ -45,17 +45,17 @@ entirely by the connection profile (env), see [Connection profiles](#connection-
 
 ```
 apps/                         THIN deployment units — what you DEPLOY. Grouped by class.
-  temporal/                     Temporal platform deploys.
+  temporal/                     Orchestration substrate — required for workflows to run.
     workers/python/
       workflow/  main.py          run_worker("workflow")
       activity/  main.py          run_worker("activity")
       (activity-cpu/, activity-io/ … add a profile + a dir — see Worker fleet)
     codec-server/python/        Temporal-adjacent: remote codec proxy (scaffold).
-  business/                     Customer-like apps (business logic; only a Temporal client).
-    orders-api/python/            REST gateway that starts/signals workflows.
-  demo/                         Not required to run Temporal in prod (local/demo tooling).
-    console/python/               Operator UI (HTMX + SSE).
-    mock-api/python/              External-system simulator.
+  platform/                     Platform/operability tooling (not required by business logic).
+    console/python/               Host-plane operator UI (HTMX + SSE); aggregates infra UIs.
+  business/                     Temporal-agnostic domain apps + simulated integrations.
+    orders-api/python/            REST gateway that starts/signals workflows (entrypoint).
+    mock-api/python/              External-system simulator (a stand-in dependency).
 
 libs/                         Shared code — what apps IMPORT. Use case ABOVE language.
   orders/                       the orders domain (polyglot pieces stay together).

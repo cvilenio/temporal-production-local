@@ -21,7 +21,7 @@ degraded — i.e., when you most need to look.
 
 This repo already has two de-facto planes, even though they were never named:
 
-- **Host plane (Compose):** the apps, the lgtm/Grafana stack, the `retail-demo-console`
+- **Host plane (Compose):** the apps, the lgtm/Grafana stack, the `platform-console`
   aggregator (:8086), and the `nginx` ui-proxy (:8081). Always-on; survives the cluster being
   stopped or deleted.
 - **Cluster plane (kind):** ArgoCD, workers, cert-manager. CLI-owned lifecycle (ADR-0009),
@@ -34,7 +34,7 @@ This repo already has two de-facto planes, even though they were never named:
    lives on the host plane.
 
 2. **The cluster explorer is [Headlamp](https://headlamp.dev/) (CNCF), run host-side in Compose.**
-   It mounts the kind kubeconfig (`.secrets/kube/temporal-platform.kubeconfig`) read-only and is
+   It mounts the kind kubeconfig (`.secrets/kube/kind.kubeconfig`) read-only and is
    published on a host port. Headlamp is a web UI (not a TUI), gives the GKE-console-like
    experience — cluster tree, live pod logs, exec, events, RBAC viewer, multi-cluster — and unlike
    Lens carries no licensing friction. Running it host-side is what removes the chicken-and-egg:
@@ -54,7 +54,7 @@ This repo already has two de-facto planes, even though they were never named:
    dark when the cluster is stopped. **That darkness is correct**, not a defect: ArgoCD is a
    cluster-only concern by nature.
 
-4. **`retail-demo-console` remains the always-on aggregator on the host plane** and gains a
+4. **`platform-console` remains the always-on aggregator on the host plane** and gains a
    Headlamp tab and an ArgoCD tab, mirroring the existing Temporal-UI / Grafana / pgweb embed
    pattern (`_embed_page` route + `config.py` setting + `base.html` nav + an nginx server block
    where framing headers must be stripped).

@@ -9,16 +9,16 @@
 # kind+registry recipe (https://kind.sigs.k8s.io/docs/user/local-registry/).
 #
 # Env (set by the justfile; defaults here keep the script standalone):
-#   CLUSTER_NAME   kind cluster name              (default: temporal-platform)
-#   REGISTRY_NAME  registry container name        (default: kind-registry)
+#   CLUSTER_NAME   kind cluster name              (default: kind)
+#   REGISTRY_NAME  registry container name        (default: artifact-registry)
 #   REGISTRY_PORT  host port for the registry     (default: 5001)
 #   KUBECONFIG_PATH where kind writes kubeconfig   (default: .secrets/kube/<cluster>.kubeconfig)
 #   KIND_CONFIG    kind cluster config file       (default: deploy/terraform/kind-config.yaml)
 # =============================================================================
 set -euo pipefail
 
-CLUSTER_NAME="${CLUSTER_NAME:-temporal-platform}"
-REGISTRY_NAME="${REGISTRY_NAME:-kind-registry}"
+CLUSTER_NAME="${CLUSTER_NAME:-kind}"
+REGISTRY_NAME="${REGISTRY_NAME:-artifact-registry}"
 REGISTRY_PORT="${REGISTRY_PORT:-5001}"
 KUBECONFIG_PATH="${KUBECONFIG_PATH:-.secrets/kube/${CLUSTER_NAME}.kubeconfig}"
 KIND_CONFIG="${KIND_CONFIG:-deploy/terraform/kind-config.yaml}"
@@ -99,9 +99,9 @@ KUBECONFIG="${KUBECONFIG_PATH}" kubectl apply -f deploy/kind/local-registry-host
 #    OCI Helm charts over the pod network — certs.d only covers node containerd).
 #    A selector-less Service + a hand-maintained EndpointSlice point at the
 #    registry container's kind-network IP. Re-derived every run, so it self-heals
-#    if the container's IP changes. In-cluster name: kind-registry.kube-public.svc:5000
+#    if the container's IP changes. In-cluster name: artifact-registry.kube-public.svc:5000
 REG_IP="$(docker inspect -f '{{.NetworkSettings.Networks.kind.IPAddress}}' "${REGISTRY_NAME}")"
-echo "==> Wiring in-cluster Service kind-registry.kube-public.svc:5000 -> ${REG_IP}:5000"
+echo "==> Wiring in-cluster Service artifact-registry.kube-public.svc:5000 -> ${REG_IP}:5000"
 KUBECONFIG="${KUBECONFIG_PATH}" kubectl apply -f - <<EOF
 apiVersion: v1
 kind: Service
