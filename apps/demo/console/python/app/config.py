@@ -23,9 +23,11 @@ class Settings(BaseSettings):
 
     # Cloud mode: the Temporal UI is the hosted Cloud console, which can't be
     # iframed (X-Frame-Options: SAMEORIGIN) and uses OAuth — so the nav links
-    # out to it in a new tab instead. temporal_namespace is the full account-
-    # bearing handle (<name>.<account-id>); the deep link is derived from it.
-    # An explicit temporal_ui_external_url overrides the derivation.
+    # out to it in a new tab instead. Several namespaces are live at once, so we
+    # open the namespaces list rather than deep-linking one (which also avoids
+    # depending on a single, possibly-stale TEMPORAL_NAMESPACE). The presence of
+    # temporal_namespace is just the "pointed at Cloud" signal; its value isn't
+    # used in the URL. temporal_ui_external_url overrides the target if set.
     temporal_namespace: str = ""
     temporal_ui_external_url: str = ""
 
@@ -34,10 +36,7 @@ class Settings(BaseSettings):
         if self.temporal_ui_external_url:
             return self.temporal_ui_external_url
         if self.temporal_namespace:
-            return (
-                f"https://cloud.temporal.io/namespaces/"
-                f"{self.temporal_namespace}/workflows"
-            )
+            return "https://cloud.temporal.io/namespaces"
         return ""
 
     model_config = SettingsConfigDict(
