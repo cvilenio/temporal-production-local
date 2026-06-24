@@ -24,6 +24,15 @@ resource "helm_release" "argocd" {
         params = {
           "server.insecure" = true
         }
+        # Zero-friction local viewing: anonymous read-only access so the demo
+        # console can frame the UI without a login wall (ADR-0014). NON-PROD —
+        # never expose ArgoCD this way in a customer environment.
+        cm = {
+          "users.anonymous.enabled" = "true"
+        }
+        rbac = {
+          "policy.default" = "role:readonly"
+        }
         repositories = {
           local-charts = {
             name      = "local-charts"
