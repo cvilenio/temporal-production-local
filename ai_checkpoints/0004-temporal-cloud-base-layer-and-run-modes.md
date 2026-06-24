@@ -58,9 +58,12 @@
   multi-namespace.
 
 ### Verified live
-- Cloud-nonprod stack built + came up (no local server). Workers connected to
-  `ziggymart-nonprod.<account-id>`. Submitted `happy_path` → an order reached
-  `completed`; `OrderWorkflow` confirmed **COMPLETED** in the namespace via `list_workflows`.
+- **Cloud nonprod:** stack built + came up (no local server). Workers connected to
+  `ziggymart-nonprod.<account-id>`. Submitted `happy_path` → an order reached `completed`;
+  `OrderWorkflow` confirmed **COMPLETED** in the namespace via `list_workflows`.
+- **Local OSS:** `poe up` stack built + came up (temporal server + namespace/search-attr
+  bootstrap + workers on `temporal:7233`/`ziggymart`); `happy_path` order reached `completed`.
+  Both run modes proven end-to-end.
 - `terraform validate`/`fmt` clean; post-import `plan` = **No changes**.
 
 ## Decisions
@@ -79,12 +82,9 @@
 - Search attributes registered on **prod** too, but prod has no app stack yet — fine.
 
 ## Next
-- Quick `poe up` OSS smoke test (only `docker compose config` was validated this session).
-- Tidy cosmetic residual: the history redaction mangled a `.gitignore` glob into
-  `*.<account-id>.txt` (a dead literal glob); real cred files live under the fully-ignored
-  `.secrets/`. Drop or fix that line.
 - Build `layers/cluster` (kind + ArgoCD + Cloud-API-key k8s Secret) — the local-kind flavor.
 - Worker chart `connection.yaml` needs an API-key/env-injection branch for Cloud on kind.
-- Promote this session's decisions to ADRs.
+- Promote this session's decisions to ADRs (auth, state, run modes, secrets layout).
+- Consider hardening bootstrap-key storage (Keychain/1Password) — see Open questions.
 
-Compose stack already brought down (`down -v`); cloud namespaces persist (Terraform state).
+Both compose stacks brought down (`down -v`); cloud namespaces persist (Terraform state).

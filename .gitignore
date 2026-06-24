@@ -34,7 +34,7 @@ venv/
 *.key
 *.pem
 *-apikey*
-*.<account-id>.txt
+*.tmprl.txt
 
 # IDE
 .idea/
