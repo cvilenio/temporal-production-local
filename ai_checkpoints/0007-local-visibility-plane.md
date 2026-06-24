@@ -136,6 +136,25 @@ Two fixes landed:
 Process note: re-pin/redeploy workers with `just platform-up` (builds + computes digests), not a
 bare `terraform apply`.
 
+## Refinements (2026-06-24, post-verification)
+- **ArgoCD anonymous read-only** (`argocd.tf` → `configs.cm` `users.anonymous.enabled` +
+  `rbac policy.default=role:readonly`): `server.insecure` alone still gated the UI behind a login,
+  breaking the zero-friction framed view (ADR-0014). NON-PROD only. Verified anon `/api/v1/
+  applications` returns the app list (no 401).
+- **viz-proxy gzip + caching** (`viz-proxy.conf`): Headlamp ships a ~6 MB JS bundle uncompressed;
+  the proxy now gzips (→ ~1.6 MB), uses larger upstream buffers, and marks `/assets/` immutable so
+  reopening the tab doesn't re-download/re-parse. (The "minute to load" the user first saw turned
+  out to be Cursor's embedded browser, not latency — Chrome is fine — but the proxy hygiene stands.)
+- **Real brand icons** (`base.html`): swapped Lucide placeholders for the actual Argo (Simple Icons)
+  and Headlamp (official `icon-dark.svg`, lens cut as an evenodd hole) glyphs, same single-color
+  `currentColor` treatment as the Temporal/Grafana nav icons.
+- **Temporal nav icon = Cloud link-out in Cloud mode** (`config.py`, `pages.py`, `base.html`,
+  `docker-compose.yml`): the hosted Cloud console can't be iframed (`X-Frame-Options: SAMEORIGIN`)
+  and uses OAuth, so in Cloud mode the icon opens `https://cloud.temporal.io/namespaces` (the list —
+  several namespaces are live; avoids a stale single deep-link) in a named browser tab. OSS mode
+  unchanged (local Web UI iframe). `TEMPORAL_NAMESPACE` is only the "pointed at Cloud" signal;
+  `TEMPORAL_UI_EXTERNAL_URL` overrides the target.
+
 ## Next (after 0007)
 - ADR-0015 phase 2: `kube_status` provider → live architecture page on kind.
 - ADR-0015 phase 3: topology-as-data for multi-domain.
