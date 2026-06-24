@@ -112,6 +112,30 @@ config`, `ruff`/`ruff format`/`pyright` all clean.
   reload is only a convenience, not a required step. (An earlier source read wrongly concluded
   "no runtime watch"; the live run corrected it.)
 
+## Gotcha + hardening (2026-06-24, post-live)
+
+During the live run a bare `terraform apply` (to add ArgoCD anon access) was run WITHOUT the
+`worker_image_digests` var that `just platform-up` computes. With no digest the chart falls back
+to `:{tag}` and `tag` defaults to `latest`, which isn't in the local registry → workers went into
+ImagePullBackOff. ArgoCD still showed the app **Healthy** because it only tracks the
+`temporal.io/WorkerDeployment` CR it applied (the controller spawns the failing pods one level
+below), and ArgoCD has no built-in health check for that CRD so unknown CRDs default to Healthy.
+
+Two fixes landed:
+- **ArgoCD custom health (Lua) for `temporal.io/WorkerDeployment`** (`argocd.tf` → `configs.cm`
+  `resource.customizations.health.temporal.io_WorkerDeployment`). Reads the CR's own conditions:
+  `Ready=True` → Healthy; `WaitingForPromotion` → Healthy (the intended Manual-rollout hold,
+  ADR-0012, NOT a failure); otherwise Progressing/Degraded. Verified live via the resource-tree API
+  (`WorkerDeployment … -> Healthy | Waiting for manual promotion`). ArgoCD now also surfaces the
+  controller-spawned Pods/ReplicaSets in the tree, so a real pull failure is visible.
+- **Loud-fail guard** on the silent-`:latest` footgun (`applications.tf` precondition on
+  `kubectl_manifest.applications`): a bare apply with empty digest + `tag=latest` now fails with a
+  "use `just platform-up`" message instead of deploying a broken `:latest`. A real, existing
+  non-`latest` tag is still a valid digest-free fallback. Verified via a negative `terraform plan`.
+
+Process note: re-pin/redeploy workers with `just platform-up` (builds + computes digests), not a
+bare `terraform apply`.
+
 ## Next (after 0007)
 - ADR-0015 phase 2: `kube_status` provider → live architecture page on kind.
 - ADR-0015 phase 3: topology-as-data for multi-domain.

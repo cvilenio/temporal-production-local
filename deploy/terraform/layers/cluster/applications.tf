@@ -99,4 +99,20 @@ resource "kubectl_manifest" "applications" {
 
   # After ArgoCD (Application CRD) and the TLS proxy ArgoCD pulls charts through.
   depends_on = [helm_release.argocd, kubernetes_deployment.registry_proxy]
+
+  # Guard the silent-`:latest` footgun: with no digest, the chart falls back to
+  # `:{tag}`, and tag defaults to "latest" — which isn't in the local registry,
+  # so workers land in ImagePullBackOff while ArgoCD still reports the CR healthy.
+  # A bare `terraform apply` (without the digest var `just platform-up` computes)
+  # used to hit exactly this. Fail loudly instead. A real (non-"latest") tag that
+  # exists in the registry is still a valid digest-free fallback.
+  lifecycle {
+    precondition {
+      condition = alltrue([
+        for w in values(local.worker_image) :
+        w.digest != "" || (w.tag != "" && w.tag != "latest")
+      ])
+      error_message = "Unsafe worker image ref: each worker needs a pinned digest (preferred) or a non-'latest' tag that exists in the local registry. Empty digest + tag='latest' silently deploys :latest and breaks the workers. Use `just platform-up` (it builds + computes digests) rather than a bare `terraform apply`."
+    }
+  }
 }

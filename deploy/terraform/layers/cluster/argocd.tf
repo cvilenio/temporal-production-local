@@ -29,6 +29,49 @@ resource "helm_release" "argocd" {
         # never expose ArgoCD this way in a customer environment.
         cm = {
           "users.anonymous.enabled" = "true"
+          # Custom health for the Worker Controller CRD. Without this, ArgoCD has
+          # no health logic for temporal.io/WorkerDeployment and defaults unknown
+          # CRDs to Healthy — so the app showed green even while the controller's
+          # pods were in ImagePullBackOff (the operator/GitOps visibility gap:
+          # ArgoCD tracks the CR it applied, not the pods the controller spawns).
+          # We read the CR's own conditions instead. NOTE: `WaitingForPromotion`
+          # is the intended Manual-rollout hold (ADR-0012), so it maps to Healthy;
+          # a stuck/not-yet-polling rollout maps to Progressing/Degraded.
+          "resource.customizations.health.temporal.io_WorkerDeployment" = <<-EOT
+            local hs = {}
+            if obj.status ~= nil and obj.status.conditions ~= nil then
+              local ready = nil
+              local progressing = nil
+              for i, c in ipairs(obj.status.conditions) do
+                if c.type == "Ready" then ready = c end
+                if c.type == "Progressing" then progressing = c end
+              end
+              if ready ~= nil and ready.status == "True" then
+                hs.status = "Healthy"
+                hs.message = ready.message
+                return hs
+              end
+              if (ready ~= nil and ready.reason == "WaitingForPromotion") or
+                 (progressing ~= nil and progressing.reason == "WaitingForPromotion") then
+                hs.status = "Healthy"
+                hs.message = "Waiting for manual promotion (rollout strategy Manual)"
+                return hs
+              end
+              if progressing ~= nil and progressing.status == "True" then
+                hs.status = "Progressing"
+                hs.message = progressing.message
+                return hs
+              end
+              if ready ~= nil then
+                hs.status = "Degraded"
+                hs.message = ready.message
+                return hs
+              end
+            end
+            hs.status = "Progressing"
+            hs.message = "Waiting for WorkerDeployment status"
+            return hs
+          EOT
         }
         rbac = {
           "policy.default" = "role:readonly"
