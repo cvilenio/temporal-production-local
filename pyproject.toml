@@ -53,67 +53,31 @@ members = ["libs/orders/python"]
 [tool.uv.sources]
 orders = { workspace = true }
 
-# Task runner. Invoke with `uv run poe <task>` (e.g. `uv run poe check`).
+# Task runner — Python toolchain ONLY (ruff / pyright / pytest).
+# Boundary rule: if a task shells docker/compose/terraform/kubectl/helm or
+# touches >1 language's artifacts, it lives in the justfile, NOT here. This
+# layer is the Python *leaf* runner; `just` is the cross-language front door
+# that fans it (and future go/ts/java leaves) in. Invoke via `uv run poe <task>`.
 [tool.poe.tasks]
 ruff-check = { cmd = "ruff check .", help = "Lint with ruff" }
 fix = { cmd = "ruff check --fix .", help = "Lint and autofix with ruff" }
 format = { cmd = "ruff format .", help = "Format code" }
 format-check = { cmd = "ruff format --check .", help = "Check formatting only" }
 typecheck = { cmd = "pyright", help = "Static type check" }
-lint-manifests = { cmd = "bash deploy/lint-manifests.sh", help = "helm lint + kubeconform on the k8s manifests (soft-skips kubeconform if absent)" }
 # Tolerate pytest's exit code 5 (no tests collected) so the gate stays green
 # until the first tests land (e.g. the planned replay/NDE suite). Real failures
 # (exit 1) still fail the task.
 test = { shell = "pytest; code=$?; if [ $code -eq 5 ]; then echo 'pytest: no tests collected (ok for now)'; exit 0; fi; exit $code", help = "Run tests (tolerates no-tests-yet)" }
-lint = { sequence = [
-  "ruff-check",
-  "format-check",
-  "typecheck",
-  "lint-manifests",
-], help = "All static checks (no fixes)" }
-check = { sequence = ["lint", "test"], help = "Full gate: lint + test" }
+# Python static checks ONLY. Manifest lint (helm/kubeconform) is infra → it
+# moved to `just lint-manifests`, and `just lint` fans both in.
+lint = { sequence = ["ruff-check", "format-check", "typecheck"], help = "Python static checks (no fixes)" }
+check = { sequence = ["lint", "test"], help = "Python gate: lint + test" }
 
-# =============================================================================
-# Compose lifecycle. Compose's role is now narrowed (see RUNMODES.md): it runs the
-# host visibility/console plane for the kind paths, and a LEGACY local self-hosted
-# Temporal **server + app tier** fallback. It no longer runs the Temporal workers —
-# those run on kind (Worker Deployment). So `poe up` brings up the OSS server + app
-# tier with NO workers (workflows won't execute locally until OSS-on-kind lands).
-#
-# Each task SOURCES its connection profile into the compose process so the backend
-# is deterministic regardless of any TEMPORAL_* in the host shell. `down` must use
-# the same -f set as the matching `up`. Bring the stack down before switching modes.
-#
-#   Local OSS (server + app, no workers): poe up   (base + host-apptier + oss-server)
-#   kind + Cloud host plane              : poe up-cloud-kind   (base only)
-# =============================================================================
-
-render-oss-bootstrap = { cmd = "python compose/scripts/render-oss-bootstrap.py", help = "Render the shared spec to the OSS bootstrap env file" }
-render-deps = { cmd = "python compose/scripts/render-deps.py", help = "Render config/dependencies.yaml -> config/.generated/deps.env (for the kind delivery scripts)" }
-# Local OSS = base (host platform/visibility plane) + host-apptier (orders-db +
-# orders-service + pgweb) + oss-server (Temporal server + its deps). No worker tier:
-# workers are a kind concern now (see up-cloud-kind), so OSS-on-Compose is a
-# server+app fallback that does not execute workflows on its own.
-up = { shell = "python compose/scripts/render-oss-bootstrap.py; set -a; . config/local-oss.env; set +a; docker compose -f docker-compose.yml -f compose/host-apptier.yml -f compose/oss-server.yml up --build", help = "Local OSS server + app tier (no workers — those run on kind)" }
-down = { shell = 'docker compose -f docker-compose.yml -f compose/host-apptier.yml -f compose/oss-server.yml down -v --remove-orphans; docker compose -p "${PWD##*/}" -f docker-compose.yml -f compose/host-apptier.yml -f compose/oss-server.yml down -v --remove-orphans || true; docker network rm temporal-network 2>/dev/null || true', help = "Stop the local-OSS stack and drop volumes (also sweeps a stray default-project and the shared temporal-network)" }
-fresh = { sequence = ["down", "up"], help = "Recreate the local-OSS stack" }
-
-# Host companion for the kind+Cloud path: console + cluster observers + mock-api,
-# but NEITHER the worker tier NOR the app tier — the kind cluster runs BOTH (the
-# orders-workers + orders-app charts). Base ONLY. The console reaches the in-cluster
-# app tier via the host ports kind maps (host.docker.internal:8002 / :5433). The
-# sourced Cloud profile also gives the console its Temporal Cloud liveness creds.
-# Tear down with down-cloud.
-up-cloud-kind = { shell = "set -a; . .secrets/keys/cloud.env; set +a; docker compose -f docker-compose.yml up --build", help = "Host visibility + console + mock-api for the kind+Cloud path (kind owns the workers AND the app tier)" }
-down-cloud = { shell = 'docker compose -f docker-compose.yml -f compose/host-apptier.yml down -v --remove-orphans; docker compose -p "${PWD##*/}" -f docker-compose.yml -f compose/host-apptier.yml down -v --remove-orphans || true; docker network rm temporal-network 2>/dev/null || true', help = "Stop any Cloud-backed host stack and drop volumes; also sweeps a stray default-project and the shared temporal-network" }
-
-# Preflight gate for live kind testing: the platform-console is the operator's
-# single window onto a live run, so it MUST be up before anything mutates the
-# cluster (so a human can follow along in real time). Probes the host-published
-# healthz; exits non-zero with an actionable message if the console is down. The
-# console is boot-resilient (it can run before kind exists — see ADR-0015 / db.py),
-# so bringing it up first is always safe. Wired into `just platform-up` and the
-# live-mutating recipes; also runnable on demand via `just preflight`.
+# Infra exception (kept here pragmatically): a dependency-free python probe that
+# the live-test gate needs. No docker/helm, so leaving it avoids a bash heredoc
+# in the justfile. `just preflight` wraps it. See AGENTS.md / docs/RUNMODES.md.
+# The console is boot-resilient (it can run before kind exists — see ADR-0015 /
+# db.py), so bringing it up first is always safe.
 preflight-console = { shell = """
 python - <<'PY'
 import sys, urllib.request
@@ -136,67 +100,8 @@ sys.exit(1)
 PY
 """, help = "Fail unless the platform-console is up (required before live kind testing)" }
 
-# =============================================================================
-# CI pipeline + worker image build/push (kind path).
-#
-# Worker images are tagged with the short git SHA so each build is an immutable,
-# uniquely-addressable artifact. On kind the Temporal Worker Controller derives a
-# fresh Build ID from the pod template, so a new image tag = a new worker version.
-# REGISTRY defaults to the local registry wired to kind by `just cluster-up`.
-# Prefer the `just` front door (`just ci`); these are the Python-layer internals.
-# =============================================================================
-
-# Tag = `git describe --always --dirty` so a dirty tree is never confused with a
-# clean commit (the tag carries a `-dirty` suffix). The immutable identity is the
-# digest (see image-digests) — deploys pin by digest, the tag is for humans.
-build-images = { shell = """
-set -e
-REGISTRY="${REGISTRY:-localhost:5001}"
-TAG="$(git describe --tags --always --dirty --abbrev=12)"
-for profile in workflow activity; do
-  docker build -f images/python.Dockerfile \
-    --build-arg APP_GROUP=workers \
-    --build-arg APP_PATH=apps/temporal/workers/python/$profile \
-    --build-arg APP_MODULE=main \
-    --build-arg APP_CMD=python \
-    -t "$REGISTRY/orders-worker-$profile:$TAG" .
-done
-# orders-api: the Temporal client (starts/signals workflows) + system of record.
-# Now deployed onto kind alongside the workers, so it needs an image in the local
-# registry too. Same Dockerfile, uvicorn entrypoint (main:app) on port 8000.
-docker build -f images/python.Dockerfile \
-  --build-arg APP_GROUP=orders-api \
-  --build-arg APP_PATH=apps/business/orders-api/python \
-  --build-arg APP_MODULE=main:app \
-  --build-arg APP_CMD=uvicorn \
-  -t "$REGISTRY/orders-api:$TAG" .
-echo "Built $REGISTRY/orders-worker-{workflow,activity}:$TAG and $REGISTRY/orders-api:$TAG"
-""", help = "Build the worker images + orders-api, tagged <registry>/<name>:<git-describe>" }
-
-push-images = { shell = """
-set -e
-REGISTRY="${REGISTRY:-localhost:5001}"
-TAG="$(git describe --tags --always --dirty --abbrev=12)"
-for profile in workflow activity; do
-  docker push "$REGISTRY/orders-worker-$profile:$TAG"
-done
-docker push "$REGISTRY/orders-api:$TAG"
-echo "Pushed $REGISTRY/orders-worker-{workflow,activity}:$TAG and $REGISTRY/orders-api:$TAG"
-""", help = "Push the worker images + orders-api to the local registry" }
-
-image-tag = { shell = "git describe --tags --always --dirty --abbrev=12", help = "Print the image tag (git-describe) for the current tree" }
-
-image-digests = { shell = """
-set -e
-REGISTRY="${REGISTRY:-localhost:5001}"
-TAG="$(git describe --tags --always --dirty --abbrev=12)"
-for profile in workflow activity; do
-  echo "$profile=$(crane digest "$REGISTRY/orders-worker-$profile:$TAG" --insecure)"
-done
-echo "orders-api=$(crane digest "$REGISTRY/orders-api:$TAG" --insecure)"
-""", help = "Print pushed image digests (name=sha256:...) for deploy-by-digest" }
-
-ci = { sequence = ["lint", "test", "build-images", "push-images"], help = "Local CI gate: lint + test + build + push worker images" }
+# Image build/push + the CI gate moved to the justfile (docker = cross-language
+# infra, not the Python toolchain). See `just build-images` / `just ci`.
 
 [tool.pyright]
 typeCheckingMode = "standard"
