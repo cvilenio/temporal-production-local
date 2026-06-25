@@ -30,8 +30,7 @@ def main() -> int:
     spec = yaml.safe_load(SPEC.read_text())
 
     domain = spec["domains"][DOMAIN]
-    oss_env = spec.get("oss", {}).get("environment", "nonprod")
-    retention_days = domain["environments"][oss_env]["retention_days"]
+    retention_days = domain["retention_days"]
 
     # Space-separated NAME=TYPE pairs — trivial for sh to split and loop.
     attrs = " ".join(
@@ -45,7 +44,7 @@ def main() -> int:
         f"OSS_RETENTION_DAYS={retention_days}\n"
         f'OSS_SEARCH_ATTRIBUTES="{attrs}"\n'
     )
-    print(f"Rendered OSS bootstrap for '{DOMAIN}' ({oss_env}): {attrs} -> {OUT}")
+    print(f"Rendered OSS bootstrap for '{DOMAIN}': {attrs} -> {OUT}")
     return 0
 
 

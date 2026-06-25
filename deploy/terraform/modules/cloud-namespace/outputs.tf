@@ -6,7 +6,7 @@ output "namespace_id" {
 # TEMPORAL_NAMESPACE for clients is the <name>.<account> handle. Derived explicitly from
 # name + account_id rather than from .id, in case the provider returns a UUID for .id.
 output "namespace_handle" {
-  description = "Client-facing namespace handle, e.g. ziggymart-nonprod.<account-id> (set TEMPORAL_NAMESPACE to this)."
+  description = "Client-facing namespace handle, e.g. ziggymart.<account-id> (set TEMPORAL_NAMESPACE to this)."
   value       = "${temporalcloud_namespace.this.name}.${var.account_id}"
 }
 

@@ -18,10 +18,10 @@ variable "cloud_state_path" {
   default     = "../../../../.secrets/terraform/cloud.tfstate"
 }
 
-variable "cloud_env" {
-  description = "Which cloud namespace this cluster mirrors — the key into the cloud layer's per-namespace outputs (<domain>-<env>)."
+variable "cloud_namespace" {
+  description = "Which cloud namespace (domain) this cluster mirrors — the key into the cloud layer's per-domain outputs (`<domain>`, no env axis)."
   type        = string
-  default     = "ziggymart-nonprod"
+  default     = "ziggymart"
 }
 
 variable "orders_namespace" {

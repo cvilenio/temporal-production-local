@@ -6,8 +6,9 @@ resource "temporalcloud_namespace" "this" {
   api_key_auth   = true
 
   # Guard every namespace against accidental destroy. The Cloud layer uses a single
-  # state for both envs, so a stray `terraform destroy` would otherwise hit prod too.
-  # To intentionally tear an env down, target it explicitly or remove this guard.
+  # state for ALL domains, so a stray `terraform destroy` would otherwise hit every
+  # namespace at once. To intentionally tear a namespace down (e.g. a rename — Cloud
+  # namespaces can't be renamed in place), set this to false, apply, then restore it.
   lifecycle {
     prevent_destroy = true
   }
