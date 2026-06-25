@@ -105,6 +105,35 @@ up-cloud-kind = { shell = "set -a; . .secrets/keys/cloud-nonprod.env; set +a; do
 down-cloud = { shell = 'docker compose -f docker-compose.yml -f compose/host-apptier.yml -f compose/workers.yml down -v --remove-orphans; docker compose -p "${PWD##*/}" -f docker-compose.yml -f compose/host-apptier.yml -f compose/workers.yml down -v --remove-orphans || true; docker network rm temporal-network 2>/dev/null || true', help = "Stop any Cloud-backed host stack (with or without workers/app tier) and drop volumes; also sweeps a stray default-project and the shared temporal-network" }
 fresh-cloud = { sequence = ["down-cloud", "up-cloud"], help = "Recreate the Cloud (nonprod) app stack" }
 
+# Preflight gate for live kind testing: the platform-console is the operator's
+# single window onto a live run, so it MUST be up before anything mutates the
+# cluster (so a human can follow along in real time). Probes the host-published
+# healthz; exits non-zero with an actionable message if the console is down. The
+# console is boot-resilient (it can run before kind exists — see ADR-0015 / db.py),
+# so bringing it up first is always safe. Wired into `just platform-up` and the
+# live-mutating recipes; also runnable on demand via `just preflight`.
+preflight-console = { shell = """
+python - <<'PY'
+import sys, urllib.request
+
+URL = "http://localhost:8086/healthz"
+try:
+    with urllib.request.urlopen(URL, timeout=3) as resp:
+        if resp.status == 200:
+            print(f"platform-console is up ({URL} -> 200).")
+            sys.exit(0)
+except Exception:
+    pass
+
+sys.stderr.write(
+    "platform-console is NOT up. Live kind testing requires it so the operator "
+    "can follow along in real time.\\n"
+    "Start it with 'just up-cloud-kind' (then 'just headlamp-reload'), then retry.\\n"
+)
+sys.exit(1)
+PY
+""", help = "Fail unless the platform-console is up (required before live kind testing)" }
+
 # =============================================================================
 # CI pipeline + worker image build/push (kind path).
 #

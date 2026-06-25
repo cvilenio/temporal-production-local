@@ -52,3 +52,22 @@ commit or PR title in this repo MUST obey these. Summary:
 Examples — good: `Add deterministic order ID derived from idempotency key`,
 `orders: Narrow retry policy on payment activity`, `ci: Drop macos-intel from CI`.
 Bad: `feat: add order id`, `Added order id.`, `update stuff`.
+
+# Live kind testing — bring the platform-console up FIRST (MUST)
+
+The `platform-console` (http://localhost:8086) is the operator's single live window onto a
+run. Before doing **any** live testing on the kind cluster — `just platform-up`, running or
+resetting orders, mutating cluster state — the console MUST already be up so a human can
+follow along in real time.
+
+- **Start it first:** `just up-cloud-kind` (host visibility + console + mock-api), then
+  `just headlamp-reload`. The console is boot-resilient (ADR-0015 / `console/.../db.py`): it
+  boots Healthy with the entire kind side absent and self-heals as the cluster appears, so it
+  is always safe to start before `just platform-up`.
+- **Enforced, not just documented:** `just preflight` (→ `poe preflight-console`) probes
+  `:8086/healthz` and fails with how-to-fix if the console is down. `just platform-up` and
+  `just orders-db-reset` run it as a gate, so a blind live test aborts before it starts.
+- **Off-path agents:** if you mutate the cluster outside those recipes (e.g. raw `kubectl`,
+  `terraform apply` on the cluster layer), run `just preflight` yourself first.
+
+See `docs/RUNMODES.md` for the full run-mode matrix.

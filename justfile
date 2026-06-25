@@ -189,6 +189,7 @@ k *args:
 orders-db-reset:
     #!/usr/bin/env bash
     set -euo pipefail
+    just preflight
     read -r -p "Delete orders-db Cluster + PVCs in namespace 'orders'? ALL order data will be lost. Type 'yes': " ans
     [ "$ans" = "yes" ] || { echo "aborted."; exit 1; }
     KUBECONFIG={{kubeconfig}} kubectl -n orders delete cluster.postgresql.cnpg.io orders-db --ignore-not-found
@@ -200,11 +201,19 @@ orders-db-reset:
 headlamp-reload:
     @docker restart headlamp >/dev/null && echo "headlamp restarted — kubeconfig reloaded"
 
+# Probe that the platform-console is up. Required before ANY live kind testing so
+# the operator can follow along in real time — see CLAUDE.md / docs/RUNMODES.md.
+# Wraps `poe preflight-console`; exits non-zero with how-to-fix if the console is down.
+preflight:
+    uv run poe preflight-console
+
 # Full local bring-up: cluster + registry, mirror deps, CI (build/push), publish chart,
 # pin workers by digest, apply the cluster layer. One command, each step idempotent.
+# Gated on the console being up first (preflight) so the bring-up is never blind.
 platform-up:
     #!/usr/bin/env bash
     set -euo pipefail
+    just preflight
     just cluster-up
     just mirror-deps
     just ci
