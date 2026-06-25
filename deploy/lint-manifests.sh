@@ -2,13 +2,17 @@
 #
 # Static validation for the repo's Kubernetes YAML — the schema-aware companion
 # to ruff/pyright (Python) and `terraform fmt`/`docker compose config` (their
-# planes). Two layers:
+# planes). Three layers, over the local charts (orders-workers, orders-data,
+# orders-api):
 #
-#   1. helm lint   — the orders-workers chart (templating + best-practice checks).
-#   2. kubeconform — validates rendered manifests against the Kubernetes OpenAPI
+#   1. helm lint   — templating + best-practice checks.
+#   2. sync-wave   — fails if a resource references a Secret/ConfigMap in an
+#      equal-or-later ArgoCD sync-wave (the deadlock class from checkpoint 0011;
+#      see ADR-0016 + deploy/check-sync-waves.py). helm + python only.
+#   3. kubeconform — validates rendered manifests against the Kubernetes OpenAPI
 #      schema AND the CRD schemas this repo uses (ArgoCD Application, Temporal
-#      WorkerDeployment/Connection), pulled from the datreeio CRDs-catalog. This
-#      is what catches a bad apiVersion/kind/field BEFORE ArgoCD fails the sync.
+#      WorkerDeployment/Connection, CNPG Cluster), pulled from the datreeio
+#      CRDs-catalog. Catches a bad apiVersion/kind/field BEFORE ArgoCD fails the sync.
 #
 # Scope (k8s manifests only): the rendered orders-workers chart + the plain
 # ArgoCD Applications + the kind registry-hosting ConfigMap. Deliberately NOT
@@ -26,14 +30,26 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-chart="deploy/charts/orders-workers"
+# The repo's local Helm charts (templated + schema-validated below).
+charts=(deploy/charts/orders-workers deploy/charts/orders-data deploy/charts/orders-api)
 
 # datreeio CRDs-catalog: {{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json
-# carries argoproj.io Application + temporal.io WorkerDeployment/Connection.
+# carries argoproj.io Application, temporal.io WorkerDeployment/Connection, and
+# postgresql.cnpg.io Cluster (orders-app's CNPG datastore).
 catalog='https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
 
-echo "== helm lint $chart =="
-helm lint "$chart"
+for chart in "${charts[@]}"; do
+  echo "== helm lint $chart =="
+  helm lint "$chart"
+done
+
+# sync-wave ordering gate (helm + python only; runs regardless of kubeconform).
+# Fails if a resource references a Secret/ConfigMap in an equal-or-later wave —
+# the deadlock class from checkpoint 0011 (see ADR-0016 + deploy/check-sync-waves.py).
+echo "== sync-wave ordering ($(echo "${charts[@]}" | wc -w | tr -d ' ') charts) =="
+for chart in "${charts[@]}"; do
+  helm template "$chart" | python3 "$repo_root/deploy/check-sync-waves.py" --name "$(basename "$chart")"
+done
 
 if ! command -v kubeconform >/dev/null 2>&1; then
   echo "⚠ kubeconform not found — skipped schema validation (chart still helm-linted)." >&2
@@ -45,8 +61,10 @@ kc=(kubeconform -strict -summary
     -schema-location default
     -schema-location "$catalog")
 
-echo "== kubeconform: rendered orders-workers chart =="
-helm template "$chart" | "${kc[@]}" -
+for chart in "${charts[@]}"; do
+  echo "== kubeconform: rendered $(basename "$chart") chart =="
+  helm template "$chart" | "${kc[@]}" -
+done
 
 echo "== kubeconform: plain manifests (argocd applications + kind registry-hosting) =="
 "${kc[@]}" deploy/argocd deploy/kind/local-registry-hosting.yaml

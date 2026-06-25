@@ -11,8 +11,12 @@ from fastapi.staticfiles import StaticFiles
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize DB connection pool
+    # Best-effort DB connect — never fatal. The console must boot and serve even
+    # with the whole kind side (orders-db, orders-api) unreachable; it's expected
+    # to be running before the cluster exists. The maintainer establishes the
+    # pool when the DB appears and re-establishes it if the DB goes away.
     await db.init_db()
+    db_maintainer_task = asyncio.create_task(db.maintain_pool())
 
     # Start the SSE background poller
     poller_task = asyncio.create_task(poll_order_updates())
@@ -23,7 +27,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup
-    for task in (poller_task, status_poller_task):
+    for task in (db_maintainer_task, poller_task, status_poller_task):
         task.cancel()
         try:
             await task
