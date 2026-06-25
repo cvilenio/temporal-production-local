@@ -50,7 +50,7 @@
   </header>
 
   <!-- Diagram Canvas -->
-  <section class="relative max-w-5xl mx-auto h-[480px]">
+  <section class="relative max-w-5xl mx-auto h-[600px]">
 
     <!-- Temporal Cloud Boundary Box (absolute) — reactive border -->
     <div x-data="{ open: false }"
@@ -146,6 +146,21 @@
       </div>
     </div>
 
+    <!-- External Systems Boundary Box (absolute) — systems OUTSIDE the business
+         (payment, shipping, inventory providers), mocked by mock-api. Its own
+         plane below the customer environment to make the boundary explicit. -->
+    <div
+      class="absolute top-[460px] left-0 w-[624px] h-[120px] rounded-2xl border-2 border-dashed border-textMuted/40 bg-white/[0.01]">
+      <div
+        class="absolute -top-3 left-6 bg-bgMain px-2 flex items-center gap-2 text-textMuted text-xs font-semibold tracking-wider">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round"
+            d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0 0a8.949 8.949 0 0 0 4.951-1.488A3.987 3.987 0 0 0 13 16h-2a3.987 3.987 0 0 0-3.951 3.512A8.949 8.949 0 0 0 12 21Zm3-11.25a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+        </svg>
+        EXTERNAL SYSTEMS
+      </div>
+    </div>
+
     <!-- SVG Overlay for Edges -->
     <svg class="absolute inset-0 w-full h-full pointer-events-none z-0">
 
@@ -155,8 +170,9 @@
         :stroke="edgeStroke('orders-service', 'orders-db')"
         :stroke-opacity="edgeOpacity('orders-service', 'orders-db')" />
 
-      <!-- activity-worker -> mock-api (Data class: solid green) -->
-      <line x1="380" y1="250" x2="380" y2="350" stroke-width="2"
+      <!-- activity-worker -> mock-api: a call OUT to external systems. Dashed to
+           mark the boundary crossing (customer env -> external systems plane). -->
+      <line x1="380" y1="250" x2="380" y2="520" stroke-width="2" stroke-dasharray="8 4"
         :stroke="edgeStroke('orders-activity-worker', 'mock-api')"
         :stroke-opacity="edgeOpacity('orders-activity-worker', 'mock-api')" />
 
@@ -199,8 +215,10 @@
     <template x-if="services['orders-activity-worker']">
       <div class="absolute" style="top: 250px; left: 380px;" x-html="renderNode('orders-activity-worker')"></div>
     </template>
+
+    <!-- External Systems -->
     <template x-if="services['mock-api']">
-      <div class="absolute" style="top: 350px; left: 380px;" x-html="renderNode('mock-api')"></div>
+      <div class="absolute" style="top: 520px; left: 380px;" x-html="renderNode('mock-api')"></div>
     </template>
 
   </section>
