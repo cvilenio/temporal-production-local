@@ -1,14 +1,16 @@
 # =============================================================================
-# justfile — language-agnostic front door for this polyglot repo.
+# justfile — cross-language front door for this polyglot repo.
 #
-# `just` is the recognizable entry point; it delegates Python work to `poe`
-# (the Python task layer in pyproject.toml) and shells out for cluster/infra
-# work (kind, terraform, registry). As Go/TS/Java land, their native runners
-# hang off the same recipes — no Python toolchain needed to drive the repo.
+# BOUNDARY TEST (keep this honest):
+#   * Shells docker/compose/terraform/kubectl/helm, OR touches >1 language's
+#     artifacts  ->  it's a `just` recipe (here).
+#   * Shells the Python toolchain (ruff/pyright/pytest)  ->  it's a `poe` task
+#     (pyproject.toml [tool.poe.tasks]). `just` fans poe (and future go/ts/java
+#     leaf runners) in; no language's runner owns shared infra.
 #
 #   just            list all recipes
-#   just up         local OSS app stack            (-> poe up)
-#   just ci         local CI gate + image build    (-> poe ci)
+#   just up         local OSS app stack
+#   just ci         python gate + image build/push
 #   just cluster-up kind + local registry          (see deploy/terraform/kind-config.yaml)
 # =============================================================================
 
@@ -24,68 +26,117 @@ kubeconfig := ".secrets/kube/kind.kubeconfig"
 default:
     @just --list
 
-# --- Python app stack (delegates to poe) -------------------------------------
+# --- Quality + CI (python leaf via poe; infra here; just fans in) -------------
+
+# Render scripts: python-implemented, infra-DOMAIN — driven from just, not poe.
+render-deps:
+    @uv run python compose/scripts/render-deps.py
+
+render-oss-bootstrap:
+    @uv run python compose/scripts/render-oss-bootstrap.py
+
+# helm lint + kubeconform on the k8s manifests (soft-skips kubeconform if absent).
+# Runs under `uv run` so the script's python3 (check-sync-waves.py needs pyyaml)
+# resolves to the venv, not bare system python.
+lint-manifests:
+    uv run bash deploy/lint-manifests.sh
+
+# All static checks: python (poe) + k8s manifests (helm/kubeconform).
+lint:
+    uv run poe lint
+    just lint-manifests
+
+# Run tests (python leaf).
+test:
+    uv run poe test
+
+# Lint and autofix (python leaf).
+fix:
+    uv run poe fix
+
+# Full gate: lint (python + manifests) + test.
+check: lint test
+
+# Local CI gate: gate + build + push worker/api images.
+ci: check build-images push-images
+
+# --- Local OSS app stack (compose orchestration — cross-language) -------------
 
 # Local OSS server + app tier (no workers — those run on kind).
-up:
-    uv run poe up
+up: render-oss-bootstrap
+    set -a; . config/local-oss.env; set +a; docker compose -f docker-compose.yml -f compose/host-apptier.yml -f compose/oss-server.yml up --build
 
-# Stop the local-OSS stack and drop volumes.
+# Stop the local-OSS stack and drop volumes (also sweeps a stray default-project + the shared net).
 down:
-    uv run poe down
+    docker compose -f docker-compose.yml -f compose/host-apptier.yml -f compose/oss-server.yml down -v --remove-orphans; docker compose -p "${PWD##*/}" -f docker-compose.yml -f compose/host-apptier.yml -f compose/oss-server.yml down -v --remove-orphans || true; docker network rm temporal-network 2>/dev/null || true
 
 # Recreate the local-OSS stack.
-fresh:
-    uv run poe fresh
+fresh: down up
 
 # Host visibility + console + mock-api for the kind+Cloud path (kind owns the
 # workers AND the app tier). Bring this up FIRST before any live kind testing.
 up-cloud-kind:
-    uv run poe up-cloud-kind
+    set -a; . .secrets/keys/cloud.env; set +a; docker compose -f docker-compose.yml up --build
 
-# Stop the Cloud-backed host stack.
+# Stop the Cloud-backed host stack and drop volumes.
 down-cloud:
-    uv run poe down-cloud
+    docker compose -f docker-compose.yml -f compose/host-apptier.yml down -v --remove-orphans; docker compose -p "${PWD##*/}" -f docker-compose.yml -f compose/host-apptier.yml down -v --remove-orphans || true; docker network rm temporal-network 2>/dev/null || true
 
-# --- Quality + CI (delegates to poe) -----------------------------------------
+# --- Worker/API images (docker — cross-language artifact build) ---------------
+# Tagged with git-describe so a build is immutable + uniquely addressable; a
+# dirty tree carries a `-dirty` suffix. Deploys pin by DIGEST (image-digests);
+# the tag is for humans. REGISTRY defaults to the local registry from cluster-up.
 
-# All static checks (lint, format-check, typecheck).
-lint:
-    uv run poe lint
-
-# Run tests.
-test:
-    uv run poe test
-
-# Full gate: lint + test.
-check:
-    uv run poe check
-
-# Lint and autofix.
-fix:
-    uv run poe fix
-
-# Local CI gate: lint + test + build + push worker images.
-ci:
-    uv run poe ci
-
-# Build both worker images (tagged with the short git SHA).
+# Build the worker images + orders-api, tagged <registry>/<name>:<git-describe>.
 build-images:
-    uv run poe build-images
+    #!/usr/bin/env bash
+    set -euo pipefail
+    REGISTRY="${REGISTRY:-localhost:5001}"
+    TAG="$(git describe --tags --always --dirty --abbrev=12)"
+    for profile in workflow activity; do
+      docker build -f images/python.Dockerfile \
+        --build-arg APP_GROUP=workers \
+        --build-arg APP_PATH=apps/temporal/workers/python/$profile \
+        --build-arg APP_MODULE=main \
+        --build-arg APP_CMD=python \
+        -t "$REGISTRY/orders-worker-$profile:$TAG" .
+    done
+    docker build -f images/python.Dockerfile \
+      --build-arg APP_GROUP=orders-api \
+      --build-arg APP_PATH=apps/business/orders-api/python \
+      --build-arg APP_MODULE=main:app \
+      --build-arg APP_CMD=uvicorn \
+      -t "$REGISTRY/orders-api:$TAG" .
+    echo "Built $REGISTRY/orders-worker-{workflow,activity}:$TAG and $REGISTRY/orders-api:$TAG"
 
-# Push both worker images to the local registry.
+# Push the worker images + orders-api to the local registry.
 push-images:
-    uv run poe push-images
+    #!/usr/bin/env bash
+    set -euo pipefail
+    REGISTRY="${REGISTRY:-localhost:5001}"
+    TAG="$(git describe --tags --always --dirty --abbrev=12)"
+    for profile in workflow activity; do
+      docker push "$REGISTRY/orders-worker-$profile:$TAG"
+    done
+    docker push "$REGISTRY/orders-api:$TAG"
+    echo "Pushed $REGISTRY/orders-worker-{workflow,activity}:$TAG and $REGISTRY/orders-api:$TAG"
 
-# Print the image tag (short git SHA) for the current commit.
+# Print the image tag (git-describe) for the current tree.
 image-tag:
-    @uv run poe image-tag
+    @git describe --tags --always --dirty --abbrev=12
+
+# Print pushed image digests (name=sha256:...) for deploy-by-digest.
+image-digests:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    REGISTRY="${REGISTRY:-localhost:5001}"
+    TAG="$(git describe --tags --always --dirty --abbrev=12)"
+    for profile in workflow activity; do
+      echo "$profile=$(crane digest "$REGISTRY/orders-worker-$profile:$TAG" --insecure)"
+    done
+    echo "orders-api=$(crane digest "$REGISTRY/orders-api:$TAG" --insecure)"
 
 # --- Local cluster (kind + local registry) -----------------------------------
-
-# Render the dependency manifest -> config/.generated/deps.env (single source of versions).
-render-deps:
-    @uv run poe render-deps
 
 # Bring up the kind cluster + local registry (kubeconfig under .secrets/).
 cluster-up: render-deps
@@ -157,8 +208,8 @@ cluster-start:
 mirror-deps: render-deps
     REGISTRY_PORT={{registry_port}} bash deploy/kind/mirror-deps.sh
 
-# Package the orders charts (orders-workers + orders-app) and push them to the
-# local OCI registry (ArgoCD pulls them from there).
+# Package the orders charts (orders-workers + orders-data + orders-api) and push
+# them to the local OCI registry (ArgoCD pulls them from there).
 chart-publish:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -195,7 +246,7 @@ headlamp-reload:
     @docker restart headlamp >/dev/null && echo "headlamp restarted — kubeconfig reloaded"
 
 # Probe that the platform-console is up. Required before ANY live kind testing so
-# the operator can follow along in real time — see CLAUDE.md / docs/RUNMODES.md.
+# the operator can follow along in real time — see AGENTS.md / docs/RUNMODES.md.
 # Wraps `poe preflight-console`; exits non-zero with how-to-fix if the console is down.
 preflight:
     uv run poe preflight-console
