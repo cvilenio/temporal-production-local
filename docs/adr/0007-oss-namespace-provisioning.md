@@ -65,3 +65,16 @@ pretending the *provisioning mechanism* is the same.
   up via the renderer.
 - The kind Argo bootstrap Job and OSS auth (ADR-0008) are follow-on work built with
   `layers/cluster`; the Compose path is the interim local story.
+
+## Update (checkpoint 0015) — env axis retired; spec is domain-only
+
+The spec's `domains.<d>.environments.{nonprod,prod}` nesting and the `oss.environment`
+selector are removed. Each **domain** maps to a single `<domain>` namespace (e.g.
+`ziggymart`) on both backends — Cloud and OSS namespace names now converge (OSS already used
+the bare name). The `cloud_overlay` and the cloud layer outputs are re-keyed by `<domain>`;
+the `cloud-namespace` module is unchanged (env vs domain was always a caller concern in
+`namespaces.tf`). Rationale: the nonprod/prod axis demonstrated no Temporal feature; the axes
+that do — **domain** (Nexus, per-domain auth) and **region** (multi-region HA) — are modeled
+elsewhere. See ADR-0017's update note and the new checkpoint. (Cloud namespaces can't be
+renamed in place, so the rename was a destroy+recreate via the module's `prevent_destroy`
+escape hatch.)

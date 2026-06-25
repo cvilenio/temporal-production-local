@@ -1,5 +1,5 @@
 variable "namespace_name" {
-  description = "Temporal Cloud namespace name, e.g. ziggymart-nonprod (lowercase letters, numbers, hyphens; 2-64 chars)."
+  description = "Temporal Cloud namespace name, e.g. ziggymart (lowercase letters, numbers, hyphens; 2-64 chars)."
   type        = string
 }
 

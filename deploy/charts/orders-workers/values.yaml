@@ -11,7 +11,7 @@ connection:
   # Placeholder kept schema-valid (CRD pattern ^[a-zA-Z0-9.-]+:[0-9]+$) so
   # `helm template` + kubeconform pass; the cluster layer overrides it at apply.
   hostPort: "regional-endpoint.example:7233"
-  temporalNamespace: "ziggymart-nonprod.<account-id>"
+  temporalNamespace: "ziggymart.<account-id>"
   tls: true
   # API-key auth (default for this repo's Cloud namespaces — api_key_auth=true).
   # apiKeySecret is the k8s Secret created by the cluster layer; key holds the token.

@@ -8,7 +8,7 @@ tracked, so the layout exists on a fresh clone. Keep the directory `chmod 700`.
 
 | Path | Holds |
 |---|---|
-| `keys/` | API key material — the Temporal Cloud **bootstrap** key, and filled-in connection profiles like `cloud-nonprod.env` (the worker API key + endpoint). |
+| `keys/` | API key material — the Temporal Cloud **bootstrap** key, and the filled-in connection profile `cloud.env` (the worker API key + endpoint + the read-only observer key). |
 | `terraform/` | Terraform **state** for layers that use a local backend (e.g. `cloud.tfstate` from `deploy/terraform/layers/cloud`). State contains live secrets — treat the file as a credential. |
 
 ## Why state lives here

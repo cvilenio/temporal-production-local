@@ -51,3 +51,12 @@ Two independent anti-thrash layers protect different things:
 - Every deployed worker is uniquely, immutably identified (digest → Build ID).
 - Requires tagging discipline for prod releases; `latest` remains only a non-deploy fallback in the
   chart's `values.yaml`.
+
+## Update (checkpoint 0015) — env axis retired in the repo (ADR-0017)
+
+The nonprod/prod branch-promotion model above is retained as the **production GitOps shape this
+mirrors** (customer guidance, like `docs/SHIP_PLAN.md`). The **repo itself** no longer runs a
+nonprod/prod split (ADR-0017): there is one namespace per domain, and the repo's own release
+*progression* is **in-namespace worker versioning** (ramp a new PINNED Build ID) plus the
+digest-pinning above — not a nonprod→prod artifact promotion. The anti-thrash layers (GitOps
+discipline + PINNED Worker Versioning) are unchanged.

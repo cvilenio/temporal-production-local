@@ -4,17 +4,16 @@ There is intentionally no Terraform here. Everything that runs on the cluster �
 apps, codec server, observability — is delivered by **ArgoCD → Helm**, defined under
 [`deploy/argocd/`](../../../argocd/) and [`deploy/charts/`](../../../charts/).
 
-Target shape (see `docs/ARCHITECTURE.md` and the approved Cloud-layer plan):
+Target shape (see `docs/ARCHITECTURE.md`):
 
-- An ApplicationSet generates one Application per environment (`nonprod`, `prod`).
-- Single trunk, no env branches. Env divergence lives in `values-<env>.yaml` plus the
-  ArgoCD `targetRevision` / image tag:
-  - **nonprod** tracks trunk (`targetRevision: HEAD`, images `:latest`/`:<sha>`),
-  - **prod** pins an immutable git tag + image tag (`targetRevision: vX.Y.Z`).
-- Promotion = advance the tag prod points at, after nonprod validates. Composes with the
-  Worker Controller PINNED build-ID versioning.
-- Each env targets its Temporal Cloud namespace (`ziggymart-<env>.<account-id>`) using the k8s
-  Secret created by the [cluster layer](../cluster/README.md).
+- **Single production-shaped environment, no nonprod/prod env split** (ADR-0017). Release
+  *progression* is **worker versioning within the live namespace** — the Worker Controller
+  ramps a new PINNED Build ID (rainbow deploy, drain old), which is how Temporal versioning
+  is meant to be used — plus git-tag/image-digest pinning for delivery (`targetRevision`).
+  That replaces a nonprod→prod artifact promotion (an axis that bought no Temporal feature).
+- Per **domain** (not env): an Application set targets each domain's Temporal Cloud namespace
+  (`<domain>.<account-id>`, e.g. `ziggymart`) via the k8s Secret created by the
+  [cluster layer](../cluster/README.md). New domains (`payments`, …) are what unlock Nexus.
 
 ## One documented exception: the orders-workers Application
 

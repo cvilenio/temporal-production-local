@@ -3,6 +3,12 @@
 **Customer:** Ziggymart Systems (Fictional)
 **Goal:** Migrate the core "Retail Order Processing" workflow to Temporal Cloud with zero downtime and high confidence, establishing a pattern for future workloads.
 
+> **Note — repo vs. this plan.** A real customer rollout *should* use environment-separated
+> namespaces (e.g. `ziggymart-staging` / `ziggymart-prod`), as below. The **repo itself**
+> deliberately models a single production-shaped namespace per domain (`ziggymart`) with no
+> nonprod/prod split (ADR-0017) — the env axis demonstrates no Temporal feature, and the
+> workbench is disposable. This plan is customer guidance, not a description of the repo.
+
 ## Phase 1: Foundation & Observability (Days 1-14)
 
 **Objective:** Establish a secure, observable, and multi-tenant foundation in Temporal Cloud.

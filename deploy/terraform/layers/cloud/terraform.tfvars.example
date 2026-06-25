@@ -4,32 +4,29 @@
 # account_id is NOT set here — it is account-identifying. Supply it via
 # TF_VAR_account_id by sourcing .secrets/account.env before terraform commands.
 
-# Cloud-ONLY overlay, keyed by full namespace name (`<domain>-<env>`). The SHARED
-# config (retention, search attributes) lives in config/temporal/namespaces.yaml
-# and is merged in via locals — do NOT repeat it here. To add a business domain,
-# add it to the spec, then add one overlay entry per env below (e.g.
-# payments-nonprod / payments-prod).
+# Cloud-ONLY overlay, keyed by DOMAIN (`<domain>`, no environment axis — ADR-0017).
+# The SHARED config (retention, search attributes) lives in
+# config/temporal/namespaces.yaml and is merged in via locals — do NOT repeat it
+# here. To add a business domain, add it to the spec, then add one overlay entry
+# below (e.g. `payments`) — each domain gets its own namespace + least-priv SA/key,
+# which is what enables Nexus across domains and per-domain auth.
 cloud_overlay = {
-  "ziggymart-nonprod" = {
-    service_account_name = "orders-workers-nonprod"
-    api_key_display_name = "orders-workers-nonprod-key"
+  "ziggymart" = {
+    service_account_name = "orders-workers"
+    api_key_display_name = "orders-workers-key"
     api_key_expiry_time  = "2027-06-23T00:00:00Z"
     # create_api_key     = true             # default; false → mint via tcld out-of-band
     # namespace_permission = "write"         # default
     # account_access     = "read"            # default
-    # regions            = ["aws-us-east-1"] # default
+    # regions            = ["aws-us-east-1"] # default; per-domain multi-region axis
     # Optional dedicated client identity for an in-cluster workflow STARTER (e.g.
     # the orders-api on kind). Omit to run the client on the worker SA instead.
-    client_service_account_name = "orders-api-nonprod"
-    client_api_key_display_name = "orders-api-nonprod-key"
+    client_service_account_name = "orders-api"
+    client_api_key_display_name = "orders-api-key"
     # create_client_api_key       = true     # default
     # client_namespace_permission = "write"  # default (starter needs write)
     # client_account_access       = "read"   # default
   }
 
-  "ziggymart-prod" = {
-    service_account_name = "orders-workers-prod"
-    api_key_display_name = "orders-workers-prod-key"
-    api_key_expiry_time  = "2027-06-23T00:00:00Z"
-  }
+  # "payments" = { service_account_name = "payments-workers", ... }   # a future domain
 }

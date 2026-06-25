@@ -4,31 +4,24 @@ locals {
   # the same file the local-OSS bootstrap reads, so Cloud and OSS cannot drift.
   spec = yamldecode(file("${path.module}/../../../../config/temporal/namespaces.yaml"))
 
-  # Flatten domains × environments into the `<domain>-<env>` Cloud namespace map,
-  # merging the shared spec (retention_days, search_attributes) with the
-  # Cloud-only overlay (service account, API key, regions). The overlay var is a
-  # typed object with optional() defaults, so omitted fields (regions, etc.)
-  # still resolve here. Resulting keys/values must match the prior hand-written
-  # map exactly — `terraform plan` is the no-churn gate (namespaces are
-  # prevent_destroy).
+  # Map each DOMAIN to a `<domain>` Cloud namespace (no environment axis — ADR-0017),
+  # merging the shared spec (retention_days, search_attributes) with the Cloud-only
+  # overlay (service account, API key, regions). The overlay var is a typed object
+  # with optional() defaults, so omitted fields (regions, etc.) still resolve here.
   cloud_namespaces = {
-    for pair in flatten([
-      for domain, dcfg in local.spec.domains : [
-        for env, ecfg in dcfg.environments : {
-          key = "${domain}-${env}"
-          value = {
-            retention_days    = ecfg.retention_days
-            search_attributes = dcfg.search_attributes
-          }
-        }
-      ]
-    ]) : pair.key => merge(pair.value, var.cloud_overlay[pair.key])
+    for domain, dcfg in local.spec.domains : domain => merge(
+      {
+        retention_days    = dcfg.retention_days
+        search_attributes = dcfg.search_attributes
+      },
+      var.cloud_overlay[domain],
+    )
   }
 }
 
-# One namespace stack per entry, DRY via for_each over the derived map. Every
-# namespace (all business domains × envs) is managed from this single layer/state —
-# review `terraform plan` carefully, a change here can touch every namespace at once.
+# One namespace stack per domain, DRY via for_each over the derived map. Every
+# namespace (all business domains) is managed from this single layer/state — review
+# `terraform plan` carefully, a change here can touch every namespace at once.
 module "namespaces" {
   source   = "../../modules/cloud-namespace"
   for_each = local.cloud_namespaces

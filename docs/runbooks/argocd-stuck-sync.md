@@ -91,7 +91,7 @@ can't reclaim a deployment still owned by a prior cluster's controller. (A manua
 **Fix — hand ownership back so the controller reclaims:**
 
 ```sh
-set -a; . .secrets/keys/cloud-nonprod.env; set +a
+set -a; . .secrets/keys/cloud.env; set +a
 for wd in orders/orders-workflow orders/orders-activity; do
   temporal worker deployment manager-identity unset --yes \
     --address "$TEMPORAL_ADDRESS" --namespace "$TEMPORAL_NAMESPACE" --api-key "$TEMPORAL_API_KEY" --tls \

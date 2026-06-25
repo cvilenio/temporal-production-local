@@ -23,7 +23,7 @@ ordersApi:
 # account (ADR-0008), whose API key the cluster layer seeds as orders-client-apikey.
 connection:
   hostPort: "regional-endpoint.example:7233"
-  temporalNamespace: "ziggymart-nonprod.<account-id>"
+  temporalNamespace: "ziggymart.<account-id>"
   tls: true
   apiKeySecret: orders-client-apikey
   apiKeySecretKey: api-key

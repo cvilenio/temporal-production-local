@@ -10,16 +10,45 @@ variable "account_id" {
   type        = string
 }
 
-# Cloud-only overlay, keyed by the FULL namespace name (`<domain>-<env>`, e.g.
-# ziggymart-nonprod). The SHARED config (retention, search attributes) lives in
-# config/temporal/namespaces.yaml and is merged in via locals (see main.tf) — do
-# NOT duplicate it here. This overlay carries only the fields with no OSS analog:
+# Account-level read-only observer identity for the platform-console (see
+# observer.tf). Account-scoped read; powers the console's Cloud Ops API inventory
+# (regions + namespaces) and per-namespace liveness probe. Off by default-safe:
+# set create_observer = false to skip minting it.
+variable "create_observer" {
+  description = "Mint the read-only account-level observer service account for the platform-console's Cloud liveness + inventory probe."
+  type        = bool
+  default     = true
+}
+
+variable "observer_service_account_name" {
+  description = "Name of the read-only observer service account."
+  type        = string
+  default     = "console-observer"
+}
+
+variable "create_observer_api_key" {
+  description = "Mint the observer API key in Terraform (secret enters state). Set false to mint out-of-band via tcld."
+  type        = bool
+  default     = true
+}
+
+variable "observer_api_key_expiry_time" {
+  description = "RFC3339 expiry for the observer API key (e.g. 2027-06-23T00:00:00Z)."
+  type        = string
+  default     = "2027-06-23T00:00:00Z"
+}
+
+# Cloud-only overlay, keyed by DOMAIN (`<domain>`, e.g. ziggymart) — no environment
+# axis (ADR-0017). The SHARED config (retention, search attributes) lives in
+# config/temporal/namespaces.yaml and is merged in via locals (see namespaces.tf) —
+# do NOT duplicate it here. This overlay carries only the fields with no OSS analog:
 # the worker service account, the API key, and region placement.
 #
-# There must be one entry per `<domain>-<env>` produced by the spec. Add a new
-# business domain by adding it to the spec AND adding its overlay entries here.
+# One entry per domain in the spec. A new business domain = add it to the spec AND
+# add its overlay entry here (its own SA/key → enables Nexus + per-domain auth);
+# `regions` is the per-domain multi-region axis.
 variable "cloud_overlay" {
-  description = "Per-namespace Cloud-only settings (service account, API key, regions), keyed by `<domain>-<env>`. Shared config comes from the spec, not here."
+  description = "Per-namespace Cloud-only settings (service account, API key, regions), keyed by `<domain>`. Shared config comes from the spec, not here."
   type = map(object({
     service_account_name = string
     api_key_display_name = string

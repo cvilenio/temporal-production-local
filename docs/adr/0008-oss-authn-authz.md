@@ -178,3 +178,11 @@ wave  2  orders-workers / apps (need namespace + auth live; worker identity)
 - The control-plane/data-plane identity split is the organizing principle: the bootstrap Job
   carries an admin identity, workers carry a least-privilege one — on both backends.
 - Revisit status to Accepted when the OSS phases are implemented with `layers/cluster`.
+
+## Update (checkpoint 0015) — auth divergence is the DOMAIN axis, not env
+
+With the nonprod/prod env split retired (ADR-0017), auth-method divergence (API key vs mTLS,
+strictness) is now expressed **per domain** rather than per env — each domain namespace
+carries its own least-privilege service account + key in the `cloud_overlay`, and a future
+`auth_method` field would sit there. The control-plane/data-plane identity split is unchanged;
+there is simply one namespace per domain instead of one per domain×env.

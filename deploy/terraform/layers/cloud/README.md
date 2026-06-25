@@ -1,9 +1,10 @@
 # layers/cloud — Temporal Cloud base layer
 
 Provisions one namespace + service account (+ optional worker API key) + custom search
-attributes **per namespace** (`ziggymart-nonprod`, `ziggymart-prod`, … keyed by full name
-so business domains coexist) via a single `for_each` over `var.namespaces`. API-key auth
-only (`api_key_auth = true`; no certificate auth). The account id comes from
+attributes **per domain** (`ziggymart`, … keyed by `<domain>` — no nonprod/prod env axis,
+ADR-0017; business domains coexist on the one account) via a single `for_each` over the
+spec × `cloud_overlay`. API-key auth only (`api_key_auth = true`; no certificate auth).
+The account id comes from
 `TF_VAR_account_id` (`.secrets/account.env`), never committed.
 
 This is the **base control-plane layer**. It depends on only the `temporalcloud`
@@ -31,12 +32,12 @@ terraform plan -out=cloud.plan # per namespace: 1 ns + 1 SA + 1 key + N search a
 terraform apply cloud.plan     # apply the SAVED plan
 ```
 
-To bring up only one namespace first, trim `namespaces` to that key, apply, then add the
-rest and apply again.
+To bring up only one namespace first, trim `cloud_overlay` to that domain, apply, then add
+the rest and apply again.
 
 ## Handoff to consumers (no layer coupling)
 
-The layer emits outputs keyed by **namespace name** (`ziggymart-nonprod`, …). Wire a
+The layer emits outputs keyed by **domain** (`ziggymart`, …). Wire a
 consumer yourself:
 
 ```bash
@@ -45,12 +46,15 @@ terraform output -json namespace_handles           # TEMPORAL_NAMESPACE per name
 terraform output -json api_key_tokens              # SENSITIVE: worker key per namespace
 ```
 
-**Compose cloud profile (now):** write a profile into the hardened secrets dir, e.g.
-`.secrets/keys/cloud-nonprod.env`, with `TEMPORAL_ADDRESS=<endpoints[ziggymart-nonprod]>`,
-`TEMPORAL_NAMESPACE=<namespace_handles[ziggymart-nonprod]>`, `TEMPORAL_TLS=true`,
-`TEMPORAL_API_KEY=<api_key_tokens[ziggymart-nonprod]>`. The `poe up-cloud` task sources
-this file. App code already supports it
-(`libs/orders/python/orders/services/temporal.py`). See `docs/RUNMODES.md`.
+**Host cloud profile (now):** write a profile into the hardened secrets dir,
+`.secrets/keys/cloud.env`, with `TEMPORAL_ADDRESS=<endpoints[ziggymart]>`,
+`TEMPORAL_NAMESPACE=<namespace_handles[ziggymart]>`, `TEMPORAL_TLS=true`,
+`TEMPORAL_API_KEY=<api_key_tokens[ziggymart]>`, and (optional)
+`TEMPORAL_CLOUD_OPS_API_KEY=<observer_api_key_token>`. The `poe up-cloud-kind` task sources
+this file (the kind+Cloud host plane; it also gives the console its read-only Cloud liveness
++ inventory creds). App code already supports it
+(`libs/orders/python/orders/services/temporal.py`). Outputs are keyed by `<domain>` (no env
+axis). See `docs/RUNMODES.md`.
 
 **Custom search attributes** are declared here as namespace setup — the
 `search_attributes` map per namespace creates `temporalcloud_namespace_search_attribute`
@@ -75,13 +79,13 @@ share it. See `.secrets/README.md`.
 Temporal Cloud is the source of truth. Re-import the declarative resources:
 
 ```bash
-terraform import 'module.namespaces["ziggymart-nonprod"].temporalcloud_namespace.this'        <namespace-id>
-terraform import 'module.namespaces["ziggymart-nonprod"].temporalcloud_service_account.workers' <service-account-id>
-# repeat per namespace; search attributes import as <namespace-id>/<name>
+terraform import 'module.namespaces["ziggymart"].temporalcloud_namespace.this'        <namespace-id>
+terraform import 'module.namespaces["ziggymart"].temporalcloud_service_account.workers' <service-account-id>
+# repeat per domain; search attributes import as <namespace-id>/<name>
 ```
 
 The **API key secret cannot be recovered** (shown once at creation). Rotate instead:
-`terraform apply -replace='module.namespaces["ziggymart-nonprod"].temporalcloud_apikey.workers[0]'`,
+`terraform apply -replace='module.namespaces["ziggymart"].temporalcloud_apikey.workers[0]'`,
 then re-distribute. Treat tfstate as a convenience cache, not the only copy.
 
 ### Optional hardening (not enabled)
@@ -91,6 +95,13 @@ key. Not configured here; mentioned for completeness.
 
 ## Tearing down
 
-Namespaces have `prevent_destroy = true` (single state guards prod). To intentionally
-remove one, target it or temporarily lift the lifecycle guard in
-`deploy/terraform/modules/cloud-namespace/main.tf`.
+Namespaces have `prevent_destroy = true` (single state guards every domain). To
+intentionally remove or rename one (Cloud namespaces can't be renamed in place), target it
+or temporarily set the lifecycle guard to `false` in
+`deploy/terraform/modules/cloud-namespace/namespace.tf`, apply, then restore it.
+
+> **Gotcha — search attributes block a namespace destroy.** Temporal Cloud does **not**
+> support deleting an individual search attribute, so a destroy fails on the namespace's
+> `temporalcloud_namespace_search_attribute` children. Before the destroy apply, drop them
+> from state — `terraform state rm 'module.namespaces["<domain>"].temporalcloud_namespace_search_attribute.this["<Attr>"]'`
+> — they are removed along with the namespace via `DeleteNamespace` (which *is* supported).
