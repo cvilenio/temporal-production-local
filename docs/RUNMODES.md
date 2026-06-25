@@ -161,6 +161,12 @@ Things worth knowing:
   automatically. TLS stays on with API keys.
 - **Workers are pinned by image digest** (ADR-0012): the git-describe tag is for humans, the
   `sha256` digest is the deploy contract, so the Worker Controller Build ID is content-addressed.
+- **The console's architecture page is live on kind** (ADR-0015 phase-2): it reads cluster pod
+  state via a **read-only** ServiceAccount kubeconfig (`console-reader`) that `cluster-up.sh` mints
+  into `.secrets/kube/kind.console.kubeconfig`. The substrate is injected via `CONSOLE_SUBSTRATE`
+  (base defaults `kind`; the host-apptier overlay sets `compose`). On kind the live status is a
+  union: cluster pods from Kube, host-plane tooling (lgtm, console, mock-api, viz-proxy, headlamp)
+  from Docker.
 
 The account-bearing namespace handle + API keys are read from the cloud layer's state by the cluster
 layer and injected cluster-side (Secrets + ArgoCD Application valuesObject) — never committed

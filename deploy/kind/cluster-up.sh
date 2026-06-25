@@ -151,6 +151,37 @@ KUBECONFIG="${INCONTAINER_KUBECONFIG}" kubectl config unset \
   "clusters.${CLUSTER_KEY}.certificate-authority-data" >/dev/null 2>&1 || true
 echo "==> Wrote container-reachable kubeconfig (${host_url}) -> ${INCONTAINER_KUBECONFIG}"
 
+# 7b. Read-only kubeconfig for the host-plane platform-console (ADR-0015 phase-2).
+#     The console reads live pod/node state to drive its architecture page on the
+#     kind substrate. It only OBSERVES, so it gets a least-privilege SA (get/list/
+#     watch on pods/nodes/namespaces) rather than the admin kubeconfig Headlamp
+#     uses. Mint a kubeconfig from that SA's long-lived token, container-reachable
+#     and TLS-skipped like the incontainer one. Non-prod host plane only.
+CONSOLE_KUBECONFIG="${KUBECONFIG_PATH%.kubeconfig}.console.kubeconfig"
+echo "==> Applying console-reader RBAC (read-only SA for the platform-console)"
+KUBECONFIG="${KUBECONFIG_PATH}" kubectl apply -f deploy/kind/console-reader-rbac.yaml
+echo "==> Waiting for the console-reader token to be issued"
+CONSOLE_TOKEN=""
+for _ in $(seq 1 30); do
+  CONSOLE_TOKEN="$(KUBECONFIG="${KUBECONFIG_PATH}" kubectl get secret console-reader-token \
+    -n platform-console -o jsonpath='{.data.token}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+  [ -n "${CONSOLE_TOKEN}" ] && break
+  sleep 1
+done
+if [ -z "${CONSOLE_TOKEN}" ]; then
+  echo "✖ console-reader token not issued in time — skipping console kubeconfig" >&2
+else
+  rm -f "${CONSOLE_KUBECONFIG}"
+  KUBECONFIG="${CONSOLE_KUBECONFIG}" kubectl config set-cluster "${CLUSTER_KEY}" \
+    --server="${host_url}" --insecure-skip-tls-verify=true >/dev/null
+  KUBECONFIG="${CONSOLE_KUBECONFIG}" kubectl config set-credentials console-reader \
+    --token="${CONSOLE_TOKEN}" >/dev/null
+  KUBECONFIG="${CONSOLE_KUBECONFIG}" kubectl config set-context "${CLUSTER_KEY}" \
+    --cluster="${CLUSTER_KEY}" --user=console-reader >/dev/null
+  KUBECONFIG="${CONSOLE_KUBECONFIG}" kubectl config use-context "${CLUSTER_KEY}" >/dev/null
+  echo "==> Wrote read-only console kubeconfig -> ${CONSOLE_KUBECONFIG}"
+fi
+
 echo
 echo "kind '${CLUSTER_NAME}' is up."
 echo "  registry   : localhost:${REGISTRY_PORT} (host push)  |  ${REGISTRY_NAME}:5000 (node pull)  |  ${REGISTRY_NAME}.kube-public.svc:5000 (in-cluster)"

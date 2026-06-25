@@ -59,8 +59,17 @@ it is pointed at?
 - **Now (checkpoint 0007, minimal slice):** make the embed targets injected/run-mode-aware enough
   to add the Headlamp + ArgoCD tabs and to stop hardcoding the single Temporal-UI location;
   link-out fallback for the Cloud Temporal UI. Do **not** rewrite the status page or topology yet.
-- **Next:** the `kube_status` provider so the architecture page is live on kind, not just Compose.
+- **Next — LANDED (checkpoint 0013):** the `kube_status` provider so the architecture page is live
+  on kind, not just Compose. The status source is now abstracted behind a `StatusProvider`
+  (`app/services/status/`): `DockerProvider` (Compose), `KubeProvider` (kind pods, via a read-only
+  ServiceAccount kubeconfig), and a `CompositeProvider` that unions them on kind — Kube for the
+  cluster-resident workloads (orders-api/orders-db/workers), Docker for the host-plane tooling that
+  still runs in Compose (lgtm, console, viz-proxy, headlamp, mock-api). Substrate is injected via
+  `CONSOLE_SUBSTRATE` (compose | kind) — this also **wires the phase-1 "injected descriptor" seam**,
+  which to this point existed only as intent. Provider selection is config, never inference.
 - **Later:** topology-as-data to de-bake the retail-only assumption and support multiple domains.
+  Log streaming on kind (Docker logs → pod logs) is also still Docker-only — a follow-on to this
+  slice, not yet done.
 
 ## Consequences
 
@@ -69,6 +78,13 @@ it is pointed at?
 - Per ADR-0014, the console lives on the **non-prod host plane** — this generalization is for demo
   fidelity and operator convenience, not a customer-shipped component. Effort is scoped accordingly
   (phased, not a big-bang rewrite).
-- Until the `kube_status` provider lands, the architecture/status page is accurate only in Compose
+- ~~Until the `kube_status` provider lands, the architecture/status page is accurate only in Compose
   substrate; on kind, Headlamp is the source of truth for live cluster state and the console's own
-  status page is knowingly stale. That gap is recorded here rather than silently shipped.
+  status page is knowingly stale.~~ **Resolved (phase-2, checkpoint 0013):** the architecture page
+  is now live on kind via `KubeProvider`. Headlamp remains the deep cluster explorer; the console's
+  page is again a faithful at-a-glance topology in both substrates.
+- The console reads the cluster with a **least-privilege, read-only ServiceAccount**
+  (`console-reader`: get/list/watch on pods/nodes/namespaces only — no writes, no Secrets), minted
+  by `cluster-up.sh` as a long-lived-token kubeconfig under `.secrets/kube`. It deliberately does
+  **not** reuse the admin kubeconfig Headlamp uses: the console only observes, so it should only be
+  able to observe — a habit worth modeling even on the non-prod host plane.
