@@ -9,6 +9,12 @@ class Settings(BaseSettings):
     order_poll_interval_seconds: int = 3
     orders_service_timeout_seconds: int = 60
 
+    # Injected descriptor (ADR-0015): which Temporal backend this run targets.
+    # `cloud` (the kind+Cloud path) renders the managed Temporal Cloud endpoint and
+    # scopes Reset Demo State to local data only; `oss` renders the in-Compose
+    # Temporal cluster and keeps the full reset. Drives the architecture page.
+    console_backend: str = "cloud"
+
     # Browser-reachable URLs for embedded tool UIs (iframed in the console).
     # These resolve in the user's browser, not inside the container, so they
     # point at host-published ports. Temporal UI is served via the nginx

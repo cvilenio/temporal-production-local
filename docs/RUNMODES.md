@@ -10,16 +10,23 @@ carries forward to kind/Helm (a k8s Secret) unchanged.
 
 Two axes. **Where the apps run** (local laptop) × **where Temporal lives** (the backend).
 
-| Apps run on | Backend            | How                                              | Status |
-|-------------|--------------------|--------------------------------------------------|--------|
-| Compose     | Local OSS server   | `poe up`                                         | ✅ working |
-| Compose     | Temporal Cloud     | `poe up-cloud` / `poe up-cloud-prod`             | ✅ working |
-| kind        | Local OSS server   | ArgoCD + `charts/temporal-server` (cluster layer)| planned |
-| kind        | Temporal Cloud     | `just cluster-up` → `layers/cluster` apply (ArgoCD + Cloud API-key Secrets; runs workers + app tier) | ✅ working |
+| Apps/workers run on | Backend          | How                                              | Status |
+|---------------------|------------------|--------------------------------------------------|--------|
+| **kind**            | **Temporal Cloud** | `just platform-up` + `just up-cloud-kind` (ArgoCD + Cloud API-key Secrets; kind runs workers + app tier) | ✅ **the supported path** |
+| kind                | Local OSS server | ArgoCD + `charts/temporal-server` (cluster layer)| 🚧 planned — not wired |
+| Compose             | Local OSS server | `poe up` (server + app tier, **no workers**)     | ⚠️ legacy fallback — see below |
 
-The user-facing framing: **two local flavors** (Compose, kind) and **two Cloud flavors**
-(nonprod, prod). Compose is the fast laptop path and stays a first-class fallback even
-after kind can run OSS.
+**The pivot (this is the important part).** Temporal **workers run on kind** (Worker
+Deployment), not in Compose. Compose's role is now narrowed to two things: (1) the host
+visibility/console plane for the kind paths (`up-cloud-kind`), and (2) a **legacy local
+self-hosted OSS server + app tier** fallback (`up`). Running workers, or the full app
+tier against Cloud, on Compose is **no longer a goal** — those modes (`up-cloud`,
+`up-cloud-prod`, `compose/workers.yml`) have been removed.
+
+The legacy `poe up` brings up a local Temporal **server + app tier with no workers**, so
+workflows don't *execute* there until OSS-on-kind lands; it's useful for SDK/server
+poking and as the place metrics were historically exercised, not an end-to-end demo. The
+supported end-to-end path is **kind + Cloud**.
 
 ## How backend selection works (and the direnv footgun)
 
@@ -33,43 +40,41 @@ backend deterministic regardless of the host shell:
 
 | Task              | Sources                          | Compose files                              |
 |-------------------|----------------------------------|--------------------------------------------|
-| `up` / `fresh`    | `config/local-oss.env`           | base + `host-apptier.yml` + `workers.yml` + `oss-server.yml` |
-| `up-cloud`        | `.secrets/keys/cloud-nonprod.env`| base + `host-apptier.yml` + `workers.yml`  |
-| `up-cloud-prod`   | `.secrets/keys/cloud-prod.env`   | base + `host-apptier.yml` + `workers.yml`  |
-| `up-cloud-kind`   | `.secrets/keys/cloud-nonprod.env`| base only (kind runs the workers AND the app tier) |
+| `up-cloud-kind`   | `.secrets/keys/cloud.env`        | base only (kind runs the workers AND the app tier) |
+| `up` / `fresh`    | `config/local-oss.env`           | base + `host-apptier.yml` + `oss-server.yml` (no workers) |
 | `down` / `down-cloud` | —                            | (matching set; `-v` drops volumes)         |
 
-`down` must use the same `-f` set as its `up` (`down-cloud` uses base + host-apptier +
-workers, which also tears down a base-only `up-cloud-kind` stack). **Bring the stack down
-before switching modes** (they share host ports and one Compose project). When both worker
-and OSS layers are present, `workers.yml` precedes `oss-server.yml` — the OSS layer merges
-`depends_on: temporal` onto the worker services.
+`down` must use the same `-f` set as its `up`. **Bring the stack down before switching
+modes** (they share host ports and one Compose project).
 
 On the **kind path, the cluster runs both the workers AND the app tier** (orders-db via
-CloudNativePG + orders-service), so `up-cloud-kind` is base-only: no `workers.yml`, no
-`host-apptier.yml`. The still-on-host console reaches the in-cluster app tier through the
-host ports kind maps — `host.docker.internal:8002` (orders-service) and `:5433` (orders-db).
+CloudNativePG + orders-service), so `up-cloud-kind` is base-only: no `host-apptier.yml`.
+The still-on-host console + pgweb reach the in-cluster app tier through the host ports kind
+maps — `host.docker.internal:8002` (orders-service) and `:5433` (orders-db). The sourced
+Cloud profile also gives the console its read-only Temporal Cloud liveness credentials.
 
 ## Files
 
 - **`docker-compose.yml`** — base: the host visibility/console plane (console, observability,
-  mock-api, kind cluster observers). NOT the workers, NOT the app tier. No Temporal backend;
-  `TEMPORAL_*` default to the local OSS server. Console defaults point at the kind-mapped host
-  ports; the host-apptier overlay overrides them for Compose modes.
-- **`compose/host-apptier.yml`** — the app *tier* layer: orders-db (Postgres) + orders-service
-  + pgweb. Included on the pure-Compose paths; omitted on the kind path (kind runs orders-db
-  via CNPG + orders-service via the `orders-app` chart). Repoints the console at the in-compose
+  mock-api, **pgweb**, kind cluster observers). NOT the workers, NOT the app tier. No Temporal
+  backend; `TEMPORAL_*` default to empty/local. Console + pgweb default to the kind-mapped host
+  ports; the host-apptier overlay overrides them for the local-OSS mode. Carries the two
+  injected descriptors — `CONSOLE_SUBSTRATE` (compose|kind) and `CONSOLE_BACKEND` (cloud|oss).
+- **`compose/host-apptier.yml`** — the app *tier* layer: orders-db (Postgres) + orders-service.
+  Included on the legacy local-OSS path; omitted on the kind path (kind runs orders-db via CNPG
+  + orders-service via the `orders-app` chart). Repoints the console + pgweb at the in-compose
   service names.
-- **`compose/workers.yml`** — the worker *tier* layer: the orders workflow + activity
-  workers. Included on the pure-Compose paths; omitted on the kind path (kind runs them).
 - **`compose/oss-server.yml`** — the OSS backend *layer*: Temporal server + its Postgres +
-  schema/namespace/search-attribute bootstrap + Web UI, and re-attaches the apps'
-  `depends_on: temporal`. Omit it to run against Cloud.
+  schema/namespace/search-attribute bootstrap + Web UI; re-attaches orders-service's
+  `depends_on: temporal` and sets `CONSOLE_BACKEND=oss`. Omit it to run against Cloud. (There is
+  no worker layer — workers run on kind.)
 - **`config/temporal/namespaces.yaml`** — shared namespace/search-attr/retention spec; the
   single source of truth read by both Cloud (Terraform) and OSS (the bootstrap renderer).
 - **`config/local-oss.env`** — local-OSS connection profile (tracked; no secrets).
-- **`.secrets/keys/cloud-{nonprod,prod}.env`** — Cloud profiles (git-ignored; hold the
-  worker API key). Generated from `deploy/terraform/layers/cloud` outputs.
+- **`.secrets/keys/cloud.env`** — the Cloud connection profile (git-ignored; holds the
+  worker API key + endpoint + the read-only observer key). Generated from
+  `deploy/terraform/layers/cloud` outputs, keyed by `<domain>` (no env axis). A second
+  domain's workers on kind would get their own `cloud-<domain>.env`.
 
 ## Topology vs. backend vs. add-ons
 
@@ -79,22 +84,25 @@ host ports kind maps — `host.docker.internal:8002` (orders-service) and `:5433
 
 ## Cloud namespaces and multiple business cases
 
-Cloud namespaces are provisioned by `deploy/terraform/layers/cloud`, keyed by **full
-namespace name** so business domains coexist on the one account (`<account-id>`):
+Cloud namespaces are provisioned by `deploy/terraform/layers/cloud`, keyed by **domain**
+so business domains coexist on the one account (`<account-id>`). There is **no
+nonprod/prod env axis** (ADR-0017) — the repo models one production-shaped environment:
 
 ```
-ziggymart-nonprod   ziggymart-prod      # retail / orders (today)
-payments-nonprod    payments-prod       # a future domain — just add map keys
+ziggymart       # retail / orders (today)
+payments        # a future domain — just add a spec entry + overlay entry
 ```
 
-Convention: `<domain>-<env>`. Each entry gets its own namespace + least-privilege worker
-service account + API key. A new business case = add it to the shared spec (below) + add its
-Cloud overlay entries + its own app stack (its own `TEMPORAL_NAMESPACE` profile); the orders
-app is simply the first domain.
+Convention: `<domain>`. Each domain gets its own namespace + least-privilege worker
+(and optional client) service account + API key — which is what enables **Nexus** across
+domains and **per-domain auth**. A new business case = add it to the shared spec (below) +
+add its Cloud overlay entry + its own app stack (its own `TEMPORAL_NAMESPACE` profile); the
+orders app is simply the first domain. The other axes that matter: **region** (per-domain
+`regions` in the overlay → multi-region HA), not environment.
 
 ## One spec, no Cloud↔OSS drift
 
-Namespace identity, custom **search attributes**, and per-env retention live once in
+Namespace identity, custom **search attributes**, and retention live once in
 `config/temporal/namespaces.yaml` — the single source of truth both backends read (ADR-0007):
 
 - **Cloud:** `deploy/terraform/layers/cloud` reads the spec via `yamldecode()` and merges a
@@ -111,8 +119,9 @@ it surfaces in both the Cloud `terraform plan` and the next OSS `poe up`.
 
 kind is a *local flavor*, not a new contract. The Helm worker chart already reads the same
 `TEMPORAL_*` (`deploy/charts/orders-workers`); the backend is selected by a k8s Secret
-(Cloud) or the in-cluster `charts/temporal-server` (local OSS) — exactly the Compose split,
-one level up. Compose-OSS stays as the fast fallback.
+(Cloud) or the in-cluster `charts/temporal-server` (local OSS) — exactly the Compose backend
+split, one level up. Once OSS-on-kind lands, the kind cluster will run the workers against
+*either* backend, and the legacy Compose-OSS server+app fallback can retire entirely.
 
 ### kind + Cloud — how to run it
 
@@ -161,12 +170,25 @@ Things worth knowing:
   automatically. TLS stays on with API keys.
 - **Workers are pinned by image digest** (ADR-0012): the git-describe tag is for humans, the
   `sha256` digest is the deploy contract, so the Worker Controller Build ID is content-addressed.
-- **The console's architecture page is live on kind** (ADR-0015 phase-2): it reads cluster pod
+- **The console's architecture page is live on kind** (ADR-0015 phase-2+): it reads cluster pod
   state via a **read-only** ServiceAccount kubeconfig (`console-reader`) that `cluster-up.sh` mints
-  into `.secrets/kube/kind.console.kubeconfig`. The substrate is injected via `CONSOLE_SUBSTRATE`
-  (base defaults `kind`; the host-apptier overlay sets `compose`). On kind the live status is a
-  union: cluster pods from Kube, host-plane tooling (lgtm, console, mock-api, viz-proxy, headlamp)
-  from Docker.
+  into `.secrets/kube/kind.console.kubeconfig`. Two injected descriptors drive it:
+  `CONSOLE_SUBSTRATE` (base defaults `kind`; the host-apptier overlay sets `compose`) and
+  `CONSOLE_BACKEND` (base defaults `cloud`; `oss-server.yml` sets `oss`). On kind+Cloud the live
+  status is a union: cluster pods from Kube (orders-*, orders-db, **argocd**), host-plane tooling
+  (lgtm, console, mock-api, pgweb, viz-proxy, headlamp, codec-server) from Docker, and a
+  **console-owned Temporal Cloud liveness probe** — namespace reachability (a read-only SDK
+  `DescribeNamespace`; Cloud API keys are not authorized for the gRPC health service) plus the
+  public Temporal Statuspage. With the optional read-only **observer key**
+  (`TEMPORAL_CLOUD_OPS_API_KEY`, the cloud layer's `observer_api_key_token`), the console also
+  calls the Cloud Ops API (`GetNamespaces`/`GetRegions`) to render a **regions + namespaces**
+  status block (account-scoped `read` + per-namespace read; see `observer.tf`). The Tooling strip is data-driven, so it
+  adapts: OSS-only nodes (in-Compose Temporal sim, ui-proxy, pgweb-temporal) show only on the
+  `oss` backend; cluster-visibility tooling only on the `kind` substrate.
+- **Reset Demo State is backend-aware** (ADR-0015): on the `cloud` backend it is scoped to local
+  business data only (truncate `orders`/`idempotency_keys` + clear the submission log) and never
+  terminates or deletes workflows in the managed Cloud namespace; on `oss` it keeps the full
+  reset (terminate in-flight + optionally delete closed history).
 
 The account-bearing namespace handle + API keys are read from the cloud layer's state by the cluster
 layer and injected cluster-side (Secrets + ArgoCD Application valuesObject) — never committed
@@ -199,7 +221,7 @@ your host disk. Two reset paths, do not confuse them:
 | `just cluster-stop` → `just cluster-start` | **survives** (node container preserved) |
 | `just cluster-down` (`kind delete cluster`) | **gone** — node container destroyed with the PVC |
 | `just orders-db-reset` | **gone** — *physical* reset: deletes the CNPG Cluster + PVCs; ArgoCD re-syncs an empty DB |
-| Console "Reset demo" / `POST /admin/reset` on orders-api | kept — *logical* reset: truncates app tables + terminates workflows, DB lives |
+| Console "Reset demo" / `POST /admin/reset` on orders-api | kept — *logical* reset. On Cloud: local data only (truncates app tables, clears the submission log); never touches the managed namespace. On OSS: also terminates in-flight + optionally deletes closed history. DB lives. |
 
 To persist across a full `cluster-down`, you'd bind the PVC to a host dir via kind `extraMounts`
 (deliberately not done — it's a Compose bind-mount habit, less production-faithful than letting the

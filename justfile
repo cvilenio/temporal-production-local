@@ -26,7 +26,7 @@ default:
 
 # --- Python app stack (delegates to poe) -------------------------------------
 
-# Local OSS server + apps.
+# Local OSS server + app tier (no workers — those run on kind).
 up:
     uv run poe up
 
@@ -38,19 +38,12 @@ down:
 fresh:
     uv run poe fresh
 
-# Apps against Temporal Cloud (nonprod).
-up-cloud:
-    uv run poe up-cloud
-
-# Apps against Temporal Cloud (prod).
-up-cloud-prod:
-    uv run poe up-cloud-prod
-
-# Host app tier + visibility for the kind+Cloud path (kind owns the workers).
+# Host visibility + console + mock-api for the kind+Cloud path (kind owns the
+# workers AND the app tier). Bring this up FIRST before any live kind testing.
 up-cloud-kind:
     uv run poe up-cloud-kind
 
-# Stop the Cloud-backed app stack.
+# Stop the Cloud-backed host stack.
 down-cloud:
     uv run poe down-cloud
 
@@ -112,7 +105,7 @@ cluster-up: render-deps
 release-worker-deployments:
     #!/usr/bin/env bash
     set -euo pipefail
-    env=".secrets/keys/cloud-nonprod.env"
+    env=".secrets/keys/cloud.env"
     [ -f "$env" ] || { echo "no cloud creds ($env) — skipping Worker Deployment release"; exit 0; }
     set -a; . "$env"; set +a
     [ -n "${TEMPORAL_API_KEY:-}" ] || { echo "no TEMPORAL_API_KEY — skipping release"; exit 0; }

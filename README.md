@@ -74,9 +74,9 @@ vision above:
 | Operator visibility plane (console aggregating Temporal UI, Headlamp, ArgoCD UI) | ✅ working (kind + Cloud) |
 | Local OCI delivery + offline-resumable cluster (zot, stop/start) | ✅ working |
 | Retail order workflow (saga, signals, idempotent vs. write-then-verify retries) | ✅ working |
-| **Observability / metrics on kind** | 🚧 **not wired / unproven** — metrics have only been exercised on the Compose-OSS path; treat kind metrics as not yet working |
-| App tier (orders API, mock API, console) on kind | 🚧 planned — runs in Compose today |
-| Self-hosted Temporal **server** on kind (the OSS backend) | 🚧 planned — not wired |
+| App tier (orders API, mock API, console) on kind | ✅ working — orders-api + orders-db (CNPG) on kind; console + mock-api on the host plane |
+| **Observability / metrics on kind** | 🚧 **not wired / unproven** — SDK/server metrics were only ever exercised on the legacy Compose-OSS path (which no longer runs workers); treat kind metrics as not yet working |
+| Self-hosted Temporal **server** on kind (the OSS backend) | 🚧 planned — not wired (workers already run on kind against Cloud) |
 | Polyglot workers (Go / TypeScript / Java) | 🚧 planned — Python only today; the layout is polyglot-ready |
 | Encryption codec + codec server (client-side decode, per-user access) | 🧱 scaffold only — placeholder codec; replace with real AEAD before any sensitive use (ADR-0006) |
 | Codec proxy (payload encoding at the proxy layer) | 🚧 planned |
@@ -86,19 +86,20 @@ vision above:
 
 "Apps" run on your laptop; "backend" is where the Temporal Service itself lives.
 
-| Apps run on | Temporal backend  | Command                                  | Status |
-|-------------|-------------------|------------------------------------------|--------|
-| **kind**    | **Temporal Cloud**| `just platform-up` + `just up-cloud`     | ✅ **the supported path** |
-| Compose     | Local OSS server  | `just up`                                | ⚠️ workflow runs; see caveat below |
-| Compose     | Temporal Cloud    | `just up-cloud`                          | ⚠️ workflow runs; see caveat below |
-| kind        | Local OSS server  | (in-cluster `temporal-server` chart)     | 🚧 planned — not wired |
+| Apps/workers run on | Temporal backend | Command                              | Status |
+|---------------------|------------------|--------------------------------------|--------|
+| **kind**            | **Temporal Cloud** | `just platform-up` + `just up-cloud-kind` | ✅ **the supported path** |
+| kind                | Local OSS server  | (in-cluster `temporal-server` chart) | 🚧 planned — not wired |
+| Compose             | Local OSS server  | `just up` (server + app, **no workers**) | ⚠️ legacy fallback; see caveat |
 
-> **Compose caveat (important).** The Compose paths still start and run the order
-> workflow, and Compose-OSS is the only place metrics have been exercised. **But the demo
-> console has evolved toward the cluster plane** — it now carries Headlamp and ArgoCD tabs
-> that are inert without a kind cluster, and its run-mode awareness is tuned for the
-> kind + Cloud path. Treat Compose as a workflow/SDK quick-start, **not** a polished
-> end-to-end demo. The console is not (yet) tailored back to Compose.
+> **Compose caveat (important).** Compose is **no longer a workflow-execution runtime**.
+> Temporal workers run on kind (Worker Deployment); running workers — or the full app tier
+> against Cloud — on Compose is no longer a goal, and those modes (`up-cloud`,
+> `up-cloud-prod`, `compose/workers.yml`) have been removed. What remains: Compose runs the
+> **host visibility/console plane** for the kind paths, and a **legacy local self-hosted
+> Temporal server + app tier** (`just up`) with **no workers** — so it boots a server you
+> can poke but won't *execute* workflows until OSS-on-kind lands. The supported end-to-end
+> path is **kind + Cloud**.
 
 ---
 
@@ -164,11 +165,12 @@ terraform apply cloud.plan
 cd -
 ```
 
-This creates the `ziggymart-nonprod` / `ziggymart-prod` namespaces, a least-privilege
-worker service account + API key per namespace, and the `OrderId` / `OrderStatus` /
-`TraceId` custom search attributes — all from the shared spec in
+This creates the `ziggymart` namespace (one per business **domain** — no nonprod/prod
+env split, ADR-0015), a least-privilege worker + client service account + API key, a
+read-only account-level **observer** key for the console, and the `OrderId` /
+`OrderStatus` / `TraceId` custom search attributes — all from the shared spec in
 `config/temporal/namespaces.yaml`. State is written to `.secrets/terraform/cloud.tfstate`
-and **contains the worker API key in plaintext** — treat it as a credential. Full detail:
+and **contains the API keys in plaintext** — treat it as a credential. Full detail:
 [`deploy/terraform/layers/cloud/README.md`](deploy/terraform/layers/cloud/README.md).
 
 ### 4. Bring up the kind cluster and deploy the workers
@@ -186,8 +188,9 @@ just platform-up
 The cluster layer wires the workers to Cloud automatically — it reads the **regional**
 Cloud endpoint and the worker API key from the Cloud layer's outputs and injects them via
 a Secret that the Worker Controller mounts. By default the cluster mirrors the
-`ziggymart-nonprod` namespace. The workers are delivered as a
-`temporal.io/WorkerDeployment`, so the deployed version is content-addressed by digest.
+`ziggymart` namespace (the cluster layer's `cloud_namespace` var). The workers are
+delivered as a `temporal.io/WorkerDeployment`, so the deployed version is
+content-addressed by digest.
 
 Verify the workers reconciled:
 
@@ -196,34 +199,43 @@ just k get applications -n argocd            # orders-workers should be Synced/H
 just k get pods -n orders                    # workflow + activity worker pods Running
 ```
 
-### 5. Bring up the app tier (Compose) pointed at the same Cloud namespace
+### 5. Bring up the host visibility plane (console, pgweb, observability)
 
-The orders API, mock external API, and console run in Compose for now. Point them at your
-Cloud namespace by writing a worker connection profile from the Cloud layer outputs, then
-start the stack:
+On the kind path the **app tier runs in-cluster** (orders-api + orders-db via CNPG, part
+of `just platform-up`). What runs on the host is the **visibility plane**: the demo
+console, pgweb, the LGTM stack, mock-api, and the cluster observers (Headlamp, ArgoCD via
+viz-proxy). Bring it up with `just up-cloud-kind`, which sources the Cloud connection
+profile — the console uses it for a read-only Temporal Cloud liveness probe, and pgweb +
+the console reach the in-cluster app tier through the host ports kind maps.
+
+The profile also carries an optional **read-only observer key** (`TEMPORAL_CLOUD_OPS_API_KEY`,
+the cloud layer's `observer_api_key_token` output). When present, the console calls the
+Temporal Cloud Ops API to render a **regions + namespaces** status block on the architecture
+page (account-scoped `read`, minted by the cloud layer's `observer.tf`). Omit it and the
+block is simply hidden — the single-namespace liveness probe still works.
+
+> **Do this *before* Step 4's `just platform-up`.** The console is the operator's live
+> window onto the bring-up, so it must be up first — `just platform-up` is gated on it
+> (`just preflight` probes `:8086/healthz` and aborts if the console is down). The console
+> is boot-resilient: it comes up Healthy with the whole kind side absent and self-heals as
+> the cluster appears (ADR-0015).
 
 ```bash
-# Derive the nonprod connection profile from the Cloud layer outputs.
+# Derive the ziggymart connection profile from the Cloud layer outputs (keyed by domain).
 cd deploy/terraform/layers/cloud
-cat > ../../../../.secrets/keys/cloud-nonprod.env <<EOF
-export TEMPORAL_ADDRESS=$(terraform output -json endpoints          | jq -r '.["ziggymart-nonprod"]')
-export TEMPORAL_NAMESPACE=$(terraform output -json namespace_handles | jq -r '.["ziggymart-nonprod"]')
+cat > ../../../../.secrets/keys/cloud.env <<EOF
+export TEMPORAL_ADDRESS=$(terraform output -json endpoints          | jq -r '.["ziggymart"]')
+export TEMPORAL_NAMESPACE=$(terraform output -json namespace_handles | jq -r '.["ziggymart"]')
 export TEMPORAL_TLS=true
-export TEMPORAL_API_KEY=$(terraform output -json api_key_tokens     | jq -r '.["ziggymart-nonprod"]')
+export TEMPORAL_API_KEY=$(terraform output -json api_key_tokens     | jq -r '.["ziggymart"]')
+# Optional: read-only observer key for the architecture page's regions/namespaces block.
+export TEMPORAL_CLOUD_OPS_API_KEY=$(terraform output -raw observer_api_key_token)
 EOF
 cd -
 
-just up-cloud          # app tier, sourcing the profile above
+just up-cloud-kind     # host visibility plane + console + pgweb + mock-api (start FIRST)
 just headlamp-reload   # nudge the cluster explorer to pick up the kubeconfig (optional)
 ```
-
-> **Known edge — two worker fleets.** `just up-cloud` currently also starts the Compose
-> worker containers, which poll the **same** Cloud namespace and task queues as the kind
-> workers. Orders still complete, but either fleet may execute them — so this does not by
-> itself *prove* the kind workers did the work. Until a Compose app-tier-only override
-> lands, confirm execution on the kind side with
-> `just k logs -n orders -l app.kubernetes.io/name=orders-activity` (or watch the kind
-> pods) rather than assuming.
 
 ### 6. Open the consoles and run an order
 
@@ -238,8 +250,8 @@ From the **Demo Console**, open the Orders page, select **"Happy Path"**, and cl
 **Trigger scenarios**. The order is orchestrated by the kind workers against your Cloud
 namespace; watch it complete in the console and inspect its history in the Cloud UI.
 
-> Metrics/observability (Grafana) are wired only on the Compose-OSS path today and are
-> **not** yet proven on kind — see the status table.
+> Metrics/observability (Grafana) were only ever exercised on the legacy Compose-OSS path
+> (which no longer runs workers) and are **not** yet proven on kind — see the status table.
 
 ### Going offline (planes, demos with no network)
 
@@ -259,17 +271,18 @@ just cluster-start    # resumes with zero network
 
 ## Other run modes
 
-The fastest path to *see the workflow run* — no Kubernetes, self-hosted Temporal in
-Compose (read the Compose caveat above first):
+A legacy, no-Kubernetes fallback: a self-hosted Temporal **server + app tier** in Compose
+(read the Compose caveat above first). Note this runs **no workers** — workers run on kind
+— so it boots a local server + app you can poke, but won't *execute* workflows end-to-end
+until OSS-on-kind lands:
 
 ```bash
-just up        # local OSS Temporal server + app + LGTM observability
+just up        # local OSS Temporal server + app tier + LGTM observability (no workers)
 just down      # stop and drop volumes
 ```
 
-Or run the app tier in Compose against Temporal Cloud (no kind): `just up-cloud`. The full
-backend × topology matrix, the connection-profile contract, and the direnv footgun are
-documented in [`docs/RUNMODES.md`](docs/RUNMODES.md).
+The full backend × topology matrix, the connection-profile contract, and the direnv
+footgun are documented in [`docs/RUNMODES.md`](docs/RUNMODES.md).
 
 ---
 
@@ -309,7 +322,8 @@ libs/        Shared-kernel code apps import (the orders domain: workflows, activ
 images/      One configurable Dockerfile per language.
 deploy/      How it ships: terraform/ (control plane), argocd/ (app-of-apps), charts/.
 config/      Connection profiles + the shared namespace/dependency specs.
-compose/     Self-hosted Temporal + observability for the no-Kubernetes quick-start.
+compose/     Host visibility/console plane for the kind paths, plus a legacy local
+             self-hosted Temporal server + app tier (no workers — those run on kind).
 docs/        ARCHITECTURE.md, RUNMODES.md, DEMO_SCRIPT.md, SHIP_PLAN.md, and adr/.
 ai_checkpoints/  Cross-session work log (read newest-first for current state).
 ```
@@ -324,8 +338,8 @@ ai_checkpoints/  Cross-session work log (read newest-first for current state).
   contract.
 - [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md) — the guided scenario walk-through.
 - [`docs/SHIP_PLAN.md`](docs/SHIP_PLAN.md) — a sample 30–60 day Cloud rollout plan.
-- [`OBSERVABILITY.md`](OBSERVABILITY.md) — the observability model (proven on Compose-OSS;
-  see the status table for kind).
+- [`OBSERVABILITY.md`](OBSERVABILITY.md) — the observability model (historically exercised
+  on the legacy Compose-OSS path; not yet proven on kind — see the status table).
 - [`docs/adr/`](docs/adr/) — numbered decision records (the *why* behind each choice).
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — commit conventions and contribution flow.
 

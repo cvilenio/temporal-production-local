@@ -28,6 +28,18 @@ INFERRED_DEPS = ("temporal", "orders-service")
 # instead of from the Docker socket. Services WITHOUT a `kube` locator (host-plane
 # tooling, the Cloud-sim nodes) stay Docker/probe-sourced in every substrate.
 SERVICE_REGISTRY = {
+    # The managed Temporal Cloud endpoint, shown on the cloud backend. Its status is
+    # NOT container-derived — the CloudStatusProvider probes my namespace's
+    # reachability (SDK health check) AND the public Temporal Statuspage, and emits
+    # this entry. The `temporal`/`temporal-ui`/`postgresql` trio below are the
+    # OSS-on-Compose simulators kept for the (future) OSS backend.
+    "temporal-cloud": {
+        "group": "Temporal Cloud",
+        "icon_key": "server-rack",
+        "display_name": "Temporal Cloud",
+        "description": "Managed Temporal namespace (account/region provisioned by Terraform)",
+        "http_probe": None,
+    },
     "temporal": {
         "group": "Temporal Cloud",
         "icon_key": "server-rack",
@@ -148,12 +160,60 @@ SERVICE_REGISTRY = {
         "description": "Grafana, Loki, Tempo, Prometheus",
         "http_probe": "http://lgtm:3000/api/health",
     },
+    "codec-server": {
+        "group": "Tooling",
+        "icon_key": "network",
+        "display_name": "Codec Server",
+        "description": "Decodes encrypted payloads for the Temporal UI/CLI",
+        "http_probe": None,
+    },
+    # ── Cluster-visibility tooling (kind only — see KIND_ONLY_KEYS) ──────────
+    "headlamp": {
+        "group": "Tooling",
+        "icon_key": "window",
+        "display_name": "Headlamp",
+        "description": "Kubernetes cluster explorer",
+        "http_probe": None,
+    },
+    "viz-proxy": {
+        "group": "Tooling",
+        "icon_key": "network",
+        "display_name": "Visibility Proxy",
+        "description": "Frame-stripping proxy fronting Headlamp + ArgoCD",
+        "http_probe": None,
+        "tcp_port": 8087,
+    },
+    # ArgoCD runs IN the cluster (argocd namespace), so it is kube-sourced like the
+    # orders workloads. The read-only console SA has cluster-wide pod get/list/watch.
+    "argocd": {
+        "group": "Tooling",
+        "icon_key": "network",
+        "display_name": "ArgoCD",
+        "description": "GitOps delivery controller",
+        "http_probe": None,
+        "kube": {
+            "namespace": "argocd",
+            "selector": "app.kubernetes.io/name=argocd-server",
+        },
+    },
 }
 
 # Service keys the cluster owns on the kind substrate (those with a `kube` locator).
 KUBE_OWNED_KEYS = frozenset(
     key for key, cfg in SERVICE_REGISTRY.items() if cfg.get("kube")
 )
+
+# Substrate/backend applicability. The status loop excludes the irrelevant set so a
+# service that only exists on the other substrate never shows up as spurious "down":
+#   - OSS_ONLY_KEYS: the OSS-on-Compose Temporal simulators + their dev UIs. Present
+#     only on the `oss` backend; excluded on the kind+Cloud path (the temporal-cloud
+#     entry replaces them).
+#   - KIND_ONLY_KEYS: cluster-visibility tooling that is meaningless without a kind
+#     cluster. Excluded on the `compose` substrate.
+OSS_ONLY_KEYS = frozenset(
+    {"temporal", "temporal-ui", "postgresql", "ui-proxy", "pgweb-temporal"}
+)
+KIND_ONLY_KEYS = frozenset({"headlamp", "viz-proxy", "argocd"})
 
 _current_snapshot: dict[str, dict] = {}
 

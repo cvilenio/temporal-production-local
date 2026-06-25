@@ -25,6 +25,8 @@ platform-console = [
   "kubernetes>=30.1.0",
   "pydantic-settings>=2.2.1",
   "uvicorn[standard]>=0.29.0",
+  # Console-owned Temporal Cloud liveness probe builds its own read-only client.
+  "temporalio>=1.28,<1.29",
 ]
 mock-api = [
   "fastapi==0.111.0",
@@ -72,39 +74,38 @@ lint = { sequence = [
 check = { sequence = ["lint", "test"], help = "Full gate: lint + test" }
 
 # =============================================================================
-# Compose lifecycle — one app stack, swappable Temporal backend.
+# Compose lifecycle. Compose's role is now narrowed (see RUNMODES.md): it runs the
+# host visibility/console plane for the kind paths, and a LEGACY local self-hosted
+# Temporal **server + app tier** fallback. It no longer runs the Temporal workers —
+# those run on kind (Worker Deployment). So `poe up` brings up the OSS server + app
+# tier with NO workers (workflows won't execute locally until OSS-on-kind lands).
 #
-# Each task SOURCES its connection profile into the compose process so the
-# backend is deterministic regardless of any TEMPORAL_* in the host shell
-# (.envrc/direnv targets host-direct runs, not compose). `down` must use the
-# same -f set as the matching `up`. Bring the stack down before switching modes.
+# Each task SOURCES its connection profile into the compose process so the backend
+# is deterministic regardless of any TEMPORAL_* in the host shell. `down` must use
+# the same -f set as the matching `up`. Bring the stack down before switching modes.
 #
-#   Local OSS  : poe up         (base + compose/oss-server.yml)
-#   Cloud nonprod: poe up-cloud
-#   Cloud prod : poe up-cloud-prod
+#   Local OSS (server + app, no workers): poe up   (base + host-apptier + oss-server)
+#   kind + Cloud host plane              : poe up-cloud-kind   (base only)
 # =============================================================================
 
 render-oss-bootstrap = { cmd = "python compose/scripts/render-oss-bootstrap.py", help = "Render the shared spec to the OSS bootstrap env file" }
 render-deps = { cmd = "python compose/scripts/render-deps.py", help = "Render config/dependencies.yaml -> config/.generated/deps.env (for the kind delivery scripts)" }
-# Compose stack = base (host platform/visibility plane) + opt-in layers. The
-# worker tier (compose/workers.yml) is included on the pure-Compose paths and
-# OMITTED on the kind path (kind runs the workers — see up-cloud-kind). When
-# both are present, workers.yml must precede oss-server.yml (the OSS layer
-# merges `depends_on: temporal` onto the worker services).
-up = { shell = "python compose/scripts/render-oss-bootstrap.py; set -a; . config/local-oss.env; set +a; docker compose -f docker-compose.yml -f compose/host-apptier.yml -f compose/workers.yml -f compose/oss-server.yml up --build", help = "Local OSS server + apps + workers" }
-down = { shell = 'docker compose -f docker-compose.yml -f compose/host-apptier.yml -f compose/workers.yml -f compose/oss-server.yml down -v --remove-orphans; docker compose -p "${PWD##*/}" -f docker-compose.yml -f compose/host-apptier.yml -f compose/workers.yml -f compose/oss-server.yml down -v --remove-orphans || true; docker network rm temporal-network 2>/dev/null || true', help = "Stop the local-OSS stack and drop volumes (also sweeps a stray default-project and the shared temporal-network)" }
+# Local OSS = base (host platform/visibility plane) + host-apptier (orders-db +
+# orders-service + pgweb) + oss-server (Temporal server + its deps). No worker tier:
+# workers are a kind concern now (see up-cloud-kind), so OSS-on-Compose is a
+# server+app fallback that does not execute workflows on its own.
+up = { shell = "python compose/scripts/render-oss-bootstrap.py; set -a; . config/local-oss.env; set +a; docker compose -f docker-compose.yml -f compose/host-apptier.yml -f compose/oss-server.yml up --build", help = "Local OSS server + app tier (no workers — those run on kind)" }
+down = { shell = 'docker compose -f docker-compose.yml -f compose/host-apptier.yml -f compose/oss-server.yml down -v --remove-orphans; docker compose -p "${PWD##*/}" -f docker-compose.yml -f compose/host-apptier.yml -f compose/oss-server.yml down -v --remove-orphans || true; docker network rm temporal-network 2>/dev/null || true', help = "Stop the local-OSS stack and drop volumes (also sweeps a stray default-project and the shared temporal-network)" }
 fresh = { sequence = ["down", "up"], help = "Recreate the local-OSS stack" }
 
-up-cloud = { shell = "set -a; . .secrets/keys/cloud-nonprod.env; set +a; docker compose -f docker-compose.yml -f compose/host-apptier.yml -f compose/workers.yml up --build", help = "Apps + workers against Temporal Cloud (nonprod), all on the host" }
-up-cloud-prod = { shell = "set -a; . .secrets/keys/cloud-prod.env; set +a; docker compose -f docker-compose.yml -f compose/host-apptier.yml -f compose/workers.yml up --build", help = "Apps + workers against Temporal Cloud (prod), all on the host" }
 # Host companion for the kind+Cloud path: console + cluster observers + mock-api,
 # but NEITHER the worker tier NOR the app tier — the kind cluster runs BOTH (the
-# orders-workers + orders-app charts). Base ONLY: no compose/workers.yml and no
-# compose/host-apptier.yml. The console reaches the in-cluster app tier via the
-# host ports kind maps (host.docker.internal:8002 / :5433). Tear down with down-cloud.
-up-cloud-kind = { shell = "set -a; . .secrets/keys/cloud-nonprod.env; set +a; docker compose -f docker-compose.yml up --build", help = "Host visibility + console + mock-api for the kind+Cloud path (kind owns the workers AND the app tier)" }
-down-cloud = { shell = 'docker compose -f docker-compose.yml -f compose/host-apptier.yml -f compose/workers.yml down -v --remove-orphans; docker compose -p "${PWD##*/}" -f docker-compose.yml -f compose/host-apptier.yml -f compose/workers.yml down -v --remove-orphans || true; docker network rm temporal-network 2>/dev/null || true', help = "Stop any Cloud-backed host stack (with or without workers/app tier) and drop volumes; also sweeps a stray default-project and the shared temporal-network" }
-fresh-cloud = { sequence = ["down-cloud", "up-cloud"], help = "Recreate the Cloud (nonprod) app stack" }
+# orders-workers + orders-app charts). Base ONLY. The console reaches the in-cluster
+# app tier via the host ports kind maps (host.docker.internal:8002 / :5433). The
+# sourced Cloud profile also gives the console its Temporal Cloud liveness creds.
+# Tear down with down-cloud.
+up-cloud-kind = { shell = "set -a; . .secrets/keys/cloud.env; set +a; docker compose -f docker-compose.yml up --build", help = "Host visibility + console + mock-api for the kind+Cloud path (kind owns the workers AND the app tier)" }
+down-cloud = { shell = 'docker compose -f docker-compose.yml -f compose/host-apptier.yml down -v --remove-orphans; docker compose -p "${PWD##*/}" -f docker-compose.yml -f compose/host-apptier.yml down -v --remove-orphans || true; docker network rm temporal-network 2>/dev/null || true', help = "Stop any Cloud-backed host stack and drop volumes; also sweeps a stray default-project and the shared temporal-network" }
 
 # Preflight gate for live kind testing: the platform-console is the operator's
 # single window onto a live run, so it MUST be up before anything mutates the

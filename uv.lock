@@ -1117,6 +1117,7 @@ platform-console = [
     { name = "jinja2" },
     { name = "kubernetes" },
     { name = "pydantic-settings" },
+    { name = "temporalio" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 workers = [
@@ -1155,6 +1156,7 @@ platform-console = [
     { name = "jinja2", specifier = ">=3.1.4" },
     { name = "kubernetes", specifier = ">=30.1.0" },
     { name = "pydantic-settings", specifier = ">=2.2.1" },
+    { name = "temporalio", specifier = ">=1.28,<1.29" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.29.0" },
 ]
 workers = [{ name = "orders", editable = "libs/orders/python" }]

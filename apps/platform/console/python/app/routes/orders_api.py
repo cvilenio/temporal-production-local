@@ -214,14 +214,20 @@ async def get_submission_log():
 
 @router.post("/reset")
 async def reset_demo(payload: dict[str, Any] = Body(default={})):
-    """Reset all demo state: proxy to orders-service /admin/reset (terminates
-    workflows + truncates order tables), then clear the in-memory submission log
-    so the console's batch history matches the wiped backend.
+    """Reset demo state: proxy to orders-service /admin/reset, then clear the
+    in-memory submission log so the console's batch history matches.
 
-    delete_closed (default true) also removes closed workflows from the Temporal
-    UI list; set false to only stop in-flight work and keep history.
+    Backend-aware (ADR-0015). On the **cloud** backend the reset is scoped to local
+    business data only (`local_only=true`) — Temporal Cloud is a managed, shared
+    namespace the console must never terminate or delete workflows in. On the **oss**
+    backend the full reset runs: terminate in-flight workflows and, when
+    delete_closed (default true), delete closed workflow history too.
     """
+    local_only = settings.console_backend.strip().lower() == "cloud"
     delete_closed = bool(payload.get("delete_closed", True))
+    params = {"local_only": str(local_only).lower()}
+    if not local_only:
+        params["delete_closed"] = str(delete_closed).lower()
 
     async with httpx.AsyncClient(
         timeout=settings.orders_service_timeout_seconds
@@ -229,7 +235,7 @@ async def reset_demo(payload: dict[str, Any] = Body(default={})):
         try:
             response = await client.post(
                 f"{settings.orders_service_url.rstrip('/')}/admin/reset",
-                params={"delete_closed": str(delete_closed).lower()},
+                params=params,
             )
             response.raise_for_status()
             result = response.json()

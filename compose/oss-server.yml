@@ -176,19 +176,11 @@ services:
       - "8084:8081"
     restart: always
 
-  # ── Re-attach the app services to the local server + point the console at
-  #    the embedded Temporal UI. These fragments MERGE onto the base services. ─
+  # ── Re-attach orders-service to the local server + point the console at the
+  #    embedded Temporal UI and the OSS backend. These fragments MERGE onto the
+  #    base services. (Workers run on kind, never in Compose — there is no worker
+  #    fragment here.) ─────────────────────────────────────────────────────────
   orders-service:
-    depends_on:
-      temporal:
-        condition: service_healthy
-
-  orders-workflow-worker:
-    depends_on:
-      temporal:
-        condition: service_healthy
-
-  orders-activity-worker:
     depends_on:
       temporal:
         condition: service_healthy
@@ -196,3 +188,6 @@ services:
   platform-console:
     environment:
       - TEMPORAL_UI_EMBED_URL=http://localhost:8081
+      # Self-hosted Temporal: render the in-Compose cluster sim + keep the full
+      # reset (terminate/delete workflows). Overrides the base `cloud` default.
+      - CONSOLE_BACKEND=oss

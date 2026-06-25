@@ -9,26 +9,30 @@
 #   TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE, TEMPORAL_TLS, TEMPORAL_API_KEY
 #
 # This base is the HOST VISIBILITY/CONSOLE PLANE: the console, observability, the
-# external-dependency simulator (mock-api), and the kind cluster observers. Two
-# tiers are SEPARATE opt-in layers so the kind paths don't duplicate what the
-# cluster runs:
-#   - the Temporal worker tier   → compose/workers.yml
-#   - the app tier (orders-db + orders-service + pgweb) → compose/host-apptier.yml
-# On the kind path the cluster runs BOTH (orders-app + orders-workers charts), so
-# the base alone is correct there; the console reaches the in-cluster app tier via
-# the host ports kind maps (host.docker.internal:8002 / :5433 — see kind-config.yaml).
+# external-dependency simulator (mock-api), pgweb, and the kind cluster observers.
+# Compose's role is narrowed (RUNMODES.md): it runs this host plane for the kind
+# paths, plus a LEGACY local OSS server + app tier. It does NOT run the Temporal
+# workers — those run on kind (Worker Deployment). The app tier is a SEPARATE opt-in
+# layer so the kind path doesn't duplicate what the cluster runs:
+#   - the app tier (orders-db + orders-service) → compose/host-apptier.yml
+# On the kind path the cluster runs the app tier AND the workers (orders-app +
+# orders-workers charts), so the base alone is correct there; the console + pgweb
+# reach the in-cluster app tier via the host ports kind maps
+# (host.docker.internal:8002 / :5433 — see kind-config.yaml).
 #
 # Run modes (prefer the `poe` wrappers, which encode these):
 #
-#   Local OSS    : base + workers.yml + host-apptier.yml + oss-server.yml (poe up)
-#                  (oss-server.yml adds the Temporal server + its deps)
-#   Compose→Cloud: base + workers.yml + host-apptier.yml                  (poe up-cloud)
-#                  (no local server; apps + workers connect out to Cloud)
 #   kind + Cloud : base ONLY                                  (poe up-cloud-kind)
 #                  (kind runs the workers AND the app tier; host runs visibility +
-#                   console + mock-api only)
+#                   console + pgweb + mock-api only. CONSOLE_BACKEND=cloud.)
+#   Local OSS    : base + host-apptier.yml + oss-server.yml   (poe up)
+#                  (oss-server.yml adds the local Temporal server + its deps and sets
+#                   CONSOLE_BACKEND=oss. NO workers — workflows don't execute locally
+#                   until OSS-on-kind lands; this is a server+app fallback.)
 #
-# The same env contract carries to kind/Helm (a k8s Secret instead of an
+# Two injected descriptors drive the console (ADR-0015): CONSOLE_SUBSTRATE
+# (compose|kind = where workloads run) and CONSOLE_BACKEND (cloud|oss = the Temporal
+# backend). The same env contract carries to kind/Helm (a k8s Secret instead of an
 # env-file) — see docs/RUNMODES.md.
 #
 #   lgtm (grafana/otel-lgtm) — OTel Collector + Prometheus + Tempo + Loki + Grafana
@@ -103,10 +107,10 @@ services:
     ports:
       - "8001:8000"
 
-  # NOTE: the Temporal workers (orders-workflow-worker / orders-activity-worker)
-  # live in compose/workers.yml, NOT here. They are an opt-in layer so the kind
-  # paths (where the cluster runs the workers) don't double up the fleet. See
-  # that file and docs/RUNMODES.md.
+  # NOTE: the Temporal workers do NOT run in Compose. They run on kind (delivered
+  # as a Worker Deployment via the orders-workers chart). On the legacy local-OSS
+  # path the server + app tier come up without workers, so workflows don't execute
+  # locally until OSS-on-kind lands. See docs/RUNMODES.md.
 
   # ===========================================================================
   # APPLICATION — DEMO CONSOLE
@@ -139,6 +143,11 @@ services:
       # it to compose for the pure-Compose run modes. KUBECONFIG points at the
       # read-only console kubeconfig cluster-up.sh mints into .secrets/kube.
       - CONSOLE_SUBSTRATE=${CONSOLE_SUBSTRATE:-kind}
+      # Backend descriptor (ADR-0015): the base path is kind+Cloud, so default
+      # `cloud` — the console owns a read-only Temporal Cloud liveness probe and
+      # scopes Reset Demo State to local data only. compose/oss-server.yml flips it
+      # to `oss` for the local self-hosted server.
+      - CONSOLE_BACKEND=${CONSOLE_BACKEND:-cloud}
       - KUBECONFIG=/kube/kind.console.kubeconfig
       - PORT=8086
       - LOG_BUFFER_SIZE=500
@@ -153,6 +162,19 @@ services:
       # target.
       - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-}
       - TEMPORAL_UI_EXTERNAL_URL=${TEMPORAL_UI_EXTERNAL_URL:-}
+      # Cloud connection profile (sourced by `poe up-cloud-kind` from
+      # .secrets/keys/cloud.env) — the console builds its OWN read-only client for
+      # the Temporal Cloud liveness probe. Empty on the OSS path, so the probe stays
+      # off there. The dedicated read-only observer key (TEMPORAL_CLOUD_OPS_API_KEY,
+      # cloud Terraform layer) also powers the regions/namespaces inventory block.
+      - TEMPORAL_ADDRESS=${TEMPORAL_ADDRESS:-}
+      - TEMPORAL_TLS=${TEMPORAL_TLS:-}
+      - TEMPORAL_API_KEY=${TEMPORAL_API_KEY:-}
+      # Read-only account-level OBSERVER key (cloud Terraform layer output
+      # observer_api_key_token). Lets the console call the Cloud Ops API
+      # (GetNamespaces/GetRegions) for the multi-region/namespace status block.
+      # Empty → that block is hidden; the single-namespace probe still works.
+      - TEMPORAL_CLOUD_OPS_API_KEY=${TEMPORAL_CLOUD_OPS_API_KEY:-}
       - GRAFANA_EMBED_URL=http://localhost:3000
       - PGWEB_EMBED_URL=http://localhost:8083
       # Cluster-visibility UIs, fronted by viz-proxy (frame headers stripped).
@@ -206,9 +228,25 @@ services:
     ports:
       - "8085:8000"
 
-  # NOTE: pgweb-orders (the orders-db browser) lives in compose/host-apptier.yml
-  # alongside orders-db, since it depends on it. On the kind path, browse the DB
-  # via Headlamp / a port-forward instead.
+  # ===========================================================================
+  # DEV ADMIN UI — pgweb for the orders DB → http://localhost:8083.
+  # Host-plane in every mode. On the KIND path (base) it browses the in-cluster
+  # CNPG orders-db through the host port kind maps (host.docker.internal:5433,
+  # NodePort 30543 → owner admin/password, db orders_db). The host-apptier overlay
+  # repoints DATABASE_URL at the in-compose orders-db for the Compose run modes.
+  # ===========================================================================
+  pgweb-orders:
+    image: sosedoff/pgweb
+    container_name: pgweb-orders
+    environment:
+      - DATABASE_URL=postgres://admin:password@host.docker.internal:5433/orders_db?sslmode=disable
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - temporal-network
+    ports:
+      - "8083:8081"
+    restart: unless-stopped
 
   # ===========================================================================
   # CLUSTER VISIBILITY  (host plane, non-prod — see ADR-0014)
