@@ -31,6 +31,9 @@ locals {
     activity = { repository = "localhost:5001/orders-worker-activity", tag = var.worker_image_tag, digest = lookup(var.worker_image_digests, "activity", "") }
   }
 
+  # orders-api image: same digest-or-tag pinning as the workers.
+  orders_api_image = { repository = "localhost:5001/orders-api", tag = var.orders_api_image_tag, digest = var.orders_api_image_digest }
+
   # orders-workers: chart pulled from the local OCI registry; the account-bearing
   # connection values are injected here from cloud state (never committed to git).
   # sync-wave 0 keeps it after the wave -2/-1 add-ons.
@@ -86,8 +89,82 @@ locals {
     }
   }
 
-  # Every Application TF seeds: the committed add-ons + the injected orders-workers.
-  all_applications = { for app in concat(local.addon_applications, [local.orders_workers_application]) : app.metadata.name => app }
+  # orders-data: the CNPG orders-db Cluster + its git-safe credential. Its OWN
+  # Application (separate failure domain) so a slow/failed DB bootstrap can never
+  # stall the orders-api tier's sync (ADR-0016). No account-bearing values — the
+  # chart defaults are git-safe — so no valuesObject injection.
+  orders_data_application = {
+    apiVersion = "argoproj.io/v1alpha1"
+    kind       = "Application"
+    metadata = {
+      name        = "orders-data"
+      namespace   = var.argocd_namespace
+      annotations = { "argocd.argoproj.io/sync-wave" = "0" }
+    }
+    spec = {
+      project = "default"
+      source = {
+        repoURL        = var.oci_charts_repo
+        chart          = "orders-data"
+        targetRevision = var.orders_data_chart_version
+      }
+      destination = {
+        server    = "https://kubernetes.default.svc"
+        namespace = var.orders_namespace
+      }
+      syncPolicy = {
+        automated   = { prune = true, selfHeal = true }
+        syncOptions = ["CreateNamespace=true"]
+      }
+    }
+  }
+
+  # orders-api: the Temporal client Deployment + Service. Its OWN Application,
+  # authenticated to Cloud as the dedicated CLIENT identity (orders-client-apikey).
+  # Depends on orders-db at RUNTIME via k8s readiness, NOT an ArgoCD sync gate
+  # (ADR-0016) — so it crash-loops-until-ready rather than deadlocking.
+  orders_api_application = {
+    apiVersion = "argoproj.io/v1alpha1"
+    kind       = "Application"
+    metadata = {
+      name        = "orders-api"
+      namespace   = var.argocd_namespace
+      annotations = { "argocd.argoproj.io/sync-wave" = "0" }
+    }
+    spec = {
+      project = "default"
+      source = {
+        repoURL        = var.oci_charts_repo
+        chart          = "orders-api"
+        targetRevision = var.orders_api_chart_version
+        helm = {
+          valuesObject = {
+            ordersApi = {
+              image = local.orders_api_image
+            }
+            connection = {
+              hostPort          = local.temporal_address
+              temporalNamespace = local.namespace_handle
+              tls               = true
+              apiKeySecret      = var.client_apikey_secret_name
+            }
+          }
+        }
+      }
+      destination = {
+        server    = "https://kubernetes.default.svc"
+        namespace = var.orders_namespace
+      }
+      syncPolicy = {
+        automated   = { prune = true, selfHeal = true }
+        syncOptions = ["CreateNamespace=true"]
+      }
+    }
+  }
+
+  # Every Application TF seeds: the committed add-ons + the injected orders-workers,
+  # orders-data, and orders-api.
+  all_applications = { for app in concat(local.addon_applications, [local.orders_workers_application, local.orders_data_application, local.orders_api_application]) : app.metadata.name => app }
 }
 
 # Seed the ArgoCD Applications after the release installs the Application CRD.
@@ -109,10 +186,10 @@ resource "kubectl_manifest" "applications" {
   lifecycle {
     precondition {
       condition = alltrue([
-        for w in values(local.worker_image) :
-        w.digest != "" || (w.tag != "" && w.tag != "latest")
+        for img in concat(values(local.worker_image), [local.orders_api_image]) :
+        img.digest != "" || (img.tag != "" && img.tag != "latest")
       ])
-      error_message = "Unsafe worker image ref: each worker needs a pinned digest (preferred) or a non-'latest' tag that exists in the local registry. Empty digest + tag='latest' silently deploys :latest and breaks the workers. Use `just platform-up` (it builds + computes digests) rather than a bare `terraform apply`."
+      error_message = "Unsafe image ref: each worker AND orders-api needs a pinned digest (preferred) or a non-'latest' tag that exists in the local registry. Empty digest + tag='latest' silently deploys :latest and breaks the pod. Use `just platform-up` (it builds + computes digests) rather than a bare `terraform apply`."
     }
   }
 }

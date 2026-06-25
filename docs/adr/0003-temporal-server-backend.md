@@ -25,3 +25,14 @@ remains a no-Kubernetes quick-start that also runs a self-hosted server.
   colleague's chart values, 15-minute install timeout, and resource pinning for a 16 GB host.
 - Workers/apps are backend-agnostic; switching backends is an env/profile change, not a code
   change.
+
+## Update (2026-06-25): the app datastore also uses CNPG
+
+When the app tier moved onto kind (orders-api + orders-db, `deploy/charts/orders-app`), its
+PostgreSQL (**orders-db**, distinct from any Temporal cluster DB) was put on the **same
+CloudNativePG operator** rather than a bare Postgres Deployment — one Postgres story across the
+repo. The operator is a sync-wave −2 ArgoCD add-on (`deploy/charts/cloudnative-pg`, pinned in
+`config/dependencies.yaml`); orders-app declares a `postgresql.cnpg.io/v1 Cluster` (primary +
+replica, auto-failover). State lives on kind's `local-path` PVC; lifecycle + reset semantics are
+documented in `docs/RUNMODES.md`. Applies on the kind path regardless of whether the *Temporal*
+backend is Cloud or self-hosted.

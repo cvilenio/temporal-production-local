@@ -30,6 +30,8 @@ def main() -> None:
         # CRDs and controller share one version.
         f"WORKER_CONTROLLER_VERSION={charts['temporal-worker-controller']['version']}",
         f"ARGOCD_CHART_VERSION={charts['argo-cd']['version']}",
+        f"CNPG_VERSION={charts['cloudnative-pg']['version']}",
+        f"CNPG_REPO={charts['cloudnative-pg']['repo']}",
         f"NGINX_IMAGE={spec['images']['nginx']['repository']}:{spec['images']['nginx']['tag']}",
     ]
     OUT.parent.mkdir(parents=True, exist_ok=True)

@@ -1,0 +1,35 @@
+# CloudNativePG operator — reconciles the orders-db `Cluster` (postgresql.cnpg.io)
+# into a primary + replica Postgres with auto-failover, a generated credentials
+# Secret, and -rw/-ro/-r Services. The app tier's datastore on kind (ADR-0003
+# Postgres pattern). Secret-free public chart → delivered the pure-GitOps way by
+# the cluster layer's Application seeding. sync-wave -2: the operator + its CRDs
+# must exist before the orders-app `Cluster` (wave 0) is applied — same tier as
+# cert-manager and the worker-controller CRDs.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cloudnative-pg
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  project: default
+  source:
+    # Local OCI mirror (deploy/kind/mirror-deps.sh) — no public-internet pull.
+    # targetRevision is injected by the cluster layer from config/dependencies.yaml.
+    repoURL: registry-tls.kube-public.svc:5000/charts
+    chart: cloudnative-pg
+    helm:
+      valuesObject:
+        crds:
+          create: true # install CNPG's CRDs with the chart
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnpg-system
+  syncPolicy:
+    automated:
+      prune: false # never auto-prune CRDs
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true # CRDs can exceed the client-side annotation size limit

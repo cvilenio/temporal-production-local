@@ -1,0 +1,18 @@
+# orders-data — orders-db (CloudNativePG Cluster) + its owner credential.
+# No account-bearing values here; everything is git-safe (local-dev password,
+# matching docker-compose.yml). Its own ArgoCD Application so the data tier's
+# bootstrap is an isolated failure domain (ADR-0016).
+db:
+  clusterName: orders-db
+  instances: 2 # 1 primary + 1 replica (auto-failover)
+  storageSize: 1Gi
+  database: orders_db
+  owner: admin
+  # Local-dev throwaway password (matches Compose). A FIXED value is intentional:
+  # the still-on-host console opens a direct asyncpg pool, so it needs a known
+  # credential. NOT account-bearing. CNPG adopts it via the pre-created basic-auth
+  # Secret (bootstrap.initdb.secret.name) instead of generating a random one.
+  password: password
+  # NodePort exposing the CNPG primary (rw) to the host console's asyncpg pool.
+  # Operator-managed (spec.managed.services) so the selector tracks the primary.
+  hostNodePort: 30543

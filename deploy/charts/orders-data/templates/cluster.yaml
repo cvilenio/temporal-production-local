@@ -1,0 +1,48 @@
+# orders-db — the app tier's PostgreSQL, run by the CloudNativePG operator.
+# Reconciles into a primary + replica with streaming replication and auto-failover,
+# and publishes the standard <name>-rw / -ro / -r Services. State lives on kind's
+# default local-path PVC (in the node container) — survives pod restarts,
+# redeploys and cluster-stop/start; cleared by `cluster-down` or `just orders-db-reset`.
+# sync-wave 0: after its credential Secret (wave -1). Isolated in this Application,
+# so a slow/failed bootstrap can never stall the orders-api tier (ADR-0016).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ .Values.db.clusterName }}
+  labels:
+    app.kubernetes.io/name: orders-db
+    app.kubernetes.io/component: db
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  instances: {{ .Values.db.instances }}
+  storage:
+    size: {{ .Values.db.storageSize | quote }}
+  bootstrap:
+    initdb:
+      database: {{ .Values.db.database | quote }}
+      owner: {{ .Values.db.owner | quote }}
+      # Use the pre-created basic-auth Secret (db-secret.yaml) for the owner role
+      # so the credential is known to the host console — not auto-generated.
+      secret:
+        name: {{ .Values.db.clusterName }}-app
+  managed:
+    services:
+      additional:
+        # Expose the primary (rw) as a NodePort so the host console's asyncpg pool
+        # can reach it; CNPG owns the selector so it tracks the primary on failover.
+        - selectorType: rw
+          serviceTemplate:
+            metadata:
+              name: {{ .Values.db.clusterName }}-host
+              labels:
+                app.kubernetes.io/name: orders-db
+                app.kubernetes.io/component: db
+            spec:
+              type: NodePort
+              ports:
+                - name: postgres
+                  port: 5432
+                  targetPort: 5432
+                  protocol: TCP
+                  nodePort: {{ .Values.db.hostNodePort }}

@@ -1,0 +1,73 @@
+# orders-api — FastAPI service that is BOTH the system of record and the Temporal
+# client that starts/signals workflows. A plain Deployment (NOT a WorkerDeployment):
+# it isn't a worker, so the worker-controller doesn't manage it and the Temporal
+# connection envs are set explicitly here.
+#
+# NO ArgoCD sync-wave gate on orders-db: the dependency is RUNTIME (it needs the DB
+# serving), handled by k8s readiness, not a sync wave (ADR-0016). orders-api's
+# lifespan connects to the DB + Temporal at startup, so uvicorn only binds (→ the
+# tcpSocket readiness passes → the Service gets endpoints) once both are reachable.
+# Until then the pod is NotReady / crash-looping — self-healing and visible, never
+# a deadlock, and callers route nowhere rather than to a non-functional API.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-api
+  labels:
+    app.kubernetes.io/name: orders-api
+    app.kubernetes.io/component: app
+spec:
+  replicas: {{ .Values.ordersApi.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: orders-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: orders-api
+        app.kubernetes.io/component: app
+    spec:
+      serviceAccountName: orders-api
+      automountServiceAccountToken: false
+      containers:
+        - name: orders-api
+          image: "{{ .Values.ordersApi.image.repository }}{{ if .Values.ordersApi.image.digest }}@{{ .Values.ordersApi.image.digest }}{{ else }}:{{ .Values.ordersApi.image.tag }}{{ end }}"
+          ports:
+            - name: http
+              containerPort: {{ .Values.ordersApi.port }}
+          env:
+            # --- Database (CNPG primary, rw Service from the orders-data chart) ---
+            # DB_PASSWORD must precede DATABASE_URL: k8s $(VAR) interpolation only
+            # resolves env vars declared earlier in this list. The Secret is created
+            # by orders-data; orders-api references it by the well-known name.
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.db.clusterName }}-app
+                  key: password
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://{{ .Values.db.owner }}:$(DB_PASSWORD)@{{ .Values.db.clusterName }}-rw:5432/{{ .Values.db.database }}"
+            # --- Temporal Cloud (client identity) ---
+            - name: TEMPORAL_ADDRESS
+              value: {{ .Values.connection.hostPort | quote }}
+            - name: TEMPORAL_NAMESPACE
+              value: {{ .Values.connection.temporalNamespace | quote }}
+            - name: TEMPORAL_TLS
+              value: {{ .Values.connection.tls | quote }}
+            - name: TEMPORAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.connection.apiKeySecret | quote }}
+                  key: {{ .Values.connection.apiKeySecretKey | default "api-key" | quote }}
+            # --- Observability (best-effort; kind obs not yet wired) ---
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.ordersApi.otelEndpoint | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: orders-service
+          readinessProbe:
+            # uvicorn binds only after the lifespan startup (DB create_all + Temporal
+            # connect) completes, so a passing TCP connect implies dependencies are up.
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5

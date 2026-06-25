@@ -15,7 +15,7 @@ Two axes. **Where the apps run** (local laptop) × **where Temporal lives** (the
 | Compose     | Local OSS server   | `poe up`                                         | ✅ working |
 | Compose     | Temporal Cloud     | `poe up-cloud` / `poe up-cloud-prod`             | ✅ working |
 | kind        | Local OSS server   | ArgoCD + `charts/temporal-server` (cluster layer)| planned |
-| kind        | Temporal Cloud     | `just cluster-up` → `layers/cluster` apply (ArgoCD + Cloud API-key Secret) | ✅ working |
+| kind        | Temporal Cloud     | `just cluster-up` → `layers/cluster` apply (ArgoCD + Cloud API-key Secrets; runs workers + app tier) | ✅ working |
 
 The user-facing framing: **two local flavors** (Compose, kind) and **two Cloud flavors**
 (nonprod, prod). Compose is the fast laptop path and stays a first-class fallback even
@@ -33,23 +33,33 @@ backend deterministic regardless of the host shell:
 
 | Task              | Sources                          | Compose files                              |
 |-------------------|----------------------------------|--------------------------------------------|
-| `up` / `fresh`    | `config/local-oss.env`           | base + `compose/workers.yml` + `compose/oss-server.yml` |
-| `up-cloud`        | `.secrets/keys/cloud-nonprod.env`| base + `compose/workers.yml`               |
-| `up-cloud-prod`   | `.secrets/keys/cloud-prod.env`   | base + `compose/workers.yml`               |
-| `up-cloud-kind`   | `.secrets/keys/cloud-nonprod.env`| base only (kind runs the workers)          |
+| `up` / `fresh`    | `config/local-oss.env`           | base + `host-apptier.yml` + `workers.yml` + `oss-server.yml` |
+| `up-cloud`        | `.secrets/keys/cloud-nonprod.env`| base + `host-apptier.yml` + `workers.yml`  |
+| `up-cloud-prod`   | `.secrets/keys/cloud-prod.env`   | base + `host-apptier.yml` + `workers.yml`  |
+| `up-cloud-kind`   | `.secrets/keys/cloud-nonprod.env`| base only (kind runs the workers AND the app tier) |
 | `down` / `down-cloud` | —                            | (matching set; `-v` drops volumes)         |
 
-`down` must use the same `-f` set as its `up` (`down-cloud` uses base + workers, which
-also tears down a base-only `up-cloud-kind` stack). **Bring the stack down before
-switching modes** (they share host ports and one Compose project). When both worker and
-OSS layers are present, `workers.yml` precedes `oss-server.yml` — the OSS layer merges
+`down` must use the same `-f` set as its `up` (`down-cloud` uses base + host-apptier +
+workers, which also tears down a base-only `up-cloud-kind` stack). **Bring the stack down
+before switching modes** (they share host ports and one Compose project). When both worker
+and OSS layers are present, `workers.yml` precedes `oss-server.yml` — the OSS layer merges
 `depends_on: temporal` onto the worker services.
+
+On the **kind path, the cluster runs both the workers AND the app tier** (orders-db via
+CloudNativePG + orders-service), so `up-cloud-kind` is base-only: no `workers.yml`, no
+`host-apptier.yml`. The still-on-host console reaches the in-cluster app tier through the
+host ports kind maps — `host.docker.internal:8002` (orders-service) and `:5433` (orders-db).
 
 ## Files
 
-- **`docker-compose.yml`** — base: the host platform/visibility plane (app services,
-  console, observability, orders-db, kind cluster observers). NOT the workers. No Temporal
-  backend; `TEMPORAL_*` default to the local OSS server.
+- **`docker-compose.yml`** — base: the host visibility/console plane (console, observability,
+  mock-api, kind cluster observers). NOT the workers, NOT the app tier. No Temporal backend;
+  `TEMPORAL_*` default to the local OSS server. Console defaults point at the kind-mapped host
+  ports; the host-apptier overlay overrides them for Compose modes.
+- **`compose/host-apptier.yml`** — the app *tier* layer: orders-db (Postgres) + orders-service
+  + pgweb. Included on the pure-Compose paths; omitted on the kind path (kind runs orders-db
+  via CNPG + orders-service via the `orders-app` chart). Repoints the console at the in-compose
+  service names.
 - **`compose/workers.yml`** — the worker *tier* layer: the orders workflow + activity
   workers. Included on the pure-Compose paths; omitted on the kind path (kind runs them).
 - **`compose/oss-server.yml`** — the OSS backend *layer*: Temporal server + its Postgres +
@@ -114,7 +124,7 @@ just platform-up    # cluster + local registry, mirror deps, CI (build/push), pu
 just cluster-up                                     # kind + local registry (kubeconfig -> .secrets/kube)
 just mirror-deps                                    # cert-manager + worker-controller charts+images -> local registry
 just ci                                             # lint + test + build/push worker images
-just chart-publish                                  # publish orders-workers chart to the local OCI registry
+just chart-publish                                  # publish orders-workers + orders-app charts to the local OCI registry
 terraform -chdir=deploy/terraform/layers/cluster init && \
 terraform -chdir=deploy/terraform/layers/cluster apply   # pass TF_VAR_worker_image_digests to pin by digest
 
@@ -142,9 +152,42 @@ Things worth knowing:
 - **Workers are pinned by image digest** (ADR-0012): the git-describe tag is for humans, the
   `sha256` digest is the deploy contract, so the Worker Controller Build ID is content-addressed.
 
-The account-bearing namespace handle + API key are read from the cloud layer's state by the cluster
-layer and injected cluster-side (Secret + ArgoCD Application valuesObject) — never committed
+The account-bearing namespace handle + API keys are read from the cloud layer's state by the cluster
+layer and injected cluster-side (Secrets + ArgoCD Application valuesObject) — never committed
 (`.githooks/pre-commit`).
+
+### App tier on kind (orders-api + orders-db)
+
+On the kind path the **app tier runs in-cluster too**, co-located with the workers in the `orders`
+namespace (`deploy/charts/orders-app`):
+
+- **orders-api** — the Temporal client (starts/signals workflows) + system of record. Authenticated
+  to Cloud as a **dedicated client service account + API key**, distinct from the worker identity
+  (ADR-0008): the client needs `write` to start workflows, and a separate credential keeps its blast
+  radius independent of the worker fleet. Exposed to the host as a NodePort (`:8002`) for the console
+  and the order E2E.
+- **orders-db** — PostgreSQL run by the **CloudNativePG (CNPG) operator** (`deploy/charts/cloudnative-pg`
+  add-on, sync-wave −2): a primary + replica with auto-failover and the standard `-rw`/`-ro` Services.
+  A NodePort (`:5433`) exposes the primary so the host console's direct asyncpg pool can read it.
+- **mock-api stays on the host** as the simulated external dependency; workers reach it via
+  `host.docker.internal:8001` (`MOCK_API_URL`), which correctly models cluster egress.
+
+#### orders-db state lifecycle (when state survives, how to clear it)
+
+orders-db uses kind's default `local-path` PVC — data lives **in the kind node container**, not on
+your host disk. Two reset paths, do not confuse them:
+
+| Action | orders-db state |
+|---|---|
+| Pod restart · `selfHeal` · image rebuild · redeploy | **survives** (PVC outlives pods) |
+| `just cluster-stop` → `just cluster-start` | **survives** (node container preserved) |
+| `just cluster-down` (`kind delete cluster`) | **gone** — node container destroyed with the PVC |
+| `just orders-db-reset` | **gone** — *physical* reset: deletes the CNPG Cluster + PVCs; ArgoCD re-syncs an empty DB |
+| Console "Reset demo" / `POST /admin/reset` on orders-api | kept — *logical* reset: truncates app tables + terminates workflows, DB lives |
+
+To persist across a full `cluster-down`, you'd bind the PVC to a host dir via kind `extraMounts`
+(deliberately not done — it's a Compose bind-mount habit, less production-faithful than letting the
+operator own storage).
 
 ## Offline contract — what's air-gapped vs not (ADR-0013)
 

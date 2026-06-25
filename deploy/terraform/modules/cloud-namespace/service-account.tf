@@ -25,3 +25,30 @@ resource "temporalcloud_apikey" "workers" {
   expiry_time  = var.api_key_expiry_time
   disabled     = false
 }
+
+# Dedicated CLIENT service account + key (e.g. orders-api: starts/signals
+# workflows). Separate identity from the workers (ADR-0008) so the blast radius of
+# the client credential is independent of the worker fleet's. Minted only when a
+# client SA name is supplied for this namespace.
+resource "temporalcloud_service_account" "client" {
+  count          = var.client_service_account_name != null ? 1 : 0
+  name           = var.client_service_account_name
+  account_access = var.client_account_access
+
+  namespace_accesses = [
+    {
+      namespace_id = temporalcloud_namespace.this.id
+      permission   = var.client_namespace_permission
+    }
+  ]
+}
+
+resource "temporalcloud_apikey" "client" {
+  count = var.client_service_account_name != null && var.create_client_api_key ? 1 : 0
+
+  display_name = coalesce(var.client_api_key_display_name, "${var.client_service_account_name}-key")
+  owner_type   = "service-account"
+  owner_id     = temporalcloud_service_account.client[0].id
+  expiry_time  = var.api_key_expiry_time
+  disabled     = false
+}

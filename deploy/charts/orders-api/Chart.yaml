@@ -1,0 +1,11 @@
+apiVersion: v2
+name: orders-api
+description: >-
+  The orders-api service: the Temporal client (starts/signals workflows) and the
+  system of record. Its OWN ArgoCD Application (separate from orders-data). It
+  depends on orders-db at RUNTIME, gated by k8s readiness — NOT by an ArgoCD sync
+  wave — so a slow DB makes orders-api crash-loop-until-ready (self-healing,
+  visible) rather than deadlocking a shared sync. See ADR-0016.
+type: application
+version: 0.1.0
+appVersion: "1.0"

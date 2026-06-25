@@ -44,4 +44,11 @@ module "namespaces" {
   api_key_display_name = each.value.api_key_display_name
   api_key_expiry_time  = each.value.api_key_expiry_time
   search_attributes    = each.value.search_attributes
+
+  # Optional dedicated client SA (e.g. orders-api). null name => not minted.
+  client_service_account_name = each.value.client_service_account_name
+  client_api_key_display_name = each.value.client_api_key_display_name
+  create_client_api_key       = each.value.create_client_api_key
+  client_namespace_permission = each.value.client_namespace_permission
+  client_account_access       = each.value.client_account_access
 }

@@ -1,0 +1,11 @@
+apiVersion: v2
+name: orders-data
+description: >-
+  The orders data tier: orders-db, a CloudNativePG PostgreSQL Cluster, plus its
+  git-safe owner credential. Its OWN ArgoCD Application (separate failure domain
+  from orders-api) so a slow/failed bootstrap can never stall the API tier's sync
+  — the API tier depends on the DB via k8s readiness, not an ArgoCD sync gate.
+  See ADR-0016 (Terraform-vs-ArgoCD boundary; order existence deps, not readiness).
+type: application
+version: 0.1.0
+appVersion: "1.0"

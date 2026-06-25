@@ -1,0 +1,115 @@
+# =============================================================================
+# Host APP TIER overlay — orders-db + orders-service (+ pgweb) on the HOST.
+# =============================================================================
+#
+# Layered on top of docker-compose.yml for the Compose run modes (Local OSS,
+# Compose→Cloud) where the application tier runs on the host. On the kind path
+# this overlay is OMITTED (poe up-cloud-kind): the cluster runs orders-db (CNPG)
+# and orders-service (orders-app chart), and the base console reaches them via
+# host.docker.internal. See docs/RUNMODES.md and the base file's header.
+#
+# This overlay also repoints platform-console (defined in the base with kind
+# defaults) back at the in-compose service names and restores its app-tier
+# depends_on, so the console waits for a healthy app tier in Compose modes.
+# =============================================================================
+
+services:
+
+  # APPLICATION — DATA STORE
+  # Postgres for the Ziggymart orders application (separate from any Temporal
+  # cluster DB). Host port 5433.
+  orders-db:
+    image: postgres:16
+    container_name: orders-db
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: orders_db
+    ports:
+      - "5433:5432"
+    networks:
+      - temporal-network
+    volumes:
+      - orders-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d orders_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+
+  # APPLICATION — ORDERS API SERVICE
+  # FastAPI service exposing the orders REST API; starts/signals Temporal
+  # workflows. Port 8002 → 8000. Temporal backend is selected via env.
+  orders-service:
+    build:
+      # Relative paths in extra -f files resolve against the FIRST compose file's
+      # dir (repo root), so `.` is the root — matching compose/workers.yml.
+      context: .
+      dockerfile: images/python.Dockerfile
+      args:
+        APP_GROUP: orders-api
+        APP_PATH: apps/business/orders-api/python
+        APP_MODULE: main:app
+        APP_PORT: "8000"
+    container_name: orders-service
+    depends_on:
+      orders-db:
+        condition: service_healthy
+      lgtm:
+        condition: service_healthy
+    environment:
+      # Temporal backend — defaults target the local OSS server; override via
+      # --env-file (Cloud) or compose/oss-server.yml (local OSS).
+      - TEMPORAL_ADDRESS=${TEMPORAL_ADDRESS:-temporal:7233}
+      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-ziggymart}
+      - TEMPORAL_TLS=${TEMPORAL_TLS:-false}
+      - TEMPORAL_API_KEY=${TEMPORAL_API_KEY:-}
+      - DATABASE_URL=postgresql+asyncpg://admin:password@orders-db:5432/orders_db
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://lgtm:4317
+      - OTEL_SERVICE_NAME=orders-service
+      - SDK_METRICS_PORT=9000
+    networks:
+      - temporal-network
+    ports:
+      - "8002:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+
+  # Repoint the console (base = kind defaults) at the in-compose app tier and
+  # restore its app-tier depends_on. environment lists merge by key, so these
+  # override the base DATABASE_URL / ORDERS_SERVICE_URL.
+  platform-console:
+    depends_on:
+      orders-db:
+        condition: service_healthy
+      orders-service:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://admin:password@orders-db:5432/orders_db
+      - ORDERS_SERVICE_URL=http://orders-service:8000
+
+  # DEV ADMIN UI (non-critical) — pgweb for the orders DB → http://localhost:8083.
+  pgweb-orders:
+    image: sosedoff/pgweb
+    container_name: pgweb-orders
+    depends_on:
+      - orders-db
+    environment:
+      - DATABASE_URL=postgres://admin:password@orders-db:5432/orders_db?sslmode=disable
+    networks:
+      - temporal-network
+    ports:
+      - "8083:8081"
+    restart: always
+
+# =============================================================================
+# VOLUMES
+# =============================================================================
+
+volumes:
+  orders-db-data:

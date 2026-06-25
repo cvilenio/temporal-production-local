@@ -27,3 +27,14 @@ output "api_key_tokens" {
   value       = { for env, m in module.namespaces : env => m.api_key_token }
   sensitive   = true
 }
+
+output "client_service_account_ids" {
+  description = "Per-env CLIENT service account ids (null where no client SA is minted)."
+  value       = { for env, m in module.namespaces : env => m.client_service_account_id }
+}
+
+output "client_api_key_tokens" {
+  description = "Per-env CLIENT API key secrets (null where no client SA/key is minted). SENSITIVE — consumed by the cluster layer's orders-client-apikey Secret."
+  value       = { for env, m in module.namespaces : env => m.client_api_key_token }
+  sensitive   = true
+}

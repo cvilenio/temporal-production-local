@@ -1,0 +1,22 @@
+# orders-service — MUST be named `orders-service` on port 8000 so the workers'
+# ORDERS_SERVICE_URL (http://orders-service:8000) resolves in-cluster. Typed
+# NodePort so it ALSO exposes orders-api to the host: the still-on-host console's
+# ORDERS_SERVICE_URL and the E2E `curl POST /submit-order` reach it via the host
+# port kind maps from this node port (deploy/terraform/kind-config.yaml).
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-service
+  labels:
+    app.kubernetes.io/name: orders-api
+    app.kubernetes.io/component: app
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: orders-api
+  ports:
+    - name: http
+      port: {{ .Values.ordersApi.port }}
+      targetPort: http
+      protocol: TCP
+      nodePort: {{ .Values.ordersApi.hostNodePort }}

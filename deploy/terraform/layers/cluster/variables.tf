@@ -46,6 +46,12 @@ variable "cloud_apikey_secret_name" {
   default     = "orders-cloud-apikey"
 }
 
+variable "client_apikey_secret_name" {
+  description = "Name of the k8s Secret holding the Cloud CLIENT API key (consumed by orders-api via the orders-app chart's connection.apiKeySecret)."
+  type        = string
+  default     = "orders-client-apikey"
+}
+
 # ArgoCD pulls ALL charts from the local OCI registry (deploy/kind/mirror-deps.sh
 # for third-party, just chart-publish for orders-workers) — no GitHub/public-internet
 # dependency for delivery. This is the in-cluster Service address of the registry.
@@ -64,7 +70,7 @@ variable "registry_service" {
 variable "orders_workers_chart_version" {
   description = "Published version of the orders-workers OCI chart (matches Chart.yaml / just chart-publish)."
   type        = string
-  default     = "0.1.0"
+  default     = "0.1.4"
 }
 
 variable "worker_image_tag" {
@@ -77,4 +83,28 @@ variable "worker_image_digests" {
   description = "Per-profile image digests (sha256:...) from `just ci`. When set, workers are pinned by digest (immutable, content-addressed Build ID) instead of tag."
   type        = map(string)
   default     = {} # e.g. { workflow = "sha256:...", activity = "sha256:..." }
+}
+
+variable "orders_data_chart_version" {
+  description = "Published version of the orders-data OCI chart (CNPG orders-db + credential)."
+  type        = string
+  default     = "0.1.0"
+}
+
+variable "orders_api_chart_version" {
+  description = "Published version of the orders-api OCI chart (orders-api Deployment + Service)."
+  type        = string
+  default     = "0.1.0"
+}
+
+variable "orders_api_image_tag" {
+  description = "Tag for the orders-api image (fallback when a digest is not pinned; see orders_api_image_digest)."
+  type        = string
+  default     = "latest"
+}
+
+variable "orders_api_image_digest" {
+  description = "orders-api image digest (sha256:...) from `just ci`. When set, orders-api is pinned by digest instead of tag."
+  type        = string
+  default     = ""
 }

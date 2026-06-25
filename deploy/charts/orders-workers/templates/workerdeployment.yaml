@@ -38,11 +38,58 @@ spec:
           # image content changes); fall back to a tag when no digest is pinned.
           image: "{{ .image.repository }}{{ if .image.digest }}@{{ .image.digest }}{{ else }}:{{ .image.tag }}{{ end }}"
           command: {{ .command | toJson }}
-          {{- if $.Values.connection.tls }}
-          # API-key connections require TLS. The controller injects API_KEY +
-          # the address/namespace/version envs but not TLS, so set it here.
+          # The controller injects the TEMPORAL_* envs (address/namespace/api-key/
+          # version), but not these. Both MUST be set explicitly: the kernel's
+          # defaults are the host-dev values (localhost:8001/:8002), so without an
+          # override the activities dial localhost inside the pod and fail with
+          # "All connection attempts failed". orders-api is co-located in this
+          # namespace (Service `orders-service`); mock-api stays on the host (the
+          # simulated external dependency), reached via the cluster's host gateway.
           env:
+            - name: ORDERS_SERVICE_URL
+              value: {{ $.Values.ordersServiceUrl | quote }}
+            - name: MOCK_API_URL
+              value: {{ $.Values.mockApiUrl | quote }}
+            {{- if $.Values.connection.tls }}
+            # API-key connections require TLS (the controller doesn't set it).
             - name: TEMPORAL_TLS
               value: "true"
+            {{- end }}
+          {{- if $.Values.startupProbe.enabled }}
+          # Downstream-reachability gate, STARTUP-ONLY (not a periodic readiness
+          # probe — that would re-ping downstream forever and couple failure
+          # domains into a cascade; see ADR-0016). A lightweight TCP connect to the
+          # worker's configured ORDERS_SERVICE_URL + MOCK_API_URL: until both are
+          # reachable the pod stays NotReady, so the Worker Controller does NOT
+          # promote this version to Current (Build-ID routing gate) and the old
+          # version keeps serving. A permanently-misconfigured version (e.g. the
+          # localhost bug) lands in CrashLoopBackOff and simply never takes traffic
+          # — instead of every workflow failing. Reads the env so the probe always
+          # matches the actual endpoints (single source of truth).
+          startupProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - |
+                  import os, socket, sys
+                  from urllib.parse import urlparse
+                  ok = True
+                  for var in ("ORDERS_SERVICE_URL", "MOCK_API_URL"):
+                      u = urlparse(os.environ.get(var, ""))
+                      if not u.hostname:
+                          continue
+                      port = u.port or (443 if u.scheme == "https" else 80)
+                      s = socket.socket()
+                      s.settimeout(2)
+                      try:
+                          s.connect((u.hostname, port))
+                      except OSError:
+                          ok = False
+                      finally:
+                          s.close()
+                  sys.exit(0 if ok else 1)
+            periodSeconds: {{ $.Values.startupProbe.periodSeconds }}
+            failureThreshold: {{ $.Values.startupProbe.failureThreshold }}
           {{- end }}
 {{- end }}

@@ -18,6 +18,13 @@ cloud_overlay = {
     # namespace_permission = "write"         # default
     # account_access     = "read"            # default
     # regions            = ["aws-us-east-1"] # default
+    # Optional dedicated client identity for an in-cluster workflow STARTER (e.g.
+    # the orders-api on kind). Omit to run the client on the worker SA instead.
+    client_service_account_name = "orders-api-nonprod"
+    client_api_key_display_name = "orders-api-nonprod-key"
+    # create_client_api_key       = true     # default
+    # client_namespace_permission = "write"  # default (starter needs write)
+    # client_account_access       = "read"   # default
   }
 
   "ziggymart-prod" = {
