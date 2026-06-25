@@ -92,6 +92,9 @@ services:
     environment:
       - DATABASE_URL=postgresql://admin:password@orders-db:5432/orders_db
       - ORDERS_SERVICE_URL=http://orders-service:8000
+      # Compose substrate: the app tier runs here as containers, so the live-status
+      # source is Docker (no cluster to read). Overrides the base kind default.
+      - CONSOLE_SUBSTRATE=compose
 
   # DEV ADMIN UI (non-critical) — pgweb for the orders DB → http://localhost:8083.
   pgweb-orders:

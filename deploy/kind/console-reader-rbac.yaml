@@ -1,0 +1,64 @@
+# =============================================================================
+# Read-only ServiceAccount for the host-plane platform-console (ADR-0015 phase-2).
+#
+# The console runs on the host (Compose), NOT in the cluster, but on the kind
+# substrate it reads live pod/node state to drive the architecture page. It only
+# ever OBSERVES, so it gets a least-privilege, read-only (get/list/watch) identity
+# scoped to pods/nodes/namespaces — never write, never secrets. Applied by
+# deploy/kind/cluster-up.sh, which then mints a kubeconfig from this SA's token.
+#
+# This is host-plane bootstrap (like the registry plumbing in cluster-up.sh), not
+# ArgoCD-managed app state — it must exist independent of, and before, ArgoCD.
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: platform-console
+  labels:
+    app.kubernetes.io/part-of: host-plane
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: console-reader
+  namespace: platform-console
+  labels:
+    app.kubernetes.io/name: console-reader
+    app.kubernetes.io/part-of: host-plane
+---
+# A long-lived (non-expiring) SA token so the minted kubeconfig survives
+# cluster-stop/cluster-start without regeneration. Non-prod host plane only.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: console-reader-token
+  namespace: platform-console
+  annotations:
+    kubernetes.io/service-account.name: console-reader
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: console-reader
+  labels:
+    app.kubernetes.io/part-of: host-plane
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "namespaces"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: console-reader
+  labels:
+    app.kubernetes.io/part-of: host-plane
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: console-reader
+subjects:
+  - kind: ServiceAccount
+    name: console-reader
+    namespace: platform-console

@@ -134,6 +134,12 @@ services:
       - DATABASE_URL=postgresql://admin:password@host.docker.internal:5433/orders_db
       - ORDERS_SERVICE_URL=http://host.docker.internal:8002
       - DOCKER_HOST=unix:///var/run/docker.sock
+      # Substrate selects the live-status source (ADR-0015 phase-2). Base defaults
+      # to kind (cluster pods + host-plane tooling); the host-apptier overlay flips
+      # it to compose for the pure-Compose run modes. KUBECONFIG points at the
+      # read-only console kubeconfig cluster-up.sh mints into .secrets/kube.
+      - CONSOLE_SUBSTRATE=${CONSOLE_SUBSTRATE:-kind}
+      - KUBECONFIG=/kube/kind.console.kubeconfig
       - PORT=8086
       - LOG_BUFFER_SIZE=500
       - MESSAGE_POLL_INTERVAL_SECONDS=3
@@ -163,6 +169,10 @@ services:
       - "8086:8086"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Read-only console kubeconfig (kind substrate) — same dir Headlamp mounts.
+      # Present only after `just cluster-up`; the KubeProvider connects lazily and
+      # degrades to "down" for cluster services until it appears.
+      - ./.secrets/kube:/kube:ro
     # On the kind path the console may start before the in-cluster DB is reachable
     # (its asyncpg pool connects at boot); retry until the cluster app tier is up.
     restart: unless-stopped

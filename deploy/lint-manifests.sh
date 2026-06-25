@@ -66,7 +66,7 @@ for chart in "${charts[@]}"; do
   helm template "$chart" | "${kc[@]}" -
 done
 
-echo "== kubeconform: plain manifests (argocd applications + kind registry-hosting) =="
-"${kc[@]}" deploy/argocd deploy/kind/local-registry-hosting.yaml
+echo "== kubeconform: plain manifests (argocd apps + kind registry-hosting + console-reader RBAC) =="
+"${kc[@]}" deploy/argocd deploy/kind/local-registry-hosting.yaml deploy/kind/console-reader-rbac.yaml
 
 echo "manifest validation ok."

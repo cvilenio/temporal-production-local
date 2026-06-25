@@ -1,7 +1,7 @@
 import asyncio
 import json
 
-from app.services.docker_status import broker, get_snapshot
+from app.services.status import broker, get_snapshot
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
