@@ -116,9 +116,19 @@ one level up. Compose-OSS stays as the fast fallback.
 
 ### kind + Cloud — how to run it
 
+**Console first (required).** The `platform-console` (:8086) is the operator's live window;
+bring it up before any live kind testing so a human can follow along. `just up-cloud-kind`
+then `just headlamp-reload`. This is enforced — `just platform-up` and `just orders-db-reset`
+run `just preflight` (probes `:8086/healthz`) and abort if the console is down. See AGENTS.md
+("Live kind testing — bring the platform-console up FIRST").
+
 ```sh
+just up-cloud-kind  # host visibility + console + mock-api (start this FIRST; console is the live window)
+just headlamp-reload
+
 just platform-up    # cluster + local registry, mirror deps, CI (build/push), publish chart,
                     # pin workers by digest, terraform apply. One command, each step idempotent.
+                    # Gated on `just preflight` — fails fast if the console isn't up.
 
 # or step by step:
 just cluster-up                                     # kind + local registry (kubeconfig -> .secrets/kube)
