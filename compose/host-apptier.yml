@@ -2,11 +2,12 @@
 # Host APP TIER overlay — orders-db + orders-service (+ pgweb) on the HOST.
 # =============================================================================
 #
-# Layered on top of docker-compose.yml for the Compose run modes (Local OSS,
-# Compose→Cloud) where the application tier runs on the host. On the kind path
-# this overlay is OMITTED (poe up-cloud-kind): the cluster runs orders-db (CNPG)
-# and orders-service (orders-app chart), and the base console reaches them via
-# host.docker.internal. See docs/RUNMODES.md and the base file's header.
+# Layered on top of docker-compose.yml for the legacy local-OSS run mode (poe up),
+# where the application tier runs on the host alongside the local Temporal server.
+# On the kind path this overlay is OMITTED (poe up-cloud-kind): the cluster runs
+# orders-db (CNPG) and orders-service (orders-app chart), and the base console +
+# pgweb reach them via host.docker.internal. See docs/RUNMODES.md and the base
+# file's header.
 #
 # This overlay also repoints platform-console (defined in the base with kind
 # defaults) back at the in-compose service names and restores its app-tier
@@ -44,7 +45,7 @@ services:
   orders-service:
     build:
       # Relative paths in extra -f files resolve against the FIRST compose file's
-      # dir (repo root), so `.` is the root — matching compose/workers.yml.
+      # dir (repo root), so `.` is the root — matching the base docker-compose.yml.
       context: .
       dockerfile: images/python.Dockerfile
       args:
@@ -96,19 +97,14 @@ services:
       # source is Docker (no cluster to read). Overrides the base kind default.
       - CONSOLE_SUBSTRATE=compose
 
-  # DEV ADMIN UI (non-critical) — pgweb for the orders DB → http://localhost:8083.
+  # Repoint pgweb (defined in the base at host.docker.internal:5433 for the kind
+  # path) at the in-compose orders-db, and wait for it. environment merges by key,
+  # so this DATABASE_URL overrides the base one.
   pgweb-orders:
-    image: sosedoff/pgweb
-    container_name: pgweb-orders
     depends_on:
       - orders-db
     environment:
       - DATABASE_URL=postgres://admin:password@orders-db:5432/orders_db?sslmode=disable
-    networks:
-      - temporal-network
-    ports:
-      - "8083:8081"
-    restart: always
 
 # =============================================================================
 # VOLUMES

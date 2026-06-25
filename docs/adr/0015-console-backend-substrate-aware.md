@@ -88,3 +88,39 @@ it is pointed at?
   by `cluster-up.sh` as a long-lived-token kubeconfig under `.secrets/kube`. It deliberately does
   **not** reuse the admin kubeconfig Headlamp uses: the console only observes, so it should only be
   able to observe — a habit worth modeling even on the non-prod host plane.
+
+## Update (checkpoint 0014) — backend-awareness, real Cloud probe, data-driven tooling
+
+The phase-1 descriptor is now two axes: `CONSOLE_SUBSTRATE` (compose | kind, *where*) **and**
+`CONSOLE_BACKEND` (cloud | oss, *which Temporal*). The architecture page consumes both:
+
+- **Real Temporal Cloud liveness, console-owned.** On the `cloud` backend the box no longer
+  aggregates absent OSS containers. A `CloudStatusProvider` emits a `temporal-cloud` entry from two
+  signals: **my namespace/region reachability** (the console builds its own lazy read-only SDK
+  client from the injected Cloud profile and calls `DescribeNamespace` — *not* the gRPC health
+  service, which Cloud API keys are not authorized for; live testing showed `check_health()`
+  returns "Request unauthorized") and the **public Temporal Statuspage**. Cloud liveness is a *platform* concern, so the console owns it rather than any one
+  business app (e.g. orders-service) — otherwise every future domain would duplicate the check.
+  Reusing the worker key is the local-dev expedient; a dedicated read-only **observer** key in the
+  cloud Terraform layer (mirroring `console-reader` on the kube side) is the production-faithful
+  follow-up. The OSS-internals rendering is retained for the future OSS-on-kind backend.
+- **Multi-region / multi-namespace inventory (landed).** The read-only **observer** identity is
+  now real (`observer.tf`: account-scoped `read` + per-namespace `read` — least privilege; the
+  account role alone returns an empty namespace list). With its key (`TEMPORAL_CLOUD_OPS_API_KEY`)
+  the console calls the **Cloud Ops API** (`CloudOperationsClient` → `GetNamespaces`/`GetRegions`,
+  throttled ~60s) and renders a regions + namespaces status block in the Temporal Cloud box —
+  "regions used" computed from the namespaces (the catalog returns all ~20 Cloud regions). Two
+  gotchas found live: the Ops API requires a `temporal-cloud-api-version` header (else "cloud API
+  version must be specified"), and Cloud API keys are not authorized for the gRPC health service
+  (`check_health` → "Request unauthorized"), so namespace liveness uses `DescribeNamespace`.
+- **Host-plane tooling is shown and data-driven.** ArgoCD (kube-sourced), Headlamp, viz-proxy and
+  the codec server now appear in the Tooling strip, which iterates the live snapshot rather than a
+  hardcoded key list; `OSS_ONLY_KEYS` / `KIND_ONLY_KEYS` exclusions keep irrelevant nodes from
+  rendering as spurious "down".
+- **Reset Demo State is backend-aware.** On `cloud` it is scoped to local business data only and
+  never terminates/deletes workflows in the managed namespace (`/admin/reset?local_only=true`); on
+  `oss` it keeps the full reset.
+
+Related (checkpoint 0014): running Temporal workers / OSS / the app tier on Compose is no longer a
+repo goal — `compose/workers.yml` and the `up-cloud`/`up-cloud-prod` recipes were removed and the
+docs reframed. Compose now serves the host plane + a legacy OSS server+app fallback. See RUNMODES.md.

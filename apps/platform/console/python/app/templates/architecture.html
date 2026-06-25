@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div x-data="archApp()" class="h-full overflow-auto relative">
+<div x-data="archApp('{{ backend }}')" class="h-full overflow-auto relative">
 
   <!-- Page Header -->
   <header class="max-w-6xl mx-auto p-8">
@@ -87,19 +87,77 @@
       <!-- Caption inside boundary -->
       <p class="absolute top-5 left-6 right-6 text-[11px] text-textMuted/60 italic leading-snug z-10">
         Managed by Temporal — a single namespace endpoint (<span
-          class="font-mono not-italic text-textMuted/80">your-ns.tmprl.cloud:7233</span>); internal topology is opaque
+          class="font-mono not-italic text-textMuted/80"
+          x-text="(backend === 'cloud' && cloudInfo().endpoint) ? cloudInfo().endpoint : 'your-ns.tmprl.cloud:7233'"></span>); internal topology is opaque
         to the customer.
       </p>
 
       <!-- Temporal logo watermark -->
-      <img src="/static/Temporal_Symbol_light.svg" alt="" aria-hidden="true" x-show="!open"
+      <img src="/static/Temporal_Symbol_light.svg" alt="" aria-hidden="true"
+        x-show="!open && !(backend === 'cloud' && cloudInfo().namespaces && cloudInfo().namespaces.length)"
         x-transition:enter="transition-opacity ease-out duration-200" x-transition:enter-start="opacity-0"
         x-transition:enter-end="opacity-50" x-transition:leave="transition-opacity ease-in duration-150"
         x-transition:leave-start="opacity-50" x-transition:leave-end="opacity-0"
         class="absolute inset-0 m-auto w-[75%] h-[75%] object-contain pointer-events-none select-none" />
 
-      <!-- Collapsible internals — positioned below caption, grows downward, no collision -->
-      <div class="absolute top-[90px] left-6 right-6 z-10">
+      <!-- Cloud backend: surface the live platform status-page line + a link out. -->
+      <div x-show="backend === 'cloud'" class="absolute top-[90px] left-6 right-6 z-10">
+        <div class="text-xs text-textMuted">
+          <span class="text-textMuted/70">Platform status:</span>
+          <span class="text-textPrimary" x-text="cloudInfo().statuspage_description || '—'"></span>
+        </div>
+        <a :href="cloudInfo().statuspage_url || 'https://status.temporal.io'" target="_blank" rel="noopener noreferrer"
+          class="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-info hover:underline">
+          View status page
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+          </svg>
+        </a>
+
+        <!-- Account inventory (regions + namespaces) — only when the read-only
+             observer key is configured (Cloud Ops API). Hidden otherwise; the
+             single-namespace liveness probe above still renders. -->
+        <template x-if="cloudInfo().namespaces && cloudInfo().namespaces.length">
+          <div class="mt-3 space-y-2">
+            <div>
+              <div class="text-[10px] uppercase tracking-wider text-textMuted/70 mb-1"
+                x-text="`Regions (${(cloudInfo().regions||[]).length})`"></div>
+              <div class="flex flex-wrap gap-1">
+                <template x-for="rg in (cloudInfo().regions||[])" :key="rg.id">
+                  <span class="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-bgPanel/70 border border-borderSubtle text-[10px] font-mono text-textPrimary"
+                    :title="rg.location">
+                    <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="dotClass(regionStatus(rg.id))"></span>
+                    <span x-text="rg.id"></span>
+                  </span>
+                </template>
+              </div>
+            </div>
+            <div>
+              <div class="text-[10px] uppercase tracking-wider text-textMuted/70 mb-1"
+                x-text="`Namespaces (${cloudInfo().namespaces.length})`"></div>
+              <div class="flex flex-col gap-1 max-h-[150px] overflow-auto pr-1">
+                <template x-for="ns in cloudInfo().namespaces" :key="ns.handle">
+                  <div class="flex items-center gap-2 bg-bgPanel/60 border border-borderSubtle rounded px-2 py-1">
+                    <div class="w-1.5 h-1.5 rounded-full shrink-0" :class="dotClass(ns.state)"></div>
+                    <div class="flex-1 min-w-0">
+                      <div class="text-[11px] font-medium truncate flex items-center gap-1">
+                        <span x-text="ns.name"></span>
+                        <span x-show="ns.is_self" class="px-1 rounded bg-accent/20 text-accent text-[9px] leading-tight">this</span>
+                      </div>
+                      <div class="text-[9px] text-textMuted font-mono truncate"
+                        x-text="ns.active_region || (ns.regions||[]).join(', ')"></div>
+                    </div>
+                    <span class="text-[9px] capitalize text-textMuted shrink-0" x-text="ns.state"></span>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- OSS backend: collapsible internals — the in-Compose Temporal cluster sim. -->
+      <div x-show="backend === 'oss'" class="absolute top-[90px] left-6 right-6 z-10">
         <button @click="open = !open"
           class="text-xs font-medium text-textMuted hover:text-textPrimary flex items-center gap-1.5 transition-colors">
           <svg class="w-3.5 h-3.5 shrink-0 transition-transform duration-200" :class="open ? 'rotate-90' : ''"
@@ -229,7 +287,7 @@
     <p class="text-textMuted text-xs mb-4">Not part of reference architecture — demo utilities only.</p>
 
     <div class="flex flex-wrap gap-3">
-      <template x-for="key in ['platform-console', 'ui-proxy', 'pgweb-orders', 'pgweb-temporal', 'lgtm']">
+      <template x-for="key in toolingKeys()" :key="key">
         <template x-if="services[key]">
           <div @mouseenter="showTooltip(key, $event)" @mousemove="moveTooltip($event)" @mouseleave="hideTooltip()"
             class="flex items-center gap-3 bg-bgPanel border border-borderSubtle rounded-md px-4 py-2 cursor-pointer hover:bg-white/[0.02] transition-colors"
@@ -319,29 +377,58 @@
                }" x-text="temporalCloudStatus()"></div>
         </div>
 
-        <div class="grid grid-cols-[80px_1fr] gap-x-2 gap-y-1 text-textMuted">
-          <div>Endpoint:</div>
-          <div class="font-mono text-textPrimary truncate">your-ns.tmprl.cloud:7233</div>
-          <div>Ownership:</div>
-          <div class="text-textPrimary">Managed by Temporal</div>
-        </div>
-
-        <div class="mt-2 pt-2 border-t border-borderSubtle">
-          <div class="text-textMuted mb-2">Simulated by (3):</div>
-          <div class="flex flex-col gap-1">
-            <template x-for="k in ['temporal', 'postgresql', 'temporal-ui']">
-              <template x-if="services[k]">
-                <div class="flex items-center justify-between bg-bgMain rounded px-2 py-1">
-                  <div class="flex items-center gap-2">
-                    <div class="w-1.5 h-1.5 rounded-full" :class="dotClass(nodeStatus(k))"></div>
-                    <span class="font-mono truncate w-24" x-text="services[k].display_name"></span>
-                  </div>
-                  <span class="capitalize text-textPrimary" x-text="services[k].docker_state"></span>
-                </div>
-              </template>
-            </template>
+        <!-- Cloud backend: the real, console-owned probe detail. -->
+        <template x-if="backend === 'cloud'">
+          <div>
+            <div class="grid grid-cols-[80px_1fr] gap-x-2 gap-y-1 text-textMuted">
+              <div>Endpoint:</div>
+              <div class="font-mono text-textPrimary truncate" x-text="cloudInfo().endpoint || '—'"></div>
+              <div>Namespace:</div>
+              <div class="font-mono text-textPrimary truncate" x-text="cloudInfo().namespace || '—'"></div>
+              <div>Ownership:</div>
+              <div class="text-textPrimary">Managed by Temporal</div>
+            </div>
+            <div class="mt-2 pt-2 border-t border-borderSubtle grid grid-cols-[110px_1fr] gap-x-2 gap-y-1 text-textMuted">
+              <div>Namespace:</div>
+              <div>
+                <span :class="cloudInfo().namespace_reachable ? 'text-success' : 'text-error'"
+                  x-text="cloudInfo().namespace_reachable ? 'reachable' : (cloudInfo().namespace_reachable === false ? 'unreachable' : 'unknown')"></span>
+                <span x-show="cloudInfo().latency_ms != null" class="text-textPrimary font-mono"
+                  x-text="`(${cloudInfo().latency_ms}ms)`"></span>
+              </div>
+              <div>Platform:</div>
+              <div class="text-textPrimary" x-text="cloudInfo().statuspage_description || '—'"></div>
+            </div>
           </div>
-        </div>
+        </template>
+
+        <!-- OSS backend: the in-Compose simulated cluster. -->
+        <template x-if="backend === 'oss'">
+          <div>
+            <div class="grid grid-cols-[80px_1fr] gap-x-2 gap-y-1 text-textMuted">
+              <div>Endpoint:</div>
+              <div class="font-mono text-textPrimary truncate">temporal:7233 (local OSS)</div>
+              <div>Ownership:</div>
+              <div class="text-textPrimary">Self-hosted (simulated)</div>
+            </div>
+            <div class="mt-2 pt-2 border-t border-borderSubtle">
+              <div class="text-textMuted mb-2">Simulated by (3):</div>
+              <div class="flex flex-col gap-1">
+                <template x-for="k in ['temporal', 'postgresql', 'temporal-ui']">
+                  <template x-if="services[k]">
+                    <div class="flex items-center justify-between bg-bgMain rounded px-2 py-1">
+                      <div class="flex items-center gap-2">
+                        <div class="w-1.5 h-1.5 rounded-full" :class="dotClass(nodeStatus(k))"></div>
+                        <span class="font-mono truncate w-24" x-text="services[k].display_name"></span>
+                      </div>
+                      <span class="capitalize text-textPrimary" x-text="services[k].docker_state"></span>
+                    </div>
+                  </template>
+                </template>
+              </div>
+            </div>
+          </div>
+        </template>
       </div>
     </template>
   </div>
@@ -366,15 +453,23 @@
         This is <span class="text-error font-medium">destructive and irreversible</span>. It will:
       </p>
       <ul class="text-sm text-textMuted space-y-1.5 mb-4 list-disc pl-5">
-        <li>Terminate all in-flight order workflows in the namespace</li>
-        <li><span x-show="deleteClosed">Delete closed workflow history (clears the Temporal UI list)</span>
+        <!-- Cloud: never touch the managed namespace — local business data only. -->
+        <li x-show="backend === 'oss'">Terminate all in-flight order workflows in the namespace</li>
+        <li x-show="backend === 'oss'"><span x-show="deleteClosed">Delete closed workflow history (clears the Temporal UI list)</span>
             <span x-show="!deleteClosed">Leave closed workflow history intact</span></li>
         <li>Truncate the <span class="font-mono text-textPrimary/80">orders</span> and
             <span class="font-mono text-textPrimary/80">idempotency_keys</span> tables</li>
         <li>Clear this console's batch submission log</li>
       </ul>
 
-      <label class="flex items-center gap-2 text-sm text-textMuted mb-5 cursor-pointer select-none">
+      <!-- Cloud: make the scope explicit — the managed namespace is untouched. -->
+      <p x-show="backend === 'cloud'" class="text-xs text-textMuted/80 italic mb-5">
+        Temporal Cloud is a managed, shared backend — this reset never terminates or
+        deletes workflows there. In-flight and closed workflows are left intact in the
+        namespace; only local business data is cleared.
+      </p>
+
+      <label x-show="backend === 'oss'" class="flex items-center gap-2 text-sm text-textMuted mb-5 cursor-pointer select-none">
         <input type="checkbox" x-model="deleteClosed" class="accent-accent w-4 h-4">
         Also delete closed workflow history
       </label>
@@ -442,8 +537,9 @@
     'temporal-logo': '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 14h-2v-4h2v4zm0-6h-2V7h2v3z"/></svg>' // Using an info-circle approximation for now, or just default to T-glyph if available
   };
 
-  function archApp() {
+  function archApp(backend) {
     return {
+      backend: backend || 'cloud',
       services: {},
       lastUpdated: null,
       hovered: null,
@@ -474,6 +570,12 @@
       },
 
       temporalCloudStatus() {
+        // Cloud backend: a real, console-owned probe (namespace reachability +
+        // public Statuspage) emits a single `temporal-cloud` entry.
+        if (this.backend === 'cloud') {
+          return this.services['temporal-cloud']?.derived_status || 'unknown';
+        }
+        // OSS backend: aggregate the in-Compose Temporal cluster simulators.
         if (!this.services['temporal'] && !this.services['postgresql'] && !this.services['temporal-ui']) return 'unknown';
         const keys = ['temporal', 'postgresql', 'temporal-ui'];
         const statuses = keys.map(k => this.services[k]?.derived_status || 'down');
@@ -484,6 +586,29 @@
         if (statuses.includes('paused')) return 'paused';
         if (statuses.every(s => s === 'healthy')) return 'healthy';
         return 'unknown';
+      },
+
+      // The Cloud probe's extra fields (endpoint, namespace, latency, statuspage).
+      cloudInfo() { return this.services['temporal-cloud']?.cloud || {}; },
+
+      // A region's status = aggregate of the namespaces resident in it.
+      regionStatus(regionId) {
+        const ns = (this.cloudInfo().namespaces || [])
+          .filter(n => n.active_region === regionId || (n.regions || []).includes(regionId));
+        if (!ns.length) return 'unknown';
+        if (ns.some(n => n.state === 'down')) return 'down';
+        if (ns.some(n => ['degraded', 'restarting'].includes(n.state))) return 'degraded';
+        if (ns.every(n => n.state === 'healthy')) return 'healthy';
+        return 'unknown';
+      },
+
+      // Keys to show in the Tooling strip — data-driven from the live snapshot so it
+      // adapts to substrate/backend (OSS-only and kind-only nodes are excluded
+      // server-side, so whatever is grouped "Tooling" here is what's relevant).
+      toolingKeys() {
+        return Object.keys(this.services)
+          .filter(k => this.services[k]?.group === 'Tooling')
+          .sort((a, b) => (this.services[a].display_name || a).localeCompare(this.services[b].display_name || b));
       },
 
       nodeStatus(key) {

@@ -40,7 +40,9 @@ async def tracking_page(request: Request):
 @router.get("/architecture", response_class=HTMLResponse)
 async def architecture_page(request: Request):
     return templates.TemplateResponse(
-        request=request, name="architecture.html", context={"active": "architecture"}
+        request=request,
+        name="architecture.html",
+        context={"active": "architecture", "backend": settings.console_backend},
     )
 
 

@@ -77,8 +77,8 @@ deploy/
   charts/                       Helm charts for every workload on kind.
 
 config/                       Connection profiles (local-k8s | cloud) → env.
-compose/                      Self-hosted Temporal + observability for the fast,
-                              no-Kubernetes local quick-start (docker-compose.yml).
+compose/                      Host visibility/console plane for the kind paths + a legacy
+                              local self-hosted Temporal server + app tier (no workers).
 docs/  ai_checkpoints/        Design docs + ADRs; cross-session work log.
 pyproject.toml  uv.lock       Python workspace anchor (root).
 ```
@@ -193,11 +193,14 @@ bundles live in `config/`. Credentials never go in git (see `.gitignore`).
 
 Two ways to run, by intent:
 
-- **`docker-compose.yml`** — fastest path; self-hosted Temporal + the full app + LGTM
-  observability, no Kubernetes. Best for app development and demos.
-- **kind + Terraform + ArgoCD** (`deploy/`) — the production-like lifecycle; self-hosted
-  Temporal on k8s (or Cloud), GitOps delivery, worker versioning, autoscaling. Best for
-  platform/ops demos and readiness work.
+- **kind + Terraform + ArgoCD** (`deploy/`) — the supported, production-like lifecycle;
+  workers (and the app tier) on k8s against Temporal Cloud (self-hosted-on-kind planned),
+  GitOps delivery, worker versioning, autoscaling. Compose runs the host visibility/console
+  plane alongside it. This is the end-to-end path.
+- **`docker-compose.yml`** (`poe up`) — a legacy, no-Kubernetes fallback: a self-hosted
+  Temporal **server + app tier + LGTM**, with **no workers** (workers are a kind concern
+  now). Boots a local server you can poke; it does not execute workflows end-to-end until
+  OSS-on-kind lands.
 
 Both run the **same images and the same kernel**; only the delivery layer differs.
 

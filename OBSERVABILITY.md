@@ -1,5 +1,13 @@
 # Observability
 
+> **Status (read first).** This model and its SDK/server scrape targets were exercised on the
+> **legacy Compose-OSS path with Compose-run workers**. That path no longer runs workers —
+> workers run on **kind** now (Worker Deployment), and metrics on kind are **not yet wired/
+> proven** (see the README status table). The worker scrape targets below
+> (`orders-*-worker:9000`) and the `temporal:9091` server target describe the historical
+> Compose-OSS topology; wiring the equivalent on kind (pod-scrape + the Cloud OpenMetrics
+> endpoint) is the open follow-up.
+
 The stack uses `grafana/otel-lgtm` — a single container bundling OpenTelemetry Collector, Prometheus,
 Tempo, Loki, and Grafana with all datasources pre-wired.  Just run `docker compose up` and open Grafana.
 
