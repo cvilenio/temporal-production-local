@@ -1,8 +1,10 @@
 import argparse
 import asyncio
 import os
+import socket
 from dataclasses import dataclass, field
 
+from obslog import get_logger
 from temporalio.worker import Worker
 
 from orders.activities import (
@@ -19,6 +21,8 @@ from orders.resources import (
 )
 from orders.shared.temporal_ids import TaskQueue
 from orders.workflows.order_workflow import OrderWorkflow
+
+log = get_logger(__name__)
 
 
 # ── Activity groups ──────────────────────────────────────────────────────────
@@ -112,12 +116,24 @@ async def run_worker(profile_name: str) -> None:
     # Per-process service name — must override before init_resources so the
     # telemetry resource initialises with the correct service name.
     container.config.otel_service_name.override(f"orders-worker-{profile.name}")
-    # Start telemetry (OTel providers + Prometheus metrics endpoint).
+    # Resource identity for the log/telemetry schema: instance = pod name
+    # (HOSTNAME in k8s), version = Worker Build ID when versioning is on.
+    container.config.service_instance_id.override(
+        os.getenv("HOSTNAME") or socket.gethostname()
+    )
+    if os.getenv("TEMPORAL_WORKER_BUILD_ID"):
+        container.config.worker_build_id.override(
+            os.environ["TEMPORAL_WORKER_BUILD_ID"]
+        )
+    # Start telemetry (OTel providers + Prometheus metrics endpoint + obslog).
     # Not awaited: the telemetry resource is a sync generator.
     container.init_resources()
 
-    print(
-        f"Connecting to Temporal at {settings.temporal_address} (namespace: {settings.temporal_namespace})..."
+    log.info(
+        "connecting to Temporal",
+        address=settings.temporal_address,
+        namespace=settings.temporal_namespace,
+        profile=profile.name,
     )
 
     temporal_service = get_temporal_service()
@@ -128,15 +144,19 @@ async def run_worker(profile_name: str) -> None:
         activities.extend(_build_activity_group(group))
 
     deployment_config = _deployment_config()
-    print(
-        f"Starting Temporal Worker [PROFILE: {profile.name}] on queue [{profile.task_queue}] "
-        f"[versioning: {'on' if deployment_config else 'off'}] with concurrency:\n"
-        f"  activities={settings.worker_max_concurrent_activities}, "
-        f"workflow_tasks={settings.worker_max_concurrent_workflow_tasks}, "
-        f"local_activities={settings.worker_max_concurrent_local_activities}\n"
-        f"  activity_polls={settings.worker_max_concurrent_activity_task_polls}, "
-        f"workflow_polls={settings.worker_max_concurrent_workflow_task_polls}, "
-        f"cached_workflows={settings.worker_max_cached_workflows}"
+    log.info(
+        "starting Temporal worker",
+        profile=profile.name,
+        task_queue=str(profile.task_queue),
+        versioning="on" if deployment_config else "off",
+        concurrency={
+            "activities": settings.worker_max_concurrent_activities,
+            "workflow_tasks": settings.worker_max_concurrent_workflow_tasks,
+            "local_activities": settings.worker_max_concurrent_local_activities,
+            "activity_polls": settings.worker_max_concurrent_activity_task_polls,
+            "workflow_polls": settings.worker_max_concurrent_workflow_task_polls,
+            "cached_workflows": settings.worker_max_cached_workflows,
+        },
     )
 
     worker = Worker(

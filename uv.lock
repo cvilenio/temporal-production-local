@@ -4,6 +4,7 @@ requires-python = "==3.12.*"
 
 [manifest]
 members = [
+    "obslog",
     "orders",
     "temporal-demo",
 ]
@@ -553,6 +554,17 @@ wheels = [
 ]
 
 [[package]]
+name = "obslog"
+version = "0.0.0"
+source = { editable = "libs/logging/python" }
+dependencies = [
+    { name = "structlog" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "structlog", specifier = ">=24.1.0" }]
+
+[[package]]
 name = "opentelemetry-api"
 version = "1.42.1"
 source = { registry = "https://pypi.org/simple" }
@@ -642,6 +654,7 @@ dependencies = [
     { name = "dependency-injector" },
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "obslog" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp-proto-grpc" },
     { name = "opentelemetry-sdk" },
@@ -658,6 +671,7 @@ requires-dist = [
     { name = "dependency-injector", specifier = ">=4.49" },
     { name = "fastapi", specifier = "==0.111.0" },
     { name = "httpx", specifier = ">=0.27.0" },
+    { name = "obslog", editable = "libs/logging/python" },
     { name = "opentelemetry-api", specifier = ">=1.25" },
     { name = "opentelemetry-exporter-otlp-proto-grpc", specifier = ">=1.25" },
     { name = "opentelemetry-sdk", specifier = ">=1.25" },
@@ -1081,6 +1095,15 @@ wheels = [
 ]
 
 [[package]]
+name = "structlog"
+version = "26.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/5e/89/b4a0bcfdf4f71a3dea31379f095929613d7e4528a0996bca6aa964cd0dca/structlog-26.1.0.tar.gz", hash = "sha256:f63a716cbd1b1291cf7661de7794b455acfa4c43c5bcf1630e6ad5ddc1adb3b7", size = 1459881, upload-time = "2026-06-06T07:33:39.348Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a9/18/489c97b834dfff9cf2fc2507cede4bcd4b11e67f84bc462acd1992496f86/structlog-26.1.0-py3-none-any.whl", hash = "sha256:e081a26d6c373e6d201eca24eede26d8ffab07f88f477822e679183428d3d91e", size = 73764, upload-time = "2026-06-06T07:33:38.046Z" },
+]
+
+[[package]]
 name = "temporal-demo"
 version = "0.0.0"
 source = { virtual = "." }
@@ -1088,6 +1111,7 @@ source = { virtual = "." }
 [package.dev-dependencies]
 codec-server = [
     { name = "fastapi" },
+    { name = "obslog" },
     { name = "pydantic" },
     { name = "temporalio" },
     { name = "uvicorn" },
@@ -1103,6 +1127,9 @@ dev = [
 ]
 mock-api = [
     { name = "fastapi" },
+    { name = "obslog" },
+    { name = "opentelemetry-exporter-otlp-proto-grpc" },
+    { name = "opentelemetry-sdk" },
     { name = "pydantic" },
     { name = "uvicorn" },
 ]
@@ -1116,6 +1143,7 @@ platform-console = [
     { name = "httpx" },
     { name = "jinja2" },
     { name = "kubernetes" },
+    { name = "obslog" },
     { name = "pydantic-settings" },
     { name = "temporalio" },
     { name = "uvicorn", extra = ["standard"] },
@@ -1129,6 +1157,7 @@ workers = [
 [package.metadata.requires-dev]
 codec-server = [
     { name = "fastapi", specifier = "==0.111.0" },
+    { name = "obslog", editable = "libs/logging/python" },
     { name = "pydantic", specifier = "==2.7.1" },
     { name = "temporalio", specifier = ">=1.28,<1.29" },
     { name = "uvicorn", specifier = "==0.29.0" },
@@ -1144,6 +1173,9 @@ dev = [
 ]
 mock-api = [
     { name = "fastapi", specifier = "==0.111.0" },
+    { name = "obslog", editable = "libs/logging/python" },
+    { name = "opentelemetry-exporter-otlp-proto-grpc", specifier = ">=1.25" },
+    { name = "opentelemetry-sdk", specifier = ">=1.25" },
     { name = "pydantic", specifier = "==2.7.1" },
     { name = "uvicorn", specifier = "==0.29.0" },
 ]
@@ -1155,6 +1187,7 @@ platform-console = [
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "jinja2", specifier = ">=3.1.4" },
     { name = "kubernetes", specifier = ">=30.1.0" },
+    { name = "obslog", editable = "libs/logging/python" },
     { name = "pydantic-settings", specifier = ">=2.2.1" },
     { name = "temporalio", specifier = ">=1.28,<1.29" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.29.0" },

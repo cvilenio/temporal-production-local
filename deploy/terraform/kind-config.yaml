@@ -24,8 +24,11 @@ nodes:
       - { containerPort: 30443, hostPort: 443,  protocol: TCP }
       # Temporal frontend gRPC (NodePort/Gateway → host 7233)
       - { containerPort: 30723, hostPort: 7233, protocol: TCP }
-      # OTLP gRPC/HTTP receiver (host 4318 → collector)
-      - { containerPort: 30418, hostPort: 4318, protocol: TCP }
+      # NOTE: removed the old `hostPort 4318 → kind` mapping. The OTLP/log flow is
+      # now AGENT-OUT, not inbound: the in-cluster Alloy DaemonSet ships logs to
+      # the host-side lgtm (which publishes 3100/4317/4318 in docker-compose.yml)
+      # via host.docker.internal. Keeping host:4318 free lets lgtm bind it.
+      # See ADR-0018.
       # ArgoCD server HTTP (NodePort 30808 → host 8090). The host-plane
       # viz-proxy fronts this and strips frame headers so the console can
       # iframe it; the raw host port stays reachable for `open in new tab`.

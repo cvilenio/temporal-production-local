@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ziggymart.local/schemas/log-record.json",
+  "title": "obslog structured log record",
+  "description": "Language-neutral contract for ONE structured log line (ADR-0018). This file — not any single language's code — is the shared core. The OTel logs data model is the wire format; each language ships a thin, idiomatic emitter (Python: structlog/obslog; Go: slog/zap; TS: pino) that conforms to this shape. Well-known keys are pinned here; per-call fields are free (additionalProperties).",
+  "type": "object",
+  "required": ["timestamp", "level", "logger", "event", "service.name"],
+  "properties": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601, UTC."
+    },
+    "level": {
+      "type": "string",
+      "enum": ["debug", "info", "warning", "error", "critical"]
+    },
+    "logger": { "type": "string", "description": "Emitting logger name." },
+    "event": { "type": "string", "description": "The human-readable message." },
+
+    "service.name": { "type": "string", "description": "OTel resource: the service." },
+    "service.namespace": { "type": "string", "description": "OTel resource: the domain, e.g. ziggymart." },
+    "service.instance.id": { "type": "string", "description": "OTel resource: pod name / hostname." },
+    "service.version": { "type": "string", "description": "OTel resource: worker Build ID when present." },
+
+    "workflow_id": { "type": "string" },
+    "run_id": { "type": "string" },
+    "workflow_type": { "type": "string" },
+    "activity_id": { "type": "string" },
+    "activity_type": { "type": "string" },
+    "attempt": { "type": "integer" },
+    "task_queue": { "type": "string" },
+
+    "order_id": { "type": "string" },
+    "trace_id": { "type": "string", "description": "Correlation key across logs, traces, and search attributes." },
+    "step": { "type": "string" },
+    "request_id": { "type": "string" },
+
+    "exception": { "description": "Structured traceback on error logs (shape is language-dependent)." }
+  },
+  "additionalProperties": true
+}

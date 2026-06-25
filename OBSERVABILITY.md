@@ -41,7 +41,10 @@ Temporal demos need two distinct metric transports.  Here is why, and which to u
 | **PULL** | Prometheus scrapes `/metrics` on each process | Temporal server metrics, SDK runtime metrics (`temporal_workflow_*`, `temporal_activity_*`), custom metrics via `metric_meter()` | Dashboard name conventions match only with Prometheus scrape + correct suffixes. Replay-safe inside workflows. |
 | **PUSH** | OTLP gRPC → OTel Collector → Prometheus | Business metrics from activities + the API (e.g. `orders.payments_captured_total`) | Workflows run in a sandbox where only the SDK meter is safe; activities are unrestricted. |
 
-Traces and logs always go PUSH (OTLP → Tempo / Loki).
+Traces always go PUSH (OTLP → Tempo). **Logs are separate** (ADR-0018): every service emits
+structured JSON to **stdout**; on kind a **Grafana Alloy DaemonSet** tails pod stdout and ships
+to Loki (app→stdout→node agent→backend, the production pattern), while host-plane services
+(`mock-api`) push OTLP straight to lgtm. See the **Logging** section below.
 
 ---
 
@@ -289,12 +292,31 @@ explicit):
      custom `order.*` spans added in `order_workflow.py`
 
 3. **Logs** → Explore → Loki datasource
-   - Filter by label: `{service_name="orders-worker-activity"}` or `{service_name="orders-worker-workflow"}`
-   - `workflow.logger` and `activity.logger` output is forwarded via the OTel `LoggingHandler`
+   - On kind, filter by the **agent-attached** labels: `{k8s_pod_name=~"orders-activity.*"}` or
+     `{k8s_namespace_name="orders"}` (proof the line came through Alloy, not an app push). Host-plane
+     services keep `{service_name="mock-api"}` from their OTLP resource.
+   - Every line is the app's structured JSON (level/logger/trace_id/order_id parsed by Alloy's
+     `stage.json`), so you can also filter on `| json | level="error"`.
 
 Correlate all three: copy a `trace_id` from a Loki log line and open it in Tempo.
 
-> **Known limitation.** The `orders-service` (FastAPI) process forwards application logs to Loki, but
-> uvicorn's own access/error loggers set `propagate=False`, so HTTP access lines do not appear in Loki.
-> Worker logs (the primary target for this demo) flow fully. To capture uvicorn logs too, configure
-> uvicorn's loggers to propagate or attach the OTel handler to them explicitly.
+## Logging (ADR-0018)
+
+One shared kernel, `obslog` (`libs/logging/python/`, `structlog`-based), gives every service the
+same JSON schema and a type-robust "log codec" (never raises; `repr()` fallback). Two sinks:
+
+- **stdout JSON — always.** Visible in `kubectl logs` / Headlamp / Docker Desktop. This is the
+  k8s log contract and what the node agent collects.
+- **Backend** — on **kind** the **Alloy DaemonSet** (`deploy/charts/alloy`) tails `/var/log/pods`,
+  attaches `k8s_*` metadata, and ships to host-side Loki (apps set `LOG_OTLP_PUSH=false`). On the
+  **host plane**, `mock-api` pushes OTLP to lgtm directly (no node agent there).
+
+**Replay-safety boundary:** workflows keep `workflow.logger` + `wf_log_extra()` (deterministic,
+no contextvars); activities and plain async code use `activity.logger` / `obslog.get_logger()`
+with the concurrency-safe `obslog.bound()` context manager. See ADR-0018 for the full schema,
+the "observability is a separate durable tier" framing, and the polyglot extension path.
+
+> **Note on uvicorn access logs.** `obslog.init_logging` owns the root logger, so app logs (and
+> most library logs that propagate) render in the shared schema. uvicorn's access/error loggers
+> set `propagate=False`; point them at the root or attach the formatter to capture HTTP access
+> lines too.

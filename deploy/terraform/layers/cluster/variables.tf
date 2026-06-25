@@ -70,7 +70,7 @@ variable "registry_service" {
 variable "orders_workers_chart_version" {
   description = "Published version of the orders-workers OCI chart (matches Chart.yaml / just chart-publish)."
   type        = string
-  default     = "0.1.4"
+  default     = "0.1.6"
 }
 
 variable "worker_image_tag" {
@@ -93,6 +93,12 @@ variable "orders_data_chart_version" {
 
 variable "orders_api_chart_version" {
   description = "Published version of the orders-api OCI chart (orders-api Deployment + Service)."
+  type        = string
+  default     = "0.1.1"
+}
+
+variable "alloy_chart_version" {
+  description = "Published version of the alloy OCI chart (Grafana Alloy log-collection DaemonSet; matches Chart.yaml / just chart-publish)."
   type        = string
   default     = "0.1.0"
 }

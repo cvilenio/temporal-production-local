@@ -1,0 +1,95 @@
+# Alloy pipeline config (River). The canonical k8s log-collection flow:
+#   discover pods → relabel (k8s metadata + log file path) → tail files →
+#   unwrap CRI + parse our JSON → ship to Loki.
+# This is what makes logs queryable BY WORKLOAD in Grafana ({k8s_pod_name=...}),
+# exactly like Cloud Logging's resource.labels. ADR-0018.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: alloy
+  annotations:
+    # Must exist before the DaemonSet mounts it (existence dep; ADR-0016).
+    argocd.argoproj.io/sync-wave: "0"
+data:
+  config.alloy: |
+    // Discover every pod in the cluster.
+    discovery.kubernetes "pods" {
+      role = "pod"
+    }
+
+    // Attach Kubernetes metadata as labels and compute the on-node log path.
+    discovery.relabel "pod_logs" {
+      targets = discovery.kubernetes.pods.targets
+
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        target_label  = "k8s_namespace_name"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "k8s_pod_name"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_container_name"]
+        target_label  = "k8s_container_name"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_node_name"]
+        target_label  = "k8s_node_name"
+      }
+      // Surface the workload name as `service_name` so Loki queries line up with
+      // the OTLP path's service.name resource attribute (host-plane services).
+      rule {
+        source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+        target_label  = "service_name"
+      }
+      // Kubelet writes container logs to /var/log/pods/<ns>_<pod>_<uid>/<container>/*.log.
+      rule {
+        source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+        separator     = "/"
+        action        = "replace"
+        replacement   = "/var/log/pods/*$1/*.log"
+        target_label  = "__path__"
+      }
+    }
+
+    local.file_match "pod_logs" {
+      path_targets = discovery.relabel.pod_logs.output
+    }
+
+    loki.source.file "pod_logs" {
+      targets    = local.file_match.pod_logs.targets
+      forward_to = [loki.process.pod_logs.receiver]
+    }
+
+    loki.process "pod_logs" {
+      // Containerd (kind's runtime) wraps each stdout line in the CRI format
+      // "<ts> <stream> <flags> <message>"; unwrap to the raw JSON our apps emit.
+      stage.cri {}
+      // Parse the app's structured JSON so level/logger/trace_id are queryable.
+      stage.json {
+        expressions = {
+          level    = "level",
+          logger   = "logger",
+          trace_id = "trace_id",
+        }
+      }
+      // Promote level to a label for fast filtering; keep cardinality low (no ids).
+      stage.labels {
+        values = {
+          level = "",
+        }
+      }
+      forward_to = [loki.write.backend.receiver]
+    }
+
+    // Ship to the host-side Loki (the durable observability tier). The AGENT
+    // holds this endpoint — the apps never do.
+    loki.write "backend" {
+      endpoint {
+        url = env("LOKI_PUSH_URL")
+      }
+    }

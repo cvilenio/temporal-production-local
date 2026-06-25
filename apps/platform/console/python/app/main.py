@@ -1,4 +1,6 @@
 import asyncio
+import os
+import socket
 from contextlib import asynccontextmanager
 
 from app import db
@@ -7,10 +9,21 @@ from app.services.status import poll_status_loop
 from app.sse import poll_order_updates
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from obslog import init_logging
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Host-plane operability tooling: structured JSON to stdout (Docker Desktop).
+    # No OTLP push — the console has no OTel dependency by design; its logs are
+    # for the operator following a run in Docker Desktop, not Grafana. ADR-0018.
+    init_logging(
+        os.getenv("OTEL_SERVICE_NAME", "platform-console"),
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        fmt=os.getenv("LOG_FORMAT", "json"),
+        instance_id=os.getenv("HOSTNAME") or socket.gethostname(),
+    )
+
     # Best-effort DB connect — never fatal. The console must boot and serve even
     # with the whole kind side (orders-db, orders-api) unreachable; it's expected
     # to be running before the cluster exists. The maintainer establishes the

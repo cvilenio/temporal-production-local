@@ -7,6 +7,8 @@ from temporalio.contrib.opentelemetry.workflow import completed_span as otel_spa
 from temporalio.exceptions import ActivityError, ApplicationError
 
 with workflow.unsafe.imports_passed_through():
+    from obslog import wf_log_extra
+
     from orders.shared.activity_io import (
         CancelShipmentRequest,
         CapturePaymentRequest,
@@ -421,15 +423,20 @@ class OrderWorkflow:
     # ----- internal helpers -----
 
     def _log_ctx(self, ctx: OrderRunContext, step: str | None = None) -> dict:
-        """Build a structured logging extra dict for every log call."""
-        data: dict[str, Any] = {
-            "order_id": ctx.order_id,
-            "workflow_id": ctx.workflow_id,
-            "trace_id": ctx.trace_id,
-        }
-        if step is not None:
-            data["step"] = step
-        return data
+        """Build the structured `extra` dict for every workflow.logger call.
+
+        Replay-safe by construction: context comes from deterministic workflow
+        state (the run context), never from contextvars — see ADR-0018's replay
+        boundary. workflow.logger already injects workflow id/run id/type and
+        suppresses duplicate lines on replay. Built via obslog.wf_log_extra so
+        the schema (and None-dropping) matches the rest of the fleet.
+        """
+        return wf_log_extra(
+            order_id=ctx.order_id,
+            workflow_id=ctx.workflow_id,
+            trace_id=ctx.trace_id,
+            step=step,
+        )
 
     def _make_result(
         self,

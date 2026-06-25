@@ -40,6 +40,22 @@ class Settings(BaseSettings):
     # endpoint on this port inside the container (scraped by Prometheus in lgtm).
     sdk_metrics_port: int = 9000
 
+    # ── Logging (obslog) ──────────────────────────────────────────────────────
+    # log_level   : root level for the structured logging pipeline.
+    # log_format  : "json" (shipped/everywhere it's collected) or "console"
+    #               (pretty local dev).
+    # log_otlp_push: push logs over OTLP directly to the backend. TRUE on the
+    #               host plane (no node agent). FALSE on Kubernetes, where the
+    #               Grafana Alloy DaemonSet tails pod stdout instead (ADR-0018).
+    # service_namespace: OTel service.namespace — the domain (e.g. "ziggymart").
+    # service_instance_id: OTel service.instance.id — pod name / hostname.
+    log_level: str = "INFO"
+    log_format: str = "json"
+    log_otlp_push: bool = True
+    service_namespace: str | None = None
+    service_instance_id: str | None = None
+    worker_build_id: str | None = None
+
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )

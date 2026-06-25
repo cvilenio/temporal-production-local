@@ -1,6 +1,7 @@
 import datetime
 import time
 
+from obslog import bound
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
@@ -40,63 +41,71 @@ def make_external_activities(mock_api: MockApiClient) -> list:
 
     @activity.defn(name=ActivityName.RESERVE_INVENTORY)
     async def reserve_inventory(req: ReserveInventoryRequest) -> None:
-        activity.logger.info(
-            "calling inventory API",
-            extra={"item_id": req.item_id, "quantity": req.quantity},
-        )
-        result = await mock_api.reserve_inventory(
-            item_id=req.item_id,
-            quantity=req.quantity,
-            idem_key=req.idem_key,
-        )
-        if not result["success"]:
-            raise ApplicationError(
-                f"Inventory reservation failed: {result['reason']}",
-                type=ErrorType.UNRECOGNIZED_ACTIVITY_FAILURE,
+        # bound() enriches EVERY log under it (including the mock_api client's own
+        # logs) with this business context, concurrency-safe via contextvars —
+        # two orders reserving inventory at once never cross-contaminate.
+        with bound(item_id=req.item_id, idem_key=req.idem_key):
+            activity.logger.info(
+                "calling inventory API",
+                extra={"quantity": req.quantity},
             )
+            result = await mock_api.reserve_inventory(
+                item_id=req.item_id,
+                quantity=req.quantity,
+                idem_key=req.idem_key,
+            )
+            if not result["success"]:
+                raise ApplicationError(
+                    f"Inventory reservation failed: {result['reason']}",
+                    type=ErrorType.UNRECOGNIZED_ACTIVITY_FAILURE,
+                )
 
     @activity.defn(name=ActivityName.CREATE_SHIPMENT)
     async def create_shipment(req: CreateShipmentRequest) -> ShipmentCreatedResult:
-        tracking_id = await mock_api.create_shipment(
-            address=req.address,
-            order_id=req.order_id,
-            idem_key=req.idem_key,
-        )
-        return ShipmentCreatedResult(tracking_id=tracking_id)
+        with bound(order_id=req.order_id, idem_key=req.idem_key):
+            tracking_id = await mock_api.create_shipment(
+                address=req.address,
+                order_id=req.order_id,
+                idem_key=req.idem_key,
+            )
+            return ShipmentCreatedResult(tracking_id=tracking_id)
 
     @activity.defn(name=ActivityName.CAPTURE_PAYMENT)
     async def capture_payment(req: CapturePaymentRequest) -> None:
-        activity.logger.info(
-            "capturing payment",
-            extra={"amount": float(req.amount)},
-        )
-        t0 = time.monotonic()
-        result = await mock_api.charge_payment(
-            token=req.auth_token,
-            amount=req.amount,
-            idem_key=req.idem_key,
-        )
-        elapsed = datetime.timedelta(seconds=time.monotonic() - t0)
-
-        if not result["success"]:
-            raise ApplicationError(
-                f"Payment capture failed: {result['reason']}",
-                type=ErrorType.UNRECOGNIZED_ACTIVITY_FAILURE,
+        with bound(idem_key=req.idem_key):
+            activity.logger.info(
+                "capturing payment",
+                extra={"amount": float(req.amount)},
             )
+            t0 = time.monotonic()
+            result = await mock_api.charge_payment(
+                token=req.auth_token,
+                amount=req.amount,
+                idem_key=req.idem_key,
+            )
+            elapsed = datetime.timedelta(seconds=time.monotonic() - t0)
 
-        # Operational metric (SDK pull pipeline) — activity.metric_meter() MUST
-        # be called inside the activity body, not at factory/setup time.
-        activity.metric_meter().create_histogram_timedelta(
-            "orders_payment_capture_duration",
-            description="Wall-clock time for the payment capture API call",
-            unit="duration",
-        ).record(elapsed)
+            if not result["success"]:
+                raise ApplicationError(
+                    f"Payment capture failed: {result['reason']}",
+                    type=ErrorType.UNRECOGNIZED_ACTIVITY_FAILURE,
+                )
 
-        # Business metrics (OTLP push pipeline via business_meter) — safe in
-        # activities since they run outside the workflow sandbox.
-        _payments_captured.add(1)
-        _payment_amount.record(int(req.amount * 100))
-        activity.logger.info("payment captured", extra={"amount": float(req.amount)})
+            # Operational metric (SDK pull pipeline) — activity.metric_meter() MUST
+            # be called inside the activity body, not at factory/setup time.
+            activity.metric_meter().create_histogram_timedelta(
+                "orders_payment_capture_duration",
+                description="Wall-clock time for the payment capture API call",
+                unit="duration",
+            ).record(elapsed)
+
+            # Business metrics (OTLP push pipeline via business_meter) — safe in
+            # activities since they run outside the workflow sandbox.
+            _payments_captured.add(1)
+            _payment_amount.record(int(req.amount * 100))
+            activity.logger.info(
+                "payment captured", extra={"amount": float(req.amount)}
+            )
 
     @activity.defn(name=ActivityName.VERIFY_SHIPMENT_STATUS)
     async def verify_shipment_status(

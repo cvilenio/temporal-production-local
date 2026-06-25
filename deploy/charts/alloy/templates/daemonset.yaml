@@ -1,0 +1,68 @@
+# Alloy runs as a DaemonSet — one agent per node, tailing that node's pod logs.
+# This is the production-faithful collection topology (vs apps push-ing directly):
+# the kubelet captures each container's stdout to /var/log/pods, and the node
+# agent ships it. ADR-0018.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: alloy
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/component: log-agent
+  annotations:
+    # After its ConfigMap + SA (wave 0) exist (existence dep; ADR-0016).
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: alloy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: alloy
+      annotations:
+        # Roll pods when the pipeline config changes.
+        checksum/config: {{ .Files.Get "templates/configmap.yaml" | sha256sum }}
+    spec:
+      serviceAccountName: alloy
+      # Run on every node, including the control-plane (it hosts pods too on kind).
+      tolerations:
+        - operator: Exists
+      # Pod log files under /var/log/pods are root-owned; read them as root.
+      securityContext:
+        runAsUser: 0
+      containers:
+        - name: alloy
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/var/lib/alloy/data
+            - --server.http.listen-addr=0.0.0.0:12345
+          env:
+            - name: LOKI_PUSH_URL
+              value: {{ .Values.lokiPushUrl | quote }}
+          ports:
+            - name: http
+              containerPort: 12345
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alloy
+            - name: varlogpods
+              mountPath: /var/log/pods
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/alloy/data
+      volumes:
+        - name: config
+          configMap:
+            name: alloy-config
+        - name: varlogpods
+          hostPath:
+            path: /var/log/pods
+            type: Directory
+        - name: data
+          emptyDir: {}

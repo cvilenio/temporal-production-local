@@ -1,9 +1,13 @@
 import hashlib
 import json
+import os
+import socket
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response
+from obslog import bound, get_logger
 from sqlalchemy import select, text
 
 from orders.config import settings
@@ -23,6 +27,8 @@ from orders.shared.models import (
 )
 from orders.shared.workflow_io import OrderWorkflowInput
 
+log = get_logger(__name__)
+
 
 async def get_db_session(db: Database = Depends(get_database)):
     async for session in db.get_session():
@@ -35,7 +41,10 @@ async def lifespan(app: FastAPI):
     # Per-process service name override — must happen before init_resources so
     # the telemetry resource initialises with the correct service name.
     container.config.otel_service_name.override("orders-service")
-    # Start telemetry (OTel providers + Prometheus metrics endpoint).
+    container.config.service_instance_id.override(
+        os.getenv("HOSTNAME") or socket.gethostname()
+    )
+    # Start telemetry (OTel providers + Prometheus metrics endpoint + obslog).
     # Not awaited: the telemetry resource is a sync generator.
     container.init_resources()
 
@@ -57,6 +66,18 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Orders Service", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def bind_request_context(request: Request, call_next):
+    """Bind a per-request id + route into the log context (concurrency-safe via
+    contextvars) so every log emitted while handling the request — including
+    library logs — carries it without threading it through each call."""
+    request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+    with bound(request_id=request_id, method=request.method, path=request.url.path):
+        response = await call_next(request)
+    response.headers["x-request-id"] = request_id
+    return response
 
 
 # --- Endpoints ---
@@ -155,6 +176,13 @@ async def submit_order(
         order_id=order_id,
         trace_id=request.trace_id,
         order_input=workflow_input,
+    )
+
+    log.info(
+        "order workflow started",
+        order_id=order_id,
+        workflow_id=workflow_id,
+        trace_id=request.trace_id,
     )
 
     response_data = {

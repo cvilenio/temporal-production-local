@@ -33,6 +33,12 @@ def _telemetry_resource(
     service_name: str,
     otlp_endpoint: str,
     sdk_metrics_port: int,
+    log_level: str,
+    log_format: str,
+    log_otlp_push: bool,
+    namespace: str | None,
+    instance_id: str | None,
+    version: str | None,
 ) -> Iterator[Telemetry]:
     """Sync generator resource: init → yield → shutdown on container teardown.
 
@@ -42,7 +48,17 @@ def _telemetry_resource(
     resource, init_resources()/shutdown_resources() run inline and .provided
     resolves to the real attribute value.
     """
-    tel = init_observability(service_name, otlp_endpoint, int(sdk_metrics_port))
+    tel = init_observability(
+        service_name,
+        otlp_endpoint,
+        int(sdk_metrics_port),
+        log_level=log_level,
+        log_format=log_format,
+        log_otlp_push=bool(log_otlp_push),
+        namespace=namespace,
+        instance_id=instance_id,
+        version=version,
+    )
     yield tel
     tel.shutdown()
 
@@ -56,6 +72,12 @@ class Container(containers.DeclarativeContainer):
         service_name=config.otel_service_name,
         otlp_endpoint=config.otel_exporter_otlp_endpoint,
         sdk_metrics_port=config.sdk_metrics_port,
+        log_level=config.log_level,
+        log_format=config.log_format,
+        log_otlp_push=config.log_otlp_push,
+        namespace=config.service_namespace,
+        instance_id=config.service_instance_id,
+        version=config.worker_build_id,
     )
 
     # ── Singletons ────────────────────────────────────────────────────────────

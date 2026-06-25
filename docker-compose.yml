@@ -62,7 +62,14 @@ services:
     networks:
       - temporal-network
     ports:
-      - "3000:3000"
+      - "3000:3000"   # Grafana UI
+      # Published for the kind-side Grafana Alloy DaemonSet to ship logs OUT to
+      # this host-side backend (the "observability is a separate, durable tier"
+      # model — ADR-0018). Compose-network peers (mock-api, workers) reach the
+      # collector as lgtm:4317 and don't need these host maps.
+      - "3100:3100"   # Loki push (Alloy → loki/api/v1/push)
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
     volumes:
       - ./compose/observability/prometheus/prometheus.yaml:/otel-lgtm/prometheus.yaml:ro
       - ./compose/observability/grafana/provisioning/dashboards/ziggymart.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/ziggymart.yaml:ro
