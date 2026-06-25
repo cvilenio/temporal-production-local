@@ -21,6 +21,7 @@ off the `oss` backend, cluster-visibility tooling off the `kind` substrate, and 
 """
 
 import asyncio
+import logging
 import os
 
 import httpx
@@ -38,6 +39,8 @@ from app.services.status.docker import DockerProvider
 from app.services.status.kube import KubeProvider
 
 __all__ = ["broker", "get_snapshot", "poll_status_loop"]
+
+logger = logging.getLogger(__name__)
 
 POLL_INTERVAL_S = 3
 
@@ -108,10 +111,14 @@ def _select_provider() -> StatusProvider:
 
     cloud = CloudStatusProvider() if backend == "cloud" else None
 
-    print(
-        f"Status providers: base={'composite' if substrate == 'kind' else 'docker'} "
-        f"(substrate={substrate}), backend={backend}, "
-        f"cloud_probe={'on' if cloud else 'off'}"
+    logger.info(
+        "status providers selected",
+        extra={
+            "base": "composite" if substrate == "kind" else "docker",
+            "substrate": substrate,
+            "backend": backend,
+            "cloud_probe": "on" if cloud else "off",
+        },
     )
     return RootProvider(base, cloud, frozenset(base_exclude))
 
@@ -123,13 +130,13 @@ async def poll_status_loop():
             try:
                 snapshot = await provider.poll(http_client)
             except Exception as e:
-                print(f"Status poll failed: {e}")
+                logger.warning("status poll failed", extra={"error": repr(e)})
                 snapshot = get_snapshot()
 
             set_snapshot(snapshot)
             try:
                 broker.publish(snapshot)
             except Exception as e:
-                print(f"Failed to publish status: {e}")
+                logger.warning("failed to publish status", extra={"error": repr(e)})
 
             await asyncio.sleep(POLL_INTERVAL_S)

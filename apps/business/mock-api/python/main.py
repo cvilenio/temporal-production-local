@@ -1,11 +1,16 @@
 import asyncio
 import os
 import random
+import socket
 import uuid
 from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, HTTPException
+from obslog import get_logger, init_logging
 from pydantic import BaseModel
+
+log = get_logger("mock-api")
 
 # Cache and Lock for Idempotency
 _idempotency_cache: dict[str, dict] = {}
@@ -84,7 +89,29 @@ class ShippingCancelRequest(BaseModel):
     tracking_id: str
 
 
-app = FastAPI(title="Mock External Systems API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Host-plane business mock: emit JSON to stdout (Docker Desktop) AND push
+    # OTLP straight to the observability backend (lgtm), since no node agent
+    # collects host containers. On Kubernetes this would flip to stdout-only.
+    # See ADR-0018.
+    push = os.getenv("LOG_OTLP_PUSH", "true").lower() != "false"
+    handle = init_logging(
+        os.getenv("OTEL_SERVICE_NAME", "mock-api"),
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        fmt=os.getenv("LOG_FORMAT", "json"),
+        otlp_endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://lgtm:4317")
+        if push
+        else None,
+        namespace=os.getenv("SERVICE_NAMESPACE"),
+        instance_id=os.getenv("HOSTNAME") or socket.gethostname(),
+    )
+    log.info("mock external systems API up")
+    yield
+    handle.shutdown()
+
+
+app = FastAPI(title="Mock External Systems API", lifespan=lifespan)
 
 
 async def _simulate_latency(base_ms_env: str, default_ms: str):
@@ -93,7 +120,7 @@ async def _simulate_latency(base_ms_env: str, default_ms: str):
         # +/- 20% jitter
         jitter = random.uniform(0.8, 1.2)
         actual_ms = int(base_ms * jitter)
-        print(f"Simulating response latency: sleeping {actual_ms}ms (base {base_ms}ms)")
+        log.debug("simulating response latency", actual_ms=actual_ms, base_ms=base_ms)
         await asyncio.sleep(actual_ms / 1000.0)
 
 
@@ -145,11 +172,17 @@ async def reserve_inventory(
             _inventory_attempts[idempotency_key] = attempt
 
         if attempt <= 2:
-            print(
-                f"[{idempotency_key}] Inventory Flaky: Attempt {attempt} returning 503"
+            log.warning(
+                "inventory flaky: returning 503",
+                idempotency_key=idempotency_key,
+                attempt=attempt,
             )
             raise HTTPException(status_code=503, detail="Service Unavailable")
-        print(f"[{idempotency_key}] Inventory Flaky: Attempt {attempt} succeeding")
+        log.info(
+            "inventory flaky: succeeding",
+            idempotency_key=idempotency_key,
+            attempt=attempt,
+        )
 
     async def compute() -> dict:
         await _simulate_latency("MOCK_INVENTORY_LATENCY_MS", "5000")
@@ -189,28 +222,42 @@ async def request_shipping(
         if attempt == 1:
             tracking_id = f"TRK-{uuid.uuid4()}"
             _shipping_ghost_cache[idempotency_key] = tracking_id
-            print(
-                f"[{idempotency_key}] Ghost label created: {tracking_id}. Hanging {hang_ms}ms..."
+            log.warning(
+                "shipping ghost: label created, hanging",
+                idempotency_key=idempotency_key,
+                tracking_id=tracking_id,
+                hang_ms=hang_ms,
             )
         else:
-            print(
-                f"[{idempotency_key}] Ghost label already exists. Hanging {hang_ms}ms..."
+            log.warning(
+                "shipping ghost: label already exists, hanging",
+                idempotency_key=idempotency_key,
+                hang_ms=hang_ms,
             )
         await asyncio.sleep(hang_ms / 1000)
         raise HTTPException(status_code=504, detail="Gateway Timeout")
 
     if "flaky" in addr:
         if attempt == 1:
-            print(
-                f"[{idempotency_key}] Shipping Flaky: Attempt 1 hanging {hang_ms}ms..."
+            log.warning(
+                "shipping flaky: attempt 1 hanging",
+                idempotency_key=idempotency_key,
+                hang_ms=hang_ms,
             )
             await asyncio.sleep(hang_ms / 1000)
             raise HTTPException(status_code=504, detail="Gateway Timeout")
-        print(f"[{idempotency_key}] Shipping Flaky: Attempt {attempt} succeeding")
+        log.info(
+            "shipping flaky: succeeding",
+            idempotency_key=idempotency_key,
+            attempt=attempt,
+        )
 
     if "lost" in addr:
-        print(
-            f"[{idempotency_key}] Shipping Lost: Attempt {attempt} hanging {hang_ms}ms..."
+        log.warning(
+            "shipping lost: hanging",
+            idempotency_key=idempotency_key,
+            attempt=attempt,
+            hang_ms=hang_ms,
         )
         await asyncio.sleep(hang_ms / 1000)
         raise HTTPException(status_code=504, detail="Gateway Timeout")

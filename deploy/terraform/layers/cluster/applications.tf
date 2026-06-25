@@ -162,9 +162,41 @@ locals {
     }
   }
 
+  # alloy: the Grafana Alloy log-collection DaemonSet (ADR-0018). A LOCAL chart
+  # (deploy/charts/alloy, published by `just chart-publish` like the orders charts),
+  # seeded here rather than via the addon glob since its version comes from the
+  # chart, not config/dependencies.yaml. No account-bearing values — the agent
+  # ships to the host backend, not Temporal Cloud. sync-wave -1: collection is up
+  # before the app workloads (wave 0) start producing logs.
+  alloy_application = {
+    apiVersion = "argoproj.io/v1alpha1"
+    kind       = "Application"
+    metadata = {
+      name        = "alloy"
+      namespace   = var.argocd_namespace
+      annotations = { "argocd.argoproj.io/sync-wave" = "-1" }
+    }
+    spec = {
+      project = "default"
+      source = {
+        repoURL        = var.oci_charts_repo
+        chart          = "alloy"
+        targetRevision = var.alloy_chart_version
+      }
+      destination = {
+        server    = "https://kubernetes.default.svc"
+        namespace = "observability"
+      }
+      syncPolicy = {
+        automated   = { prune = true, selfHeal = true }
+        syncOptions = ["CreateNamespace=true"]
+      }
+    }
+  }
+
   # Every Application TF seeds: the committed add-ons + the injected orders-workers,
-  # orders-data, and orders-api.
-  all_applications = { for app in concat(local.addon_applications, [local.orders_workers_application, local.orders_data_application, local.orders_api_application]) : app.metadata.name => app }
+  # orders-data, orders-api, and the alloy log agent.
+  all_applications = { for app in concat(local.addon_applications, [local.orders_workers_application, local.orders_data_application, local.orders_api_application, local.alloy_application]) : app.metadata.name => app }
 }
 
 # Seed the ArgoCD Applications after the release installs the Application CRD.

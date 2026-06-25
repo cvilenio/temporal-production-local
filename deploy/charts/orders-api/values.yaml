@@ -15,9 +15,19 @@ ordersApi:
   # NodePort exposing orders-api to the host (the still-on-host console's
   # ORDERS_SERVICE_URL + the E2E curl). kind maps it to a host port.
   hostNodePort: 30800
-  # OTel collector endpoint. Observability on kind is best-effort (not yet wired);
-  # the SDK exporter tolerates an unreachable endpoint.
-  otelEndpoint: "http://host.docker.internal:4318"
+  # OTLP push endpoint (traces + business metrics). The SDK uses the gRPC
+  # exporter, so this MUST be the 4317 port (4318 is OTLP/HTTP — a gRPC client
+  # there fails). lgtm publishes 4317 on the host (docker-compose.yml); reached
+  # via the cluster host gateway. (Logs go stdout→Alloy, not here.)
+  otelEndpoint: "http://host.docker.internal:4317"
+
+# Logging (obslog / ADR-0018). On Kubernetes the Grafana Alloy DaemonSet tails
+# pod stdout, so orders-api logs JSON to stdout only (otlpPush=false).
+logging:
+  level: INFO
+  format: json
+  otlpPush: false
+  serviceNamespace: ziggymart
 
 # Temporal Cloud connection — authenticated as the DEDICATED client service
 # account (ADR-0008), whose API key the cluster layer seeds as orders-client-apikey.

@@ -1,30 +1,33 @@
 """
 Observability initialisation — call init_observability() once per process.
 
-Two-pipeline model
-------------------
+Three signals, two transports
+-----------------------------
 PULL  (Prometheus scrape)   — Temporal SDK + custom metrics via metric_meter().
                               PrometheusConfig binds /metrics on sdk_metrics_port.
                               Scraped by Prometheus inside the lgtm container.
 
-PUSH  (OTLP gRPC to lgtm)  — Traces → Tempo, Logs → Loki,
-                              Business metrics → Prometheus (via OTel Collector).
-                              Use business_meter() in activities and the API.
-                              Workflow code MUST use workflow.metric_meter() instead
-                              (replay-safe; rides the PULL pipeline).
+PUSH  (OTLP gRPC to lgtm)  — Traces → Tempo, Business metrics → Prometheus
+                              (via OTel Collector). Use business_meter() in
+                              activities and the API. Workflow code MUST use
+                              workflow.metric_meter() instead (replay-safe; rides
+                              the PULL pipeline).
+
+LOGS                        — Owned by `obslog` (the shared logging kernel), not
+                              wired here. Logs always render JSON to stdout (for
+                              the Alloy DaemonSet to tail on Kubernetes / Docker
+                              Desktop on the host) and, when log_otlp_push is on
+                              (host plane, no node agent), ALSO push OTLP → Loki.
+                              See ADR-0018. init_observability just forwards the
+                              log settings into obslog.init_logging.
 """
 
 from __future__ import annotations
 
-import logging
-
+import obslog
 from opentelemetry import metrics, trace
-from opentelemetry._logs import set_logger_provider
-from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
-from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
@@ -35,7 +38,8 @@ from temporalio.runtime import PrometheusConfig, Runtime, TelemetryConfig
 
 
 class Telemetry:
-    """Holds the initialised telemetry providers and Temporal Runtime."""
+    """Holds the initialised telemetry providers, the logging handle, and the
+    Temporal Runtime."""
 
     def __init__(
         self,
@@ -43,13 +47,13 @@ class Telemetry:
         interceptors: list,
         tracer_provider: TracerProvider,
         meter_provider: MeterProvider,
-        logger_provider: LoggerProvider,
+        log_handle: obslog.LoggingHandle,
     ) -> None:
         self.runtime = runtime
         self.interceptors = interceptors
         self._tracer_provider = tracer_provider
         self._meter_provider = meter_provider
-        self._logger_provider = logger_provider
+        self._log_handle = log_handle
 
     def shutdown(self) -> None:
         """Flush all in-flight telemetry before process exit."""
@@ -57,14 +61,20 @@ class Telemetry:
         self._tracer_provider.shutdown()
         self._meter_provider.force_flush(timeout_millis=5_000)
         self._meter_provider.shutdown()
-        self._logger_provider.force_flush()
-        self._logger_provider.shutdown()
+        self._log_handle.shutdown()
 
 
 def init_observability(
     service_name: str,
     otlp_endpoint: str = "http://localhost:4317",
     sdk_metrics_port: int = 9000,
+    *,
+    log_level: str = "INFO",
+    log_format: str = "json",
+    log_otlp_push: bool = True,
+    namespace: str | None = None,
+    instance_id: str | None = None,
+    version: str | None = None,
 ) -> Telemetry:
     """
     Initialise the full observability stack for one process.
@@ -72,8 +82,15 @@ def init_observability(
     Parameters
     ----------
     service_name:     Shown in Grafana as the service label (set per-process).
-    otlp_endpoint:    OTLP gRPC endpoint for traces, logs, and business metrics.
+    otlp_endpoint:    OTLP gRPC endpoint for traces, business metrics, and
+                      (when log_otlp_push) logs.
     sdk_metrics_port: Port for the Temporal SDK Prometheus pull endpoint.
+    log_level/format: Forwarded to obslog (root level; "json"|"console").
+    log_otlp_push:    Push logs over OTLP too (host plane). False on Kubernetes,
+                      where the Alloy DaemonSet collects stdout. See ADR-0018.
+    namespace:        OTel service.namespace (the domain, e.g. "ziggymart").
+    instance_id:      OTel service.instance.id (pod name / hostname).
+    version:          OTel service.version (worker Build ID when present).
     """
     resource = Resource.create({SERVICE_NAME: service_name})
 
@@ -97,20 +114,32 @@ def init_observability(
     )
     metrics.set_meter_provider(meter_provider)
 
-    # ── Logs (OTLP push → Loki) ─────────────────────────────────────────────
-    # Attaches a LoggingHandler to the root logger so all existing
-    # workflow.logger / activity.logger output is forwarded to Loki.
-    # Root logger default level is WARNING; set to INFO so activity/workflow
-    # INFO logs are not filtered before reaching the OTel handler.
-    logger_provider = LoggerProvider(resource=resource)
-    logger_provider.add_log_record_processor(
-        BatchLogRecordProcessor(OTLPLogExporter(endpoint=otlp_endpoint))
-    )
-    set_logger_provider(logger_provider)
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
-    root_logger.addHandler(
-        LoggingHandler(level=logging.NOTSET, logger_provider=logger_provider)
+    # ── Temporal logger hygiene (ADR-0018) ──────────────────────────────────
+    # By default the SDK appends a string repr of the workflow/activity info to
+    # every message, so `event` reads "order workflow started ({'attempt': 1,
+    # ...})". We keep the message CLEAN and rely on the structured extras
+    # (`temporal_workflow` / `temporal_activity`) the SDK still attaches — so the
+    # JSON `event` is just the message, with context in its own fields (the
+    # message-first / expandable-context experience in Loki/Grafana).
+    from temporalio import activity as _activity
+    from temporalio import workflow as _workflow
+
+    _workflow.logger.workflow_info_on_message = False
+    _workflow.logger.workflow_info_on_extra = True
+    _activity.logger.activity_info_on_message = False
+    _activity.logger.activity_info_on_extra = True
+
+    # ── Logs (obslog: stdout JSON always; OTLP → Loki when log_otlp_push) ────
+    # obslog owns the root-logger pipeline so that workflow.logger /
+    # activity.logger and every stdlib logger render through one schema.
+    log_handle = obslog.init_logging(
+        service_name,
+        level=log_level,
+        fmt=log_format,
+        otlp_endpoint=otlp_endpoint if log_otlp_push else None,
+        namespace=namespace,
+        instance_id=instance_id,
+        version=version,
     )
 
     # ── Temporal SDK operational metrics (Prometheus pull) ───────────────────
@@ -144,5 +173,5 @@ def init_observability(
         interceptors=[TracingInterceptor()],
         tracer_provider=tracer_provider,
         meter_provider=meter_provider,
-        logger_provider=logger_provider,
+        log_handle=log_handle,
     )

@@ -1,0 +1,21 @@
+# Grafana Alloy log-collection DaemonSet (ADR-0018). All values git-safe — no
+# account-bearing data (the agent ships to the host backend, not Temporal Cloud).
+namespace: observability
+
+image:
+  repository: grafana/alloy
+  tag: v1.5.1
+
+# Where the agent ships collected logs. The backend (lgtm) runs on the HOST, so
+# kind pods reach it via the cluster's host gateway (host.docker.internal). This
+# is the "observability is a separate, durable tier the cluster ships OUT to"
+# model — the analog of GKE → Cloud Logging. The host publishes Loki's push port
+# (docker-compose.yml). loki/api/v1/push is Loki's native ingest endpoint.
+lokiPushUrl: "http://host.docker.internal:3100/loki/api/v1/push"
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 256Mi

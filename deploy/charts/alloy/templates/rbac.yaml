@@ -1,0 +1,45 @@
+# Namespace + read-only RBAC for the Alloy agent. discovery.kubernetes needs to
+# list/watch pods (and nodes/namespaces) to attach k8s metadata to each log line
+# — the same minimal-read shape as the console-reader SA (deploy/kind/
+# console-reader-rbac.yaml). No secrets, no writes. ADR-0018.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/part-of: observability
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alloy
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/part-of: observability
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: alloy-log-reader
+  labels:
+    app.kubernetes.io/part-of: observability
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "nodes/proxy", "namespaces", "endpoints", "services"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: alloy-log-reader
+  labels:
+    app.kubernetes.io/part-of: observability
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: alloy-log-reader
+subjects:
+  - kind: ServiceAccount
+    name: alloy
+    namespace: {{ .Values.namespace }}

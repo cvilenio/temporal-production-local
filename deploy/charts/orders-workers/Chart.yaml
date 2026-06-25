@@ -6,7 +6,7 @@ description: >-
   (workflow, activity, …). Build ID is derived from the pod-template hash, so
   shipping a new version is just a new image tag. See ADR-0004.
 type: application
-version: 0.1.4
+version: 0.1.6
 appVersion: "1.0"
 # Requires the Temporal Worker Controller installed in-cluster (CRDs:
 # temporal.io/v1alpha1). Installed via Terraform/ArgoCD; depends on cert-manager.

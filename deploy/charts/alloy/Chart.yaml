@@ -1,0 +1,12 @@
+apiVersion: v2
+name: alloy
+description: >-
+  Grafana Alloy as a node-level log-collection DaemonSet. Tails pod stdout from
+  /var/log/pods, enriches each line with Kubernetes metadata (namespace/pod/
+  container/node), and ships to the host-side observability backend (lgtm Loki).
+  This models the production k8s logging pattern — app→stdout→node agent→backend,
+  the same shape as a GKE fluentbit DaemonSet → Cloud Logging — instead of apps
+  pushing directly. The agent (not the app) holds the backend endpoint. ADR-0018.
+type: application
+version: 0.1.0
+appVersion: "1.5.1"

@@ -208,13 +208,13 @@ cluster-start:
 mirror-deps: render-deps
     REGISTRY_PORT={{registry_port}} bash deploy/kind/mirror-deps.sh
 
-# Package the orders charts (orders-workers + orders-data + orders-api) and push
-# them to the local OCI registry (ArgoCD pulls them from there).
+# Package the local charts (orders-workers + orders-data + orders-api + the alloy
+# log agent) and push them to the local OCI registry (ArgoCD pulls them from there).
 chart-publish:
     #!/usr/bin/env bash
     set -euo pipefail
     tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-    for chart in orders-workers orders-data orders-api; do
+    for chart in orders-workers orders-data orders-api alloy; do
       helm package "deploy/charts/$chart" -d "$tmp" >/dev/null
       helm push "$tmp/$chart"-*.tgz oci://localhost:{{registry_port}}/charts --plain-http
       ver="$(helm show chart "deploy/charts/$chart" | awk '/^version:/{print $2}')"

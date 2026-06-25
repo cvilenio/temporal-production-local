@@ -41,6 +41,24 @@ startupProbe:
 # (deploy/terraform/kind-config.yaml notes the CoreDNS/host-gateway fallback).
 mockApiUrl: "http://host.docker.internal:8001"
 
+# OTLP push endpoint (traces → Tempo, business metrics → Prometheus-via-collector).
+# gRPC, so it MUST be the 4317 port (4318 is OTLP/HTTP). Now that lgtm publishes
+# 4317 on the host (docker-compose.yml), workers reach the collector via the
+# cluster host gateway. Previously unset → defaulted to localhost:4317 in-pod and
+# spammed "Failed to export metrics to localhost:4317". NOTE: logs do NOT use this
+# (they go stdout→Alloy, LOG_OTLP_PUSH=false); this is traces + business metrics.
+otelEndpoint: "http://host.docker.internal:4317"
+
+# Logging (obslog / ADR-0018). On Kubernetes the Grafana Alloy DaemonSet tails
+# pod stdout and ships to the observability backend, so workers log JSON to
+# stdout only (otlpPush=false — no direct app→backend log push). serviceNamespace
+# is the domain (OTel service.namespace), used as a log/trace dimension.
+logging:
+  level: INFO
+  format: json
+  otlpPush: false
+  serviceNamespace: ziggymart
+
 # Rollout strategy for every WorkerDeployment (see ADR-0004):
 #   AllAtOnce   — controller promotes a healthy version to Current at 100%. The
 #                 first version of a fresh deployment becomes Current immediately,
@@ -62,10 +80,15 @@ mockApiUrl: "http://host.docker.internal:8001"
 rollout:
   strategy: AllAtOnce
 
-# Keep drained versions alive long enough that rollback routes to a live worker.
+# Keep drained versions alive long enough that PINNED in-flight orders finish on
+# the version they started on, then scale the old version down. Right-sized to
+# THIS app's actual workflow length (orders complete in minutes; even the
+# deliberately-hanging ghost/lost scenarios are a few minutes worst case), with
+# headroom. HARD FLOOR: scaledownDelay must exceed the max workflow execution
+# time — below it, a pinned in-flight order loses its only poller and stalls.
 sunset:
-  scaledownDelay: 30m
-  deleteDelay: 2h
+  scaledownDelay: 10m
+  deleteDelay: 30m
 
 # One entry per worker profile (mirrors orders.worker.WORKER_PROFILES and
 # apps/temporal/workers/python/<name>/). Each profile is its own image (the entrypoint is

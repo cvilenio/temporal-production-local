@@ -31,7 +31,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 # The repo's local Helm charts (templated + schema-validated below).
-charts=(deploy/charts/orders-workers deploy/charts/orders-data deploy/charts/orders-api)
+charts=(deploy/charts/orders-workers deploy/charts/orders-data deploy/charts/orders-api deploy/charts/alloy)
 
 # datreeio CRDs-catalog: {{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json
 # carries argoproj.io Application, temporal.io WorkerDeployment/Connection, and

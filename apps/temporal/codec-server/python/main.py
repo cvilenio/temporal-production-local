@@ -24,10 +24,15 @@ from __future__ import annotations
 
 import base64
 import os
+import socket
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from obslog import get_logger, init_logging
 from pydantic import BaseModel
+
+log = get_logger("codec-server")
 
 # Origin allowed to call the codec from a browser (the Temporal UI). Lock this
 # down per environment; "*" here only because this is a local demo scaffold.
@@ -49,7 +54,20 @@ class Payloads(BaseModel):
     payloads: list[Payload] = []
 
 
-app = FastAPI(title="Temporal Codec Server (scaffold)")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Host-plane scaffold: structured JSON to stdout (Docker Desktop).
+    init_logging(
+        os.getenv("OTEL_SERVICE_NAME", "codec-server"),
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        fmt=os.getenv("LOG_FORMAT", "json"),
+        instance_id=os.getenv("HOSTNAME") or socket.gethostname(),
+    )
+    log.info("codec server up", ui_origin=UI_ORIGIN)
+    yield
+
+
+app = FastAPI(title="Temporal Codec Server (scaffold)", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[UI_ORIGIN],
