@@ -29,11 +29,28 @@ task-queue compatibility-set API is superseded.
   the prod-grade upgrade for demoing safe canary rollouts; both non-`Manual` strategies skip
   the ramp on a cold start and promote v1 immediately. Reserve `Manual` for hand-gated
   promotion.
-  - **Ownership caveat:** a manual `set-current-version` (or `set-ramping-version`) sets the
-    server's `LastModifierIdentity` away from the controller, which then backs off and stops
-    managing routing for that deployment. Hand control back with the version metadata
-    `temporal.io/ignore-last-modifier: true`, or delete the Worker Deployment from the server
-    and redeploy clean.
+  - **Ownership caveat (corrected 2026-06-25 after live investigation).** The controller
+    coordinates exclusive routing ownership via the server's **`ManagerIdentity`** field on the
+    Worker Deployment: only a client whose identity matches `ManagerIdentity` may change routing
+    (set current/ramping version). The controller claims it when it's empty, and its identity is
+    `CONTROLLER_IDENTITY` (`<release>/<namespace>`, stable) **+ the `temporal-system` namespace
+    UID** (`getControllerIdentity()` in the controller). That namespace UID is **regenerated on
+    every fresh kind cluster**, so a rebuilt controller has a *different* identity and cannot
+    reclaim a deployment still owned by the prior cluster's controller — Current stays pinned to
+    a now-dead version and workflows sit pending. A manual `set-current-version` causes the same
+    standoff (sets `ManagerIdentity` to the CLI's identity).
+    - **There is NO `temporal.io/ignore-last-modifier` annotation** — an earlier version of this
+      ADR claimed one; it does not exist in the controller (verified against v1.7.0, the latest
+      release). Do not rely on it.
+    - **Hand control back** with `temporal worker deployment manager-identity unset
+      --deployment-name <ns>/<name>` (clears `ManagerIdentity`; the controller reclaims the empty
+      identity on the next reconcile). This is the supported mechanism.
+    - **The namespace-UID suffix is deliberate** — it scopes routing ownership per cluster so a
+      stale/decommissioned cluster's controller can't clobber a live one. So the fix is NOT to
+      pin the identity (that defeats the safety) but to **release ownership on teardown** — the
+      graceful-decommission step. `just cluster-down` now runs `just release-worker-deployments`
+      (best-effort, Cloud-only) to unset `ManagerIdentity` before deleting the cluster, so the
+      next cluster's controller claims cleanly. See `docs/runbooks/argocd-stuck-sync.md`.
 - **Workflow behavior:** plan to mark `OrderWorkflow` `PINNED` so in-flight orders never
   replay against new code; compatible in-place edits use `workflow.patched(...)` only on
   AUTO_UPGRADE workflows. Not yet enabled — tracked as follow-up.
