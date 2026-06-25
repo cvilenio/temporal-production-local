@@ -13,6 +13,8 @@ locals {
   # Per-namespace outputs are keyed by the full <domain>-<env> name.
   worker_api_key   = data.terraform_remote_state.cloud.outputs.api_key_tokens[var.cloud_env]
   namespace_handle = data.terraform_remote_state.cloud.outputs.namespace_handles[var.cloud_env]
+  # Dedicated client key for orders-api (null if the cloud layer didn't mint one).
+  client_api_key = try(data.terraform_remote_state.cloud.outputs.client_api_key_tokens[var.cloud_env], null)
   # For api_key_auth namespaces the cloud `endpoint` output is already the regional
   # gRPC endpoint (e.g. us-east-1.aws.api.temporal.io:7233) that API keys require.
   temporal_address = data.terraform_remote_state.cloud.outputs.endpoints[var.cloud_env]

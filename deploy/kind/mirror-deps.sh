@@ -29,6 +29,7 @@ DEPS_ENV="config/.generated/deps.env"
 # shellcheck disable=SC1090
 . "$DEPS_ENV"
 CERT_MANAGER_REPO="${CERT_MANAGER_REPO:-https://charts.jetstack.io}"
+CNPG_REPO="${CNPG_REPO:-https://cloudnative-pg.io/charts}"
 
 command -v helm >/dev/null 2>&1 || { echo "✖ missing required tool: helm" >&2; exit 1; }
 
@@ -38,6 +39,9 @@ trap 'rm -rf "$tmp"' EXIT
 echo "==> Mirroring Helm charts to ${CHARTS_REPO}"
 # cert-manager: classic Helm repo (can't be pull-through-cached → explicit copy).
 helm pull cert-manager --repo "${CERT_MANAGER_REPO}" --version "${CERT_MANAGER_VERSION}" -d "$tmp" >/dev/null
+# cloudnative-pg operator: classic Helm repo (same → explicit copy). Manages the
+# orders-db Cluster; its CRDs ship with the chart (crds.create defaults true).
+helm pull cloudnative-pg --repo "${CNPG_REPO}" --version "${CNPG_VERSION}" -d "$tmp" >/dev/null
 # Temporal Worker Controller: upstream OCI charts (CRDs split from the controller).
 helm pull oci://docker.io/temporalio/temporal-worker-controller-crds --version "${WORKER_CONTROLLER_VERSION}" -d "$tmp" >/dev/null
 helm pull oci://docker.io/temporalio/temporal-worker-controller --version "${WORKER_CONTROLLER_VERSION}" -d "$tmp" >/dev/null

@@ -19,6 +19,28 @@ connection:
   apiKeySecretKey: api-key
   # mtlsSecret: orders-temporal-tls   # (alternative) mTLS Connection instead of API key
 
+# orders-api is co-located in the orders namespace (orders-app chart, Service
+# `orders-service`). The kernel's default is the host-dev localhost:8002, so the
+# in-cluster URL MUST be set explicitly or activities dial localhost in-pod and
+# fail "All connection attempts failed".
+ordersServiceUrl: "http://orders-service:8000"
+
+# Startup-only downstream-reachability gate (see workerdeployment.yaml). Gates
+# Worker-Controller promotion (Build-ID routing) on the worker actually reaching
+# orders-service + mock-api, without continuous dependency pinging. failureThreshold
+# × periodSeconds = the grace window before CrashLoopBackOff (~5 min here).
+startupProbe:
+  enabled: true
+  periodSeconds: 5
+  failureThreshold: 60
+
+# mock-api (the simulated external dependency / "the internet") stays on the host
+# while the workers run on kind. Workers reach it via the cluster's host gateway —
+# host.docker.internal — which correctly models cluster egress to an outside
+# service rather than an in-cluster hop. Validate kind pods can resolve this name
+# (deploy/terraform/kind-config.yaml notes the CoreDNS/host-gateway fallback).
+mockApiUrl: "http://host.docker.internal:8001"
+
 # Rollout strategy for every WorkerDeployment (see ADR-0004):
 #   AllAtOnce   — controller promotes a healthy version to Current at 100%. The
 #                 first version of a fresh deployment becomes Current immediately,
@@ -31,9 +53,10 @@ connection:
 #                 first. A cold cluster then has no Current version and versioned
 #                 workflows sit pending. Use only when you want to gate promotion
 #                 by hand. NOTE: any manual set-current-version makes the controller
-#                 back off (LastModifierIdentity ≠ controller); hand ownership back
-#                 with metadata `temporal.io/ignore-last-modifier: true` or by
-#                 deleting the Worker Deployment from the server and redeploying.
+#                 back off (server ManagerIdentity ≠ controller); hand ownership back
+#                 with `temporal worker deployment manager-identity unset` (the
+#                 controller reclaims the empty identity on the next reconcile).
+#                 See ADR-0004 / docs/runbooks/argocd-stuck-sync.md.
 # Default AllAtOnce: this is a local/non-prod env where the happy path must just
 # work; Progressive is the prod-grade upgrade when demoing safe canary rollouts.
 rollout:

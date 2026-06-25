@@ -34,6 +34,12 @@ charts:
   argo-cd:
     version: "9.7.0" # bootstrap; installed by the Terraform helm_release
     repo: https://argoproj.github.io/argo-helm
+  cloudnative-pg:
+    # CNPG operator: manages the orders-db PostgreSQL Cluster on kind (the app
+    # tier's datastore). Classic Helm repo -> explicit mirror push (like
+    # cert-manager). chart 0.28.3 ships operator appVersion 1.29.1.
+    version: "0.28.3"
+    repo: https://cloudnative-pg.io/charts # classic Helm repo -> explicit mirror push
 
 images:
   # TLS proxy that fronts the HTTP registry for ArgoCD (registry-proxy.tf).

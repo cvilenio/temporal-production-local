@@ -51,6 +51,17 @@ regardless of mechanism.
 - **Net:** the "API key for automation, mTLS for workers" split is native to Cloud (the planes
   are independent). We use API keys for *both* planes by choice — lowest maintenance, RBAC-tied.
 
+##### Update (2026-06-25): the data plane splits into worker vs client identities
+
+When orders-api moved onto kind, it became a *second* data-plane caller — the **client** that
+starts/signals workflows, distinct from the **workers** that execute them. It gets its **own
+least-privilege service-account API key**, not the worker key: separate credential, separate
+blast radius and rotation, even though both happen to need namespace `write`. The
+`cloud-namespace` Terraform module mints it optionally (`client_service_account_name`); the
+cluster layer seeds it as the `orders-client-apikey` Secret, which orders-app's `connection`
+consumes as `TEMPORAL_API_KEY`. The two-identity-planes principle (control vs data) thus refines
+to **control / worker / client** — three credentials, each least-privilege.
+
 #### Future Cloud mTLS demo (feasibility note — not built)
 
 If we later want to demonstrate the mTLS worker path, it is feasible in this repo without any

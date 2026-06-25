@@ -31,5 +31,19 @@ nodes:
       # iframe it; the raw host port stays reachable for `open in new tab`.
       # See ADR-0014 (local visibility plane).
       - { containerPort: 30808, hostPort: 8090, protocol: TCP }
+      # App tier now runs on kind (ai_checkpoints/0011). The still-on-host console
+      # (and the order E2E curl) reach it through these NodePort → host maps,
+      # reusing the host ports the Compose orders-service/orders-db used to publish:
+      #   orders-api  (orders-service NodePort 30800) → host 8002
+      #   orders-db   (CNPG -rw NodePort      30543) → host 5433  (console asyncpg pool)
+      - { containerPort: 30800, hostPort: 8002, protocol: TCP }
+      - { containerPort: 30543, hostPort: 5433, protocol: TCP }
   - role: worker
   - role: worker
+# Pod → host egress: the orders workers reach the host mock-api at
+# host.docker.internal:8001 (MOCK_API_URL in the orders-workers chart). On Docker
+# Desktop this name resolves from pods because kind's CoreDNS forwards external
+# names to the node resolver, which Docker Desktop populates. If a future runtime
+# (rootless/Linux Docker) can't resolve it, patch CoreDNS with a `hosts` entry
+# mapping host.docker.internal → the docker host-gateway IP. Validated by the
+# order E2E (an activity must reach mock-api).

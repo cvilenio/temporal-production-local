@@ -30,3 +30,14 @@ output "api_key_token" {
   value       = try(temporalcloud_apikey.workers[0].token, null)
   sensitive   = true
 }
+
+output "client_service_account_id" {
+  description = "Client service account id (null when no client SA is minted). Use with `tcld apikey create` to mint a client key out-of-band."
+  value       = try(temporalcloud_service_account.client[0].id, null)
+}
+
+output "client_api_key_token" {
+  description = "Client API key secret (null when no client SA / key is minted). SENSITIVE — present in state."
+  value       = try(temporalcloud_apikey.client[0].token, null)
+  sensitive   = true
+}

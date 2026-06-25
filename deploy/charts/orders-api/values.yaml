@@ -1,0 +1,37 @@
+# orders-api — Temporal client + system of record. Account-bearing values (Cloud
+# endpoint, namespace handle, client API-key Secret) are injected at deploy time
+# by the cluster layer (Terraform → ArgoCD Application valuesObject); the
+# placeholders below keep `helm template` + kubeconform runnable.
+
+ordersApi:
+  # Image in the local kind registry (localhost:5001), built+pushed by `just ci`;
+  # the cluster layer pins the tag to the git SHA (prefers a digest) at apply time.
+  image:
+    repository: localhost:5001/orders-api
+    tag: "latest"
+    digest: ""
+  replicas: 1
+  port: 8000
+  # NodePort exposing orders-api to the host (the still-on-host console's
+  # ORDERS_SERVICE_URL + the E2E curl). kind maps it to a host port.
+  hostNodePort: 30800
+  # OTel collector endpoint. Observability on kind is best-effort (not yet wired);
+  # the SDK exporter tolerates an unreachable endpoint.
+  otelEndpoint: "http://host.docker.internal:4318"
+
+# Temporal Cloud connection — authenticated as the DEDICATED client service
+# account (ADR-0008), whose API key the cluster layer seeds as orders-client-apikey.
+connection:
+  hostPort: "regional-endpoint.example:7233"
+  temporalNamespace: "ziggymart-nonprod.<account-id>"
+  tls: true
+  apiKeySecret: orders-client-apikey
+  apiKeySecretKey: api-key
+
+# orders-db coordinates (the Cluster + credential live in the orders-data chart).
+# Used to build DATABASE_URL and to reference the orders-data-created credential
+# Secret. Must match orders-data's db.{clusterName,owner,database}.
+db:
+  clusterName: orders-db
+  owner: admin
+  database: orders_db

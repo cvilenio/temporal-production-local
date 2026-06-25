@@ -22,3 +22,19 @@ resource "kubernetes_secret" "orders_cloud_apikey" {
     "api-key" = local.worker_api_key
   }
 }
+
+# Dedicated CLIENT API key for orders-api (starts/signals workflows). Separate
+# identity + Secret from the workers (ADR-0008). Seeded only when the cloud layer
+# minted a client key for this namespace. orders-app reads it via the chart's
+# connection.apiKeySecret -> TEMPORAL_API_KEY.
+resource "kubernetes_secret" "orders_client_apikey" {
+  count = local.client_api_key != null ? 1 : 0
+  metadata {
+    name      = var.client_apikey_secret_name
+    namespace = kubernetes_namespace.orders.metadata[0].name
+  }
+  type = "Opaque"
+  data = {
+    "api-key" = local.client_api_key
+  }
+}

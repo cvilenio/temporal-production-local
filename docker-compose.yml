@@ -8,28 +8,33 @@
 #
 #   TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE, TEMPORAL_TLS, TEMPORAL_API_KEY
 #
-# This base is the HOST PLATFORM/VISIBILITY PLANE: app services, console,
-# observability, and the kind cluster observers. The Temporal worker tier is a
-# separate opt-in layer (compose/workers.yml) so the kind paths — where the
-# cluster runs the workers — don't run a duplicate fleet here.
+# This base is the HOST VISIBILITY/CONSOLE PLANE: the console, observability, the
+# external-dependency simulator (mock-api), and the kind cluster observers. Two
+# tiers are SEPARATE opt-in layers so the kind paths don't duplicate what the
+# cluster runs:
+#   - the Temporal worker tier   → compose/workers.yml
+#   - the app tier (orders-db + orders-service + pgweb) → compose/host-apptier.yml
+# On the kind path the cluster runs BOTH (orders-app + orders-workers charts), so
+# the base alone is correct there; the console reaches the in-cluster app tier via
+# the host ports kind maps (host.docker.internal:8002 / :5433 — see kind-config.yaml).
 #
 # Run modes (prefer the `poe` wrappers, which encode these):
 #
-#   Local OSS    : base + compose/workers.yml + compose/oss-server.yml   (poe up)
+#   Local OSS    : base + workers.yml + host-apptier.yml + oss-server.yml (poe up)
 #                  (oss-server.yml adds the Temporal server + its deps)
-#   Compose→Cloud: base + compose/workers.yml                            (poe up-cloud)
+#   Compose→Cloud: base + workers.yml + host-apptier.yml                  (poe up-cloud)
 #                  (no local server; apps + workers connect out to Cloud)
 #   kind + Cloud : base ONLY                                  (poe up-cloud-kind)
-#                  (kind runs the workers; host runs app tier + visibility)
+#                  (kind runs the workers AND the app tier; host runs visibility +
+#                   console + mock-api only)
 #
 # The same env contract carries to kind/Helm (a k8s Secret instead of an
 # env-file) — see docs/RUNMODES.md.
 #
 #   lgtm (grafana/otel-lgtm) — OTel Collector + Prometheus + Tempo + Loki + Grafana
-#   orders-db ──► orders-service ──► orders-workflow-worker / orders-activity-worker
-#              │         └─────────► platform-console
-#   mock-api ──┘ (consumed by workers)
-#   pgweb-orders → orders-db   (dev admin UI)
+#   mock-api      — simulated external dependency ("the internet"), consumed by workers
+#   platform-console — reaches orders-service + orders-db (compose names via the
+#                      host-apptier overlay, or host.docker.internal on the kind path)
 # =============================================================================
 
 services:
@@ -68,31 +73,10 @@ services:
       retries: 24
       start_period: 20s
 
-  # ===========================================================================
-  # APPLICATION — DATA STORE
-  # Postgres for the Ziggymart orders application (separate from any Temporal
-  # cluster DB). Host port 5433.
-  # ===========================================================================
-
-  orders-db:
-    image: postgres:16
-    container_name: orders-db
-    environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: orders_db
-    ports:
-      - "5433:5432"
-    networks:
-      - temporal-network
-    volumes:
-      - orders-db-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin -d orders_db"]
-      interval: 5s
-      timeout: 5s
-      retries: 60
-      start_period: 10s
+  # NOTE: the app data store (orders-db) and the orders REST API (orders-service)
+  # are NOT here — they live in compose/host-apptier.yml, an opt-in layer for the
+  # Compose run modes. On the kind path the cluster runs them (orders-app chart),
+  # and the console reaches them via host.docker.internal. See that file + RUNMODES.
 
   # ===========================================================================
   # APPLICATION — EXTERNAL SERVICE SIMULATOR
@@ -119,49 +103,6 @@ services:
     ports:
       - "8001:8000"
 
-  # ===========================================================================
-  # APPLICATION — ORDERS API SERVICE
-  # FastAPI service exposing the orders REST API; starts/signals Temporal
-  # workflows. Port 8002 → 8000. Temporal backend is selected via env.
-  # ===========================================================================
-
-  orders-service:
-    build:
-      context: .
-      dockerfile: images/python.Dockerfile
-      args:
-        APP_GROUP: orders-api
-        APP_PATH: apps/business/orders-api/python
-        APP_MODULE: main:app
-        APP_PORT: "8000"
-    container_name: orders-service
-    depends_on:
-      orders-db:
-        condition: service_healthy
-      lgtm:
-        condition: service_healthy
-    environment:
-      # Temporal backend — defaults target the local OSS server; override via
-      # --env-file (Cloud) or compose/oss-server.yml (local OSS).
-      - TEMPORAL_ADDRESS=${TEMPORAL_ADDRESS:-temporal:7233}
-      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-ziggymart}
-      - TEMPORAL_TLS=${TEMPORAL_TLS:-false}
-      - TEMPORAL_API_KEY=${TEMPORAL_API_KEY:-}
-      - DATABASE_URL=postgresql+asyncpg://admin:password@orders-db:5432/orders_db
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://lgtm:4317
-      - OTEL_SERVICE_NAME=orders-service
-      - SDK_METRICS_PORT=9000
-    networks:
-      - temporal-network
-    ports:
-      - "8002:8000"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-      start_period: 30s
-
   # NOTE: the Temporal workers (orders-workflow-worker / orders-activity-worker)
   # live in compose/workers.yml, NOT here. They are an opt-in layer so the kind
   # paths (where the cluster runs the workers) don't double up the fleet. See
@@ -183,14 +124,15 @@ services:
         APP_MODULE: app.main:app
         APP_PORT: "8086"
     container_name: platform-console
-    depends_on:
-      orders-db:
-        condition: service_healthy
-      orders-service:
-        condition: service_healthy
+    # No app-tier depends_on here: on the kind path orders-db/orders-service run in
+    # the cluster, not Compose. The host-apptier overlay re-adds the depends_on and
+    # repoints these URLs at the in-compose names for the Compose run modes.
     environment:
-      - DATABASE_URL=postgresql://admin:password@orders-db:5432/orders_db
-      - ORDERS_SERVICE_URL=http://orders-service:8000
+      # Defaults target the KIND path: the app tier runs in-cluster and is reached
+      # via the host ports kind maps (host.docker.internal:8002 / :5433). The
+      # host-apptier overlay overrides both to the in-compose orders-db/orders-service.
+      - DATABASE_URL=postgresql://admin:password@host.docker.internal:5433/orders_db
+      - ORDERS_SERVICE_URL=http://host.docker.internal:8002
       - DOCKER_HOST=unix:///var/run/docker.sock
       - PORT=8086
       - LOG_BUFFER_SIZE=500
@@ -212,12 +154,18 @@ services:
       # (Headlamp shows "unreachable", ArgoCD 502s) — see ADR-0014.
       - HEADLAMP_EMBED_URL=http://localhost:8087
       - ARGOCD_EMBED_URL=http://localhost:8088
+    # Reach the kind-mapped host ports (orders-api/orders-db) on the kind path.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - temporal-network
     ports:
       - "8086:8086"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    # On the kind path the console may start before the in-cluster DB is reachable
+    # (its asyncpg pool connects at boot); retry until the cluster app tier is up.
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8086/healthz').read()"]
       interval: 10s
@@ -248,23 +196,9 @@ services:
     ports:
       - "8085:8000"
 
-  # ===========================================================================
-  # DEV ADMIN UI  (non-critical)
-  # pgweb for the orders DB. The temporal-DB browser lives in oss-server.yml.
-  # ===========================================================================
-
-  pgweb-orders:   # orders-db browser  →  http://localhost:8083
-    image: sosedoff/pgweb
-    container_name: pgweb-orders
-    depends_on:
-      - orders-db
-    environment:
-      - DATABASE_URL=postgres://admin:password@orders-db:5432/orders_db?sslmode=disable
-    networks:
-      - temporal-network
-    ports:
-      - "8083:8081"
-    restart: always
+  # NOTE: pgweb-orders (the orders-db browser) lives in compose/host-apptier.yml
+  # alongside orders-db, since it depends on it. On the kind path, browse the DB
+  # via Headlamp / a port-forward instead.
 
   # ===========================================================================
   # CLUSTER VISIBILITY  (host plane, non-prod — see ADR-0014)
@@ -323,5 +257,5 @@ networks:
     name: temporal-network
 
 volumes:
-  orders-db-data:
+  # orders-db-data lives in compose/host-apptier.yml (with the orders-db service).
   lgtm-data:

@@ -100,8 +100,33 @@ cluster-up: render-deps
     KUBECONFIG_PATH={{kubeconfig}} KIND_CONFIG=deploy/terraform/kind-config.yaml \
     bash deploy/kind/cluster-up.sh
 
+# Release the controller's ownership of the Cloud Worker Deployments before a
+# teardown — the graceful-decommission step. The controller's ManagerIdentity is
+# suffixed with the temporal-system namespace UID (per-cluster ownership, by
+# design — stops a stale cluster clobbering a live one). That UID is regenerated
+# on every fresh kind cluster, so without releasing, the NEXT cluster's controller
+# can't reclaim routing (Current stays pinned to a dead version → workflows sit
+# pending). Unset hands ownership back so the next controller claims cleanly on an
+# empty identity. Best-effort + Cloud-only: skipped silently without cloud creds
+# (e.g. an OSS-backed cluster). See ADR-0004 / docs/runbooks/argocd-stuck-sync.md.
+release-worker-deployments:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    env=".secrets/keys/cloud-nonprod.env"
+    [ -f "$env" ] || { echo "no cloud creds ($env) — skipping Worker Deployment release"; exit 0; }
+    set -a; . "$env"; set +a
+    [ -n "${TEMPORAL_API_KEY:-}" ] || { echo "no TEMPORAL_API_KEY — skipping release"; exit 0; }
+    A=(--address "$TEMPORAL_ADDRESS" --namespace "$TEMPORAL_NAMESPACE" --api-key "$TEMPORAL_API_KEY" --tls --yes)
+    for wd in orders/orders-workflow orders/orders-activity; do
+      echo "releasing ManagerIdentity: $wd"
+      temporal worker deployment manager-identity unset "${A[@]}" --deployment-name "$wd" 2>/dev/null \
+        || echo "  (skip: $wd not found or already released)"
+    done
+
 # Tear down the kind cluster (keeps the registry; KEEP_REGISTRY=false to remove).
-cluster-down:
+# Releases Cloud Worker Deployment ownership first (graceful decommission) so the
+# next cluster's controller can reclaim routing — see release-worker-deployments.
+cluster-down: release-worker-deployments
     CLUSTER_NAME={{cluster_name}} REGISTRY_NAME={{registry_name}} \
     KUBECONFIG_PATH={{kubeconfig}} bash deploy/kind/cluster-down.sh
 
@@ -139,19 +164,36 @@ cluster-start:
 mirror-deps: render-deps
     REGISTRY_PORT={{registry_port}} bash deploy/kind/mirror-deps.sh
 
-# Package the orders-workers chart and push it to the local OCI registry (ArgoCD pulls it from there).
+# Package the orders charts (orders-workers + orders-app) and push them to the
+# local OCI registry (ArgoCD pulls them from there).
 chart-publish:
     #!/usr/bin/env bash
     set -euo pipefail
     tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-    helm package deploy/charts/orders-workers -d "$tmp" >/dev/null
-    helm push "$tmp"/orders-workers-*.tgz oci://localhost:{{registry_port}}/charts --plain-http
-    ver="$(helm show chart deploy/charts/orders-workers | awk '/^version:/{print $2}')"
-    echo "published oci://localhost:{{registry_port}}/charts/orders-workers:${ver}"
+    for chart in orders-workers orders-data orders-api; do
+      helm package "deploy/charts/$chart" -d "$tmp" >/dev/null
+      helm push "$tmp/$chart"-*.tgz oci://localhost:{{registry_port}}/charts --plain-http
+      ver="$(helm show chart "deploy/charts/$chart" | awk '/^version:/{print $2}')"
+      echo "published oci://localhost:{{registry_port}}/charts/$chart:${ver}"
+    done
 
 # kubectl against the kind cluster, e.g. `just k get pods -A`.
 k *args:
     @KUBECONFIG={{kubeconfig}} kubectl {{args}}
+
+# PHYSICALLY reset orders-db: delete the CNPG Cluster + its PVCs; ArgoCD selfHeal
+# re-syncs orders-app and CNPG bootstraps a fresh, empty DB. DESTRUCTIVE — drops
+# all order data. This is the *physical* reset (drop the datastore); for a
+# *logical* reset that only truncates the app tables, use the console's "Reset
+# demo" action or `POST /admin/reset` on orders-api. See docs/RUNMODES.md.
+orders-db-reset:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    read -r -p "Delete orders-db Cluster + PVCs in namespace 'orders'? ALL order data will be lost. Type 'yes': " ans
+    [ "$ans" = "yes" ] || { echo "aborted."; exit 1; }
+    KUBECONFIG={{kubeconfig}} kubectl -n orders delete cluster.postgresql.cnpg.io orders-db --ignore-not-found
+    KUBECONFIG={{kubeconfig}} kubectl -n orders delete pvc -l cnpg.io/cluster=orders-db --ignore-not-found
+    echo "Deleted. ArgoCD will re-sync orders-app; CNPG bootstraps a fresh orders-db."
 
 # Force Headlamp to re-read the kubeconfig now. Headlamp already WATCHES it and
 # auto-loads the cluster within ~10s, so this is only an immediate-refresh shortcut.
@@ -170,7 +212,9 @@ platform-up:
     tag="$(git describe --tags --always --dirty --abbrev=12)"
     wf="$(crane digest localhost:{{registry_port}}/orders-worker-workflow:$tag --insecure)"
     ac="$(crane digest localhost:{{registry_port}}/orders-worker-activity:$tag --insecure)"
+    api="$(crane digest localhost:{{registry_port}}/orders-api:$tag --insecure)"
     export TF_VAR_worker_image_digests="{\"workflow\":\"$wf\",\"activity\":\"$ac\"}"
+    export TF_VAR_orders_api_image_digest="$api"
     terraform -chdir=deploy/terraform/layers/cluster init -input=false
     terraform -chdir=deploy/terraform/layers/cluster apply -auto-approve
     just headlamp-reload 2>/dev/null || true

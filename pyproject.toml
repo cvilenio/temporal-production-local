@@ -90,17 +90,19 @@ render-deps = { cmd = "python compose/scripts/render-deps.py", help = "Render co
 # OMITTED on the kind path (kind runs the workers — see up-cloud-kind). When
 # both are present, workers.yml must precede oss-server.yml (the OSS layer
 # merges `depends_on: temporal` onto the worker services).
-up = { shell = "python compose/scripts/render-oss-bootstrap.py; set -a; . config/local-oss.env; set +a; docker compose -f docker-compose.yml -f compose/workers.yml -f compose/oss-server.yml up --build", help = "Local OSS server + apps + workers" }
-down = { shell = 'docker compose -f docker-compose.yml -f compose/workers.yml -f compose/oss-server.yml down -v --remove-orphans; docker compose -p "${PWD##*/}" -f docker-compose.yml -f compose/workers.yml -f compose/oss-server.yml down -v --remove-orphans || true; docker network rm temporal-network 2>/dev/null || true', help = "Stop the local-OSS stack and drop volumes (also sweeps a stray default-project and the shared temporal-network)" }
+up = { shell = "python compose/scripts/render-oss-bootstrap.py; set -a; . config/local-oss.env; set +a; docker compose -f docker-compose.yml -f compose/host-apptier.yml -f compose/workers.yml -f compose/oss-server.yml up --build", help = "Local OSS server + apps + workers" }
+down = { shell = 'docker compose -f docker-compose.yml -f compose/host-apptier.yml -f compose/workers.yml -f compose/oss-server.yml down -v --remove-orphans; docker compose -p "${PWD##*/}" -f docker-compose.yml -f compose/host-apptier.yml -f compose/workers.yml -f compose/oss-server.yml down -v --remove-orphans || true; docker network rm temporal-network 2>/dev/null || true', help = "Stop the local-OSS stack and drop volumes (also sweeps a stray default-project and the shared temporal-network)" }
 fresh = { sequence = ["down", "up"], help = "Recreate the local-OSS stack" }
 
-up-cloud = { shell = "set -a; . .secrets/keys/cloud-nonprod.env; set +a; docker compose -f docker-compose.yml -f compose/workers.yml up --build", help = "Apps + workers against Temporal Cloud (nonprod), all on the host" }
-up-cloud-prod = { shell = "set -a; . .secrets/keys/cloud-prod.env; set +a; docker compose -f docker-compose.yml -f compose/workers.yml up --build", help = "Apps + workers against Temporal Cloud (prod), all on the host" }
-# Host companion for the kind+Cloud path: app tier + console + cluster observers,
-# but NO worker tier — the kind cluster runs the workers (orders-workers chart).
-# Avoids a second fleet polling the same Cloud task queues. Tear down with down-cloud.
-up-cloud-kind = { shell = "set -a; . .secrets/keys/cloud-nonprod.env; set +a; docker compose -f docker-compose.yml up --build", help = "Host app tier + visibility for the kind+Cloud path (kind owns the workers)" }
-down-cloud = { shell = 'docker compose -f docker-compose.yml -f compose/workers.yml down -v --remove-orphans; docker compose -p "${PWD##*/}" -f docker-compose.yml -f compose/workers.yml down -v --remove-orphans || true; docker network rm temporal-network 2>/dev/null || true', help = "Stop any Cloud-backed host stack (with or without workers) and drop volumes; also sweeps a stray default-project and the shared temporal-network" }
+up-cloud = { shell = "set -a; . .secrets/keys/cloud-nonprod.env; set +a; docker compose -f docker-compose.yml -f compose/host-apptier.yml -f compose/workers.yml up --build", help = "Apps + workers against Temporal Cloud (nonprod), all on the host" }
+up-cloud-prod = { shell = "set -a; . .secrets/keys/cloud-prod.env; set +a; docker compose -f docker-compose.yml -f compose/host-apptier.yml -f compose/workers.yml up --build", help = "Apps + workers against Temporal Cloud (prod), all on the host" }
+# Host companion for the kind+Cloud path: console + cluster observers + mock-api,
+# but NEITHER the worker tier NOR the app tier — the kind cluster runs BOTH (the
+# orders-workers + orders-app charts). Base ONLY: no compose/workers.yml and no
+# compose/host-apptier.yml. The console reaches the in-cluster app tier via the
+# host ports kind maps (host.docker.internal:8002 / :5433). Tear down with down-cloud.
+up-cloud-kind = { shell = "set -a; . .secrets/keys/cloud-nonprod.env; set +a; docker compose -f docker-compose.yml up --build", help = "Host visibility + console + mock-api for the kind+Cloud path (kind owns the workers AND the app tier)" }
+down-cloud = { shell = 'docker compose -f docker-compose.yml -f compose/host-apptier.yml -f compose/workers.yml down -v --remove-orphans; docker compose -p "${PWD##*/}" -f docker-compose.yml -f compose/host-apptier.yml -f compose/workers.yml down -v --remove-orphans || true; docker network rm temporal-network 2>/dev/null || true', help = "Stop any Cloud-backed host stack (with or without workers/app tier) and drop volumes; also sweeps a stray default-project and the shared temporal-network" }
 fresh-cloud = { sequence = ["down-cloud", "up-cloud"], help = "Recreate the Cloud (nonprod) app stack" }
 
 # =============================================================================
@@ -128,8 +130,17 @@ for profile in workflow activity; do
     --build-arg APP_CMD=python \
     -t "$REGISTRY/orders-worker-$profile:$TAG" .
 done
-echo "Built $REGISTRY/orders-worker-{workflow,activity}:$TAG"
-""", help = "Build both worker images, tagged <registry>/orders-worker-<profile>:<git-describe>" }
+# orders-api: the Temporal client (starts/signals workflows) + system of record.
+# Now deployed onto kind alongside the workers, so it needs an image in the local
+# registry too. Same Dockerfile, uvicorn entrypoint (main:app) on port 8000.
+docker build -f images/python.Dockerfile \
+  --build-arg APP_GROUP=orders-api \
+  --build-arg APP_PATH=apps/business/orders-api/python \
+  --build-arg APP_MODULE=main:app \
+  --build-arg APP_CMD=uvicorn \
+  -t "$REGISTRY/orders-api:$TAG" .
+echo "Built $REGISTRY/orders-worker-{workflow,activity}:$TAG and $REGISTRY/orders-api:$TAG"
+""", help = "Build the worker images + orders-api, tagged <registry>/<name>:<git-describe>" }
 
 push-images = { shell = """
 set -e
@@ -138,8 +149,9 @@ TAG="$(git describe --tags --always --dirty --abbrev=12)"
 for profile in workflow activity; do
   docker push "$REGISTRY/orders-worker-$profile:$TAG"
 done
-echo "Pushed $REGISTRY/orders-worker-{workflow,activity}:$TAG"
-""", help = "Push both worker images to the local registry" }
+docker push "$REGISTRY/orders-api:$TAG"
+echo "Pushed $REGISTRY/orders-worker-{workflow,activity}:$TAG and $REGISTRY/orders-api:$TAG"
+""", help = "Push the worker images + orders-api to the local registry" }
 
 image-tag = { shell = "git describe --tags --always --dirty --abbrev=12", help = "Print the image tag (git-describe) for the current tree" }
 
@@ -150,7 +162,8 @@ TAG="$(git describe --tags --always --dirty --abbrev=12)"
 for profile in workflow activity; do
   echo "$profile=$(crane digest "$REGISTRY/orders-worker-$profile:$TAG" --insecure)"
 done
-""", help = "Print pushed image digests (profile=sha256:...) for deploy-by-digest" }
+echo "orders-api=$(crane digest "$REGISTRY/orders-api:$TAG" --insecure)"
+""", help = "Print pushed image digests (name=sha256:...) for deploy-by-digest" }
 
 ci = { sequence = ["lint", "test", "build-images", "push-images"], help = "Local CI gate: lint + test + build + push worker images" }
 

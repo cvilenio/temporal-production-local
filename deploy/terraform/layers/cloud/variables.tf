@@ -28,5 +28,11 @@ variable "cloud_overlay" {
     namespace_permission = optional(string, "write")
     account_access       = optional(string, "read")
     regions              = optional(list(string), ["aws-us-east-1"])
+    # Optional dedicated CLIENT service account (e.g. orders-api). Omit to skip.
+    client_service_account_name = optional(string)
+    client_api_key_display_name = optional(string)
+    create_client_api_key       = optional(bool, true)
+    client_namespace_permission = optional(string, "write")
+    client_account_access       = optional(string, "read")
   }))
 }
