@@ -1,0 +1,49 @@
+# ClickHouse logs datasource for Grafana — the "Observability 2.0 / wide events"
+# option: Grafana stays the viz pane, ClickHouse is the schema-on-read log store
+# (full fidelity, no field mapping), instead of Loki. Provisioned by the
+# clickstack overlay only (it points at the clickstack container), so it appears
+# alongside the existing Loki datasource for an in-Grafana Loki-vs-ClickHouse
+# A/B. otelEnabled=true → the plugin reads the OTel columns (Timestamp, Body,
+# SeverityText, TraceId, LogAttributes, ResourceAttributes) with zero mapping —
+# Body is already the message (filelog `move`), so the log view is clean. SQL,
+# not LogQL. See ADR-0019. Reachable lgtm→clickstack over temporal-network.
+apiVersion: 1
+datasources:
+  - name: ClickHouse (logs)
+    type: grafana-clickhouse-datasource
+    uid: clickhouse-logs
+    access: proxy
+    editable: true
+    jsonData:
+      host: clickstack
+      port: 8123
+      protocol: http
+      username: api
+      logs:
+        defaultDatabase: default
+        defaultTable: otel_logs
+        otelEnabled: true
+        # Do NOT set otelVersion. The plugin's OTel "latest"/1.2.9 schema
+        # hardcodes the filter-time column to `TimestampTime` (the newer exporter
+        # schema), which HyperDX's bundled otel_logs lacks (only `Timestamp`
+        # DateTime64) → "Unknown identifier TimestampTime". With no version, the
+        # explicit columns below are used. Also fully pins the config (no banner).
+        timeColumn: Timestamp
+        filterTimeColumn: Timestamp
+        levelColumn: SeverityText
+        messageColumn: Body
+        # THE FIX for "only body, no context fields": the default logs query
+        # selects only time/body/level. Pull the OTel attribute maps in as
+        # context columns so order_id/trace_id/step/workflow_id/etc. render as
+        # expandable log fields (the plugin flattens these Map columns to fields).
+        selectContextColumns: true
+        contextColumns:
+          - LogAttributes
+          - ResourceAttributes
+      # Ready for when tracing lands (traces shipped to ClickStack); harmless until then.
+      traces:
+        defaultDatabase: default
+        defaultTable: otel_traces
+        otelEnabled: true
+    secureJsonData:
+      password: api

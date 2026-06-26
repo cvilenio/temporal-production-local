@@ -4,7 +4,7 @@
   "title": "obslog structured log record",
   "description": "Language-neutral contract for ONE structured log line (ADR-0018). This file — not any single language's code — is the shared core. The OTel logs data model is the wire format; each language ships a thin, idiomatic emitter (Python: structlog/obslog; Go: slog/zap; TS: pino) that conforms to this shape. Well-known keys are pinned here; per-call fields are free (additionalProperties).",
   "type": "object",
-  "required": ["timestamp", "level", "logger", "event", "service.name"],
+  "required": ["timestamp", "level", "logger", "message", "service.name"],
   "properties": {
     "timestamp": {
       "type": "string",
@@ -16,7 +16,7 @@
       "enum": ["debug", "info", "warning", "error", "critical"]
     },
     "logger": { "type": "string", "description": "Emitting logger name." },
-    "event": { "type": "string", "description": "The human-readable message." },
+    "message": { "type": "string", "description": "The human-readable message. OTel maps it to the LogRecord Body; agents recognize `message` as the display line by convention (Cloud Logging / Datadog / OTel filelog). Was `event` (structlog default) pre-0017." },
 
     "service.name": { "type": "string", "description": "OTel resource: the service." },
     "service.namespace": { "type": "string", "description": "OTel resource: the domain, e.g. ziggymart." },

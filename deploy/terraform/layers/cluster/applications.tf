@@ -182,6 +182,18 @@ locals {
         repoURL        = var.oci_charts_repo
         chart          = "alloy"
         targetRevision = var.alloy_chart_version
+        # ClickStack dual-ship overlay (opt-in bake-off vs Loki). Off by default
+        # → chart ships to Loki only. When enabled, the agent also fans logs to
+        # the host-side ClickStack all-in-one over OTLP. Not account-bearing.
+        helm = {
+          valuesObject = {
+            clickstack = {
+              enabled      = var.alloy_clickstack_enabled
+              otlpUrl      = var.alloy_clickstack_otlp_url
+              ingestionKey = var.alloy_clickstack_ingestion_key
+            }
+          }
+        }
       }
       destination = {
         server    = "https://kubernetes.default.svc"

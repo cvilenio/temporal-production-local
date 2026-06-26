@@ -32,7 +32,7 @@ def test_record_has_required_fields_and_bound_context(capsys):
     assert rec[schema.SERVICE_NAMESPACE] == "ziggymart"
     # Core + bound business context + per-call field all present.
     assert rec[schema.LEVEL] == "info"
-    assert rec[schema.EVENT] == "hello"
+    assert rec[schema.MESSAGE] == "hello"
     assert rec["order_id"] == "O-1"
     assert rec["trace_id"] == "T-1"
     assert rec["qty"] == 2

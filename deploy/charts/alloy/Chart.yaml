@@ -8,5 +8,21 @@ description: >-
   the same shape as a GKE fluentbit DaemonSet → Cloud Logging — instead of apps
   pushing directly. The agent (not the app) holds the backend endpoint. ADR-0018.
 type: application
-version: 0.1.0
-appVersion: "1.5.1"
+# 0.2.0: optional ClickStack dual-ship branch (opt-in bake-off vs Loki).
+# 0.2.1: fix otelcol.receiver.loki to use an output{} block.
+# 0.2.2: scope clickstack dual-ship to one namespace + size the OTLP queue.
+# 0.2.3: parse obslog JSON in the clickstack branch — top-level fields → OTel
+#        attributes, body set to `event` (foreign lines keep their raw line).
+# 0.2.4: escape the Alloy template's {{ }} from Helm so body=event actually renders.
+# 0.2.5: parsed fields via stage.labels (reach OTel LogAttributes; structured
+#        metadata did not) so order_id/trace_id/etc are searchable in HyperDX.
+# 0.2.6: drop the per-field extraction — ship raw JSON, let HyperDX auto-flatten
+#        (fidelity over a brittle map); `event` as message is a source display setting.
+# 0.3.0: OTel-native collection — filelog receiver builds the LogRecord
+#        (message->Body, level->severity, trace_id->TraceId) + obslog event->message.
+# 0.3.1: bump Alloy to v1.17.0 (filelog) + --stability.level=public-preview.
+# 0.3.2: Loki path → OTel-native too — line=message + fields as structured
+#        metadata (clean Drilldown + trace_id lights up the Loki→Tempo link).
+# 0.3.3: filelog include_file_path=true (container op needs the path).
+version: 0.3.3
+appVersion: "1.17.0"
