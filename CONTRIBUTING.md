@@ -75,10 +75,22 @@ update stuff                # not imperative, not specific
 
 Wrap at ~72 columns. Explain **why**, not what — the diff shows what.
 
+### Workflow — PR as the history artifact
+
+This repo is solo-maintained, so PRs are not a gate — they are the **record of why** a
+change happened. Land changes through a PR by default: branch off `main`, push, open a PR
+with an informative body (summary, rationale, key changes, how it was verified), then
+merge it. Push straight to `main` only for trivial throwaway fixes.
+
+Approval is not part of the flow — GitHub does not allow approving your own PR, and there
+is no second reviewer. **Merging is the operative step.** (Agents asked to "commit and
+push" follow this by default — see [`CLAUDE.md`](CLAUDE.md) — unless told otherwise.)
+
 ### Merging
 
-PRs are **squash-merged**. The PR title becomes the commit subject and must follow the
-rules above; GitHub appends the PR number (e.g. `(#42)`) automatically.
+PRs are **squash-merged** (`gh pr merge <n> --squash --delete-branch`). The PR title
+becomes the commit subject and must follow the rules above; GitHub appends the PR number
+(e.g. `(#42)`) automatically. Sync local `main` afterward (`git pull --ff-only`).
 
 ### Changelog
 

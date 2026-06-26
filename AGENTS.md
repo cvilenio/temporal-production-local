@@ -53,6 +53,31 @@ Examples — good: `Add deterministic order ID derived from idempotency key`,
 `orders: Narrow retry policy on payment activity`, `ci: Drop macos-intel from CI`.
 Bad: `feat: add order id`, `Added order id.`, `update stuff`.
 
+# Commit & push workflow — default to a PR (MUST)
+
+When the user asks to **commit and push**, the default flow is a pull request — the PR is
+the history-recording artifact for this repo (solo-maintained; PRs are the changelog of
+*why*, not just *what*). Do NOT push straight to `main`.
+
+Default flow (no extra confirmation needed — this is the standing instruction):
+
+1. Branch off `main` with a short descriptive name (e.g. `clickhouse-log-store-hardening`).
+2. Commit using the subject rules above (CONTRIBUTING.md). One focused commit is fine.
+3. Push the branch and open a PR with `gh`, with an **informative body**: summary of the
+   change, *why*, the key changes, and how it was verified. This body is the artifact —
+   make it worth reading later.
+4. **Squash-merge** to `main` (`gh pr merge <n> --squash --delete-branch`) — matches the
+   repo's documented Merging convention — then sync local `main` (`git checkout main &&
+   git pull --ff-only`).
+
+Notes:
+- **Self-approval is impossible on GitHub** (you cannot approve your own PR). On this
+  solo repo no approval is required; **merging is the operative step** — do not block on
+  a review.
+- **Skip the PR only when the user explicitly says so** for that request (e.g. "commit
+  and push directly, no PR"). Then commit + push as they specify.
+- All commit/PR titles still obey the Commit Convention above.
+
 # Live kind testing — bring the platform-console up FIRST (MUST)
 
 The `platform-console` (http://localhost:8086) is the operator's single live window onto a
