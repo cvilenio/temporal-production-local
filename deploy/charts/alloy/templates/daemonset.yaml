@@ -22,8 +22,10 @@ spec:
       labels:
         app.kubernetes.io/name: alloy
       annotations:
-        # Roll pods when the pipeline config changes.
-        checksum/config: {{ .Files.Get "templates/configmap.yaml" | sha256sum }}
+        # Roll pods when the pipeline config changes. Include the clickstack
+        # values so a flag/endpoint/key change (values-only, raw template
+        # unchanged) still rolls the agents.
+        checksum/config: {{ printf "%s%v" (.Files.Get "templates/configmap.yaml") .Values.clickstack | sha256sum }}
     spec:
       serviceAccountName: alloy
       # Run on every node, including the control-plane (it hosts pods too on kind).
@@ -40,9 +42,22 @@ spec:
             - /etc/alloy/config.alloy
             - --storage.path=/var/lib/alloy/data
             - --server.http.listen-addr=0.0.0.0:12345
+            {{- if .Values.clickstack.enabled }}
+            # otelcol.receiver.filelog (ClickStack OTel-native collection) is a
+            # public-preview component; opt in. Only needed when the branch is on.
+            - --stability.level=public-preview
+            {{- end }}
           env:
             - name: LOKI_PUSH_URL
               value: {{ .Values.lokiPushUrl | quote }}
+            {{- if .Values.clickstack.enabled }}
+            # ClickStack dual-ship (opt-in bake-off). The agent holds the OTLP
+            # endpoint + ingestion key; the apps never do (same as Loki above).
+            - name: CLICKSTACK_OTLP_URL
+              value: {{ .Values.clickstack.otlpUrl | quote }}
+            - name: CLICKSTACK_INGESTION_KEY
+              value: {{ .Values.clickstack.ingestionKey | quote }}
+            {{- end }}
           ports:
             - name: http
               containerPort: 12345

@@ -1,0 +1,116 @@
+# =============================================================================
+# ClickStack overlay — Loki-vs-ClickStack log-UX bake-off (ADDITIVE, OPT-IN)
+# =============================================================================
+#
+# Checkpoint 0016 follow-up spike. Stands up ClickStack (ClickHouse + bundled
+# OTel collector + HyperDX) ALONGSIDE the committed Loki path so the same pod
+# logs can be compared in two UIs (Grafana Logs Drilldown vs HyperDX). This is a
+# disposable workbench overlay: it touches NOTHING in the base stack and is
+# removed cleanly with:
+#
+#   docker compose -f docker-compose.yml -f compose/clickstack.yml down -v
+#
+# Bring up (overlay only — does not disturb the running base services):
+#
+#   docker compose -f docker-compose.yml -f compose/clickstack.yml up -d clickstack
+#
+# Single all-in-one OSS image: ClickHouse + OTel collector + HyperDX + its small
+# metadata store in one container. The kind-side Grafana Alloy DaemonSet
+# dual-ships pod stdout here over OTLP (gated behind the alloy chart's
+# clickstack.enabled flag) while keeping its existing Loki write intact.
+#
+# Ports are chosen to avoid every binding the base stack already publishes
+# (3000 Grafana, 3100 Loki, 4317/4318 lgtm OTLP, 8001/8083/8085/8086/8087/8088).
+#
+#   HyperDX UI         http://localhost:8080   (the log-explorer under test)
+#   OTLP gRPC          host 4319 → container 4317
+#   OTLP HTTP          host 4320 → container 4318   (Alloy ships here)
+#   ClickHouse HTTP    http://localhost:8123   (direct SQL: /ping, /?query=...)
+#   ClickHouse native  localhost:9000          (direct SQL clients)
+#
+# Ingestion auth: HyperDX issues an ingestion API key (UI → Team Settings →
+# API Keys) after first-boot user creation. The Alloy OTLP exporter must send it
+# as an `authorization` header — wired via the alloy chart's clickstack.ingestionKey.
+# =============================================================================
+
+services:
+
+  # Overlay extension of the base lgtm (Grafana) service — only when clickstack
+  # is up. Installs the ClickHouse datasource plugin and provisions it (see
+  # compose/observability/grafana/provisioning/datasources/clickhouse.yaml), so
+  # Grafana can read logs straight from ClickHouse — the "Grafana viz over
+  # ClickHouse store, no Loki" option (ADR-0019). Env is LIST form to merge with
+  # the base lgtm's list. Recreate lgtm to apply: the plugin installs at boot.
+  lgtm:
+    environment:
+      - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
+    volumes:
+      - ./compose/observability/grafana/provisioning/datasources/clickhouse.yaml:/otel-lgtm/grafana/conf/provisioning/datasources/clickhouse.yaml:ro
+
+  clickstack:
+    image: docker.hyperdx.io/hyperdx/hyperdx-all-in-one:2
+    container_name: clickstack
+    networks:
+      - temporal-network
+    ports:
+      - "8080:8080"   # HyperDX UI
+      - "4319:4317"   # OTLP gRPC  (host 4319 avoids lgtm's 4317)
+      - "4320:4318"   # OTLP HTTP  (Alloy dual-ship target)
+      - "8123:8123"   # ClickHouse HTTP — direct SQL
+      - "9000:9000"   # ClickHouse native — direct SQL
+    # Declarative HyperDX provisioning (config-as-code). On a FRESH boot (empty
+    # mongo, after `down -v` + first team register) HyperDX's setupDefaults seeds
+    # the ClickHouse connection + the four sources from these env JSON blobs.
+    # The Logs source uses PLAIN defaults (bodyExpression = `Body`) — no per-
+    # backend display trick anymore: as of checkpoint 0017 the agent (Alloy
+    # filelog receiver) builds an OTel-native record where Body already IS the
+    # `message` field and `LogAttributes` is the auto-flattened facet set, so the
+    # convention lives at source+agent, not here. Cross-source links use NAMES
+    # (setupDefaults keys its created-source map by name, re-links ids on boot).
+    # Regenerate by dumping GET :8080/api/sources + /api/connections, stripping ids.
+    # Fully declarative: with IS_LOCAL_APP_MODE + a fixed INGESTION_API_KEY (above)
+    # there is NO first-boot step — no login, no team register, no key to copy.
+    # `down -v` + `up` returns fully configured; the matching key lives in the
+    # alloy chart (deploy/charts/alloy values / TF var default).
+    # The image's /etc/local/entry.sh hardcodes `export IS_LOCAL_APP_MODE=
+    # "REQUIRED_AUTH"`, which would clobber the env below. Strip that one line at
+    # startup so our `environment:` value wins; then exec the real entrypoint.
+    # (Deleting the line — not sed-ing the emoji — keeps this command ASCII-safe.)
+    # Idempotent: re-running finds no line to delete. This is what disables the
+    # HyperDX login wall.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - "sed -i '/export IS_LOCAL_APP_MODE=/d' /etc/local/entry.sh && exec sh /etc/local/entry.sh"
+    environment:
+      # Local single-container workbench mode: skips the HyperDX login wall
+      # entirely (auth middleware short-circuits to a static "Local App Team")
+      # and runs setupTeamDefaults at boot to seed the sources below — so a
+      # `down -v` + `up` comes back fully configured with NO register/login step.
+      # The deliberately-scary value is the image's required opt-in token; it only
+      # takes effect because the entrypoint override above removes the hardcoded
+      # REQUIRED_AUTH so this container env propagates to the node processes.
+      IS_LOCAL_APP_MODE: "DANGEROUSLY_is_local_app_mode💀"
+      # Fixed OTLP ingestion key the bundled collector accepts in local mode
+      # (vs a random per-boot team key). NOT secret — a local workbench constant,
+      # committed on purpose so Alloy can hold the SAME value declaratively and
+      # never needs re-wiring after a volume wipe. Must match the alloy chart's
+      # clickstack.ingestionKey (deploy/charts/alloy values / TF var default).
+      INGESTION_API_KEY: "ziggymart-local-clickstack-ingest-key"
+      DEFAULT_CONNECTIONS: |-
+        [{"name": "Local ClickHouse", "host": "http://localhost:8123", "username": "default", "password": ""}]
+      DEFAULT_SOURCES: |-
+        [{"from": {"databaseName": "default", "tableName": "otel_logs"}, "defaultTableSelectExpression": "Timestamp,ServiceName,SeverityText,Body", "serviceNameExpression": "ServiceName", "severityTextExpression": "SeverityText", "bodyExpression": "Body", "eventAttributesExpression": "LogAttributes", "resourceAttributesExpression": "ResourceAttributes", "displayedTimestampValueExpression": "Timestamp", "traceIdExpression": "TraceId", "spanIdExpression": "SpanId", "implicitColumnExpression": "Body", "highlightedTraceAttributeExpressions": [], "highlightedRowAttributeExpressions": [], "materializedViews": [], "metadataMaterializedViews": {"keyRollupTable": "otel_logs_key_rollup_15m", "kvRollupTable": "otel_logs_kv_rollup_15m", "granularity": "15 minute"}, "connection": "Local ClickHouse", "name": "Logs", "disabled": false, "timestampValueExpression": "Timestamp", "kind": "log", "querySettings": [], "metricSourceId": "Metrics", "traceSourceId": "Traces"}, {"from": {"databaseName": "default", "tableName": "otel_traces"}, "defaultTableSelectExpression": "Timestamp,ServiceName,StatusCode,round(Duration/1e6),SpanName", "durationExpression": "Duration", "durationPrecision": 9, "traceIdExpression": "TraceId", "spanIdExpression": "SpanId", "parentSpanIdExpression": "ParentSpanId", "spanNameExpression": "SpanName", "spanKindExpression": "SpanKind", "statusCodeExpression": "StatusCode", "statusMessageExpression": "StatusMessage", "serviceNameExpression": "ServiceName", "resourceAttributesExpression": "ResourceAttributes", "eventAttributesExpression": "SpanAttributes", "implicitColumnExpression": "SpanName", "displayedTimestampValueExpression": "Timestamp", "highlightedTraceAttributeExpressions": [], "highlightedRowAttributeExpressions": [], "materializedViews": [], "metadataMaterializedViews": {"keyRollupTable": "otel_traces_key_rollup_15m", "kvRollupTable": "otel_traces_kv_rollup_15m", "granularity": "15 minute"}, "connection": "Local ClickHouse", "name": "Traces", "disabled": false, "timestampValueExpression": "Timestamp", "kind": "trace", "querySettings": [], "logSourceId": "Logs", "metricSourceId": "Metrics", "sessionSourceId": "Sessions"}, {"from": {"databaseName": "default", "tableName": ""}, "metricTables": {"gauge": "otel_metrics_gauge", "histogram": "otel_metrics_histogram", "sum": "otel_metrics_sum", "summary": "otel_metrics_summary"}, "resourceAttributesExpression": "ResourceAttributes", "connection": "Local ClickHouse", "name": "Metrics", "disabled": false, "timestampValueExpression": "TimeUnix", "kind": "metric", "querySettings": [], "logSourceId": "Logs"}, {"from": {"databaseName": "default", "tableName": "hyperdx_sessions"}, "resourceAttributesExpression": "ResourceAttributes", "connection": "Local ClickHouse", "name": "Sessions", "disabled": false, "timestampValueExpression": "TimestampTime", "kind": "session", "querySettings": [], "traceSourceId": "Traces"}]
+    volumes:
+      # Persist ClickHouse data + HyperDX metadata across restarts. Wiped by
+      # `down -v` — this is a throwaway eval store, not a durable tier.
+      - clickstack-data:/data
+    restart: unless-stopped
+
+networks:
+  temporal-network:
+    external: true
+    name: temporal-network
+
+volumes:
+  clickstack-data:

@@ -30,8 +30,12 @@ RESOURCE_FIELDS = (
 TIMESTAMP = "timestamp"
 LEVEL = "level"
 LOGGER = "logger"
-EVENT = "event"
-CORE_FIELDS = (TIMESTAMP, LEVEL, LOGGER, EVENT)
+# The human-readable message. Named `message` (not structlog's default `event`)
+# to opt into the cross-tool convention — OTel maps it to the LogRecord Body,
+# and agents (Cloud Logging, Datadog, our Alloy filelog receiver) recognize
+# `message` as the display line by convention. ADR-0018 / checkpoint 0017.
+MESSAGE = "message"
+CORE_FIELDS = (TIMESTAMP, LEVEL, LOGGER, MESSAGE)
 
 # ── Context (bound) ─────────────────────────────────────────────────────────
 TEMPORAL_CONTEXT_FIELDS = (
@@ -46,7 +50,7 @@ TEMPORAL_CONTEXT_FIELDS = (
 BUSINESS_CONTEXT_FIELDS = ("order_id", "trace_id", "step", "request_id")
 
 # Minimum every conformant record must carry.
-REQUIRED_FIELDS = (TIMESTAMP, LEVEL, LOGGER, EVENT, SERVICE_NAME)
+REQUIRED_FIELDS = (TIMESTAMP, LEVEL, LOGGER, MESSAGE, SERVICE_NAME)
 
 # Location of the shared, language-neutral contract (sibling to python/).
 SCHEMA_FILE = Path(__file__).resolve().parents[2] / "schema" / "log-schema.json"

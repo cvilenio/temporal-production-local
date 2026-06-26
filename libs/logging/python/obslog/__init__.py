@@ -14,7 +14,7 @@ processor pipeline into the **same JSON schema** and land on:
 
 The schema (see ADR-0018):
   resource : service.name, service.namespace, service.instance.id, service.version
-  core     : timestamp (ISO-8601 UTC), level, logger, event
+  core     : timestamp (ISO-8601 UTC), level, logger, message
   context  : bound key/values — Temporal (workflow_id, run_id, …) + business
              (order_id, trace_id, step). Concurrency-safe via contextvars.
 
@@ -84,8 +84,17 @@ def _common_processors() -> list:
 
 
 def _build_formatter(fmt: str) -> structlog.stdlib.ProcessorFormatter:
+    # Rename structlog's default `event` key to `message` (schema.MESSAGE) — the
+    # cross-tool convention OTel/agents map to the log Body. Runs last, right
+    # before the renderer, so it applies to both structlog-native and foreign
+    # (workflow.logger / activity.logger) records. ADR-0018 / checkpoint 0017.
+    rename_message = structlog.processors.EventRenamer(schema.MESSAGE)
     if fmt == "console":
-        render = [safe_serialize, structlog.dev.ConsoleRenderer()]
+        render = [
+            safe_serialize,
+            rename_message,
+            structlog.dev.ConsoleRenderer(event_key=schema.MESSAGE),
+        ]
     else:
         render = [
             # Structured, JSON-safe traceback for any exc_info=True call.
@@ -94,6 +103,7 @@ def _build_formatter(fmt: str) -> structlog.stdlib.ProcessorFormatter:
                 structlog.tracebacks.ExceptionDictTransformer(show_locals=False)
             ),
             safe_serialize,
+            rename_message,
             structlog.processors.JSONRenderer(default=json_fallback),
         ]
     return structlog.stdlib.ProcessorFormatter(

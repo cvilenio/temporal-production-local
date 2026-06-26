@@ -4,7 +4,10 @@ namespace: observability
 
 image:
   repository: grafana/alloy
-  tag: v1.5.1
+  # v1.17.0: includes otelcol.receiver.filelog (public-preview) for the
+  # OTel-native ClickStack collection (checkpoint 0017). Run with
+  # --stability.level=public-preview (daemonset args).
+  tag: v1.17.0
 
 # Where the agent ships collected logs. The backend (lgtm) runs on the HOST, so
 # kind pods reach it via the cluster's host gateway (host.docker.internal). This
@@ -19,3 +22,23 @@ resources:
     memory: 128Mi
   limits:
     memory: 256Mi
+
+# ClickStack dual-ship (opt-in bake-off vs Loki — checkpoint 0016 follow-up).
+# When enabled, Alloy fans the SAME tailed pod lines to a second branch that
+# bridges them into OTLP and ships to the host-side ClickStack all-in-one
+# (ClickHouse + HyperDX) ALONGSIDE Loki. Default off → committed Loki path is
+# the only output and this is a pure no-op. The agent holds the endpoint + key.
+clickstack:
+  enabled: false
+  # Namespace the dual-ship branch is scoped to. Loki takes the whole cluster;
+  # the OTLP path to ClickStack is scoped to this one so its sending queue isn't
+  # firehosed (and the two inputs match the Loki bake-off query). The bake-off
+  # subject is the orders app.
+  scopeNamespace: "orders"
+  # Host-side ClickStack OTLP/HTTP listener (compose/clickstack.yml maps host
+  # 4320 → container 4318). Base URL only — the exporter appends /v1/logs.
+  otlpUrl: "http://host.docker.internal:4320"
+  # HyperDX ingestion API key (Team Settings → API Keys). ClickStack enforces
+  # collector auth, so this rides as the `authorization` header. NOT account-
+  # bearing (local workbench key); the real value is injected via terraform.
+  ingestionKey: ""

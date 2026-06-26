@@ -69,19 +69,63 @@ data:
       // Containerd (kind's runtime) wraps each stdout line in the CRI format
       // "<ts> <stream> <flags> <message>"; unwrap to the raw JSON our apps emit.
       stage.cri {}
-      // Parse the app's structured JSON so level/logger/trace_id are queryable.
+      // Parse the obslog record so its fields are addressable.
       stage.json {
         expressions = {
-          level    = "level",
-          logger   = "logger",
-          trace_id = "trace_id",
+          message       = "message",
+          level         = "level",
+          logger        = "logger",
+          trace_id      = "trace_id",
+          order_id      = "order_id",
+          step          = "step",
+          request_id    = "request_id",
+          workflow_id   = "workflow_id",
+          run_id        = "run_id",
+          workflow_type = "workflow_type",
+          activity_id   = "activity_id",
+          activity_type = "activity_type",
+          attempt       = "attempt",
+          task_queue    = "task_queue",
+          exception     = "exception",
         }
       }
-      // Promote level to a label for fast filtering; keep cardinality low (no ids).
+      // level stays a low-cardinality LABEL — cheap stream selector for the
+      // volume-by-level dashboard panel.
       stage.labels {
+        values = { level = "" }
+      }
+      // Everything else rides as STRUCTURED METADATA (Loki 3): high-cardinality-
+      // safe (no stream explosion), queryable, and rendered as clean facets in
+      // Logs Drilldown instead of being buried in the line. trace_id here also
+      // lights up lgtm's pre-provisioned Loki→Tempo derived field for one-click
+      // log→trace once tracing is enabled. ADR-0018 / checkpoint 0017.
+      stage.structured_metadata {
         values = {
-          level = "",
+          trace_id      = "",
+          order_id      = "",
+          step          = "",
+          request_id    = "",
+          workflow_id   = "",
+          run_id        = "",
+          workflow_type = "",
+          activity_id   = "",
+          activity_type = "",
+          attempt       = "",
+          task_queue    = "",
+          logger        = "",
+          exception     = "",
         }
+      }
+      // Make the stored line the human `message`, falling back to the raw line
+      // for foreign/non-JSON logs. This de-noises the Drilldown/Explore preview —
+      // the OTel-native message-as-body convention applied to the Loki path too.
+      // (Helm raw-string wraps the Alloy template braces so Helm leaves them be.)
+      stage.template {
+        source   = "_msg"
+        template = {{ `"{{ if .message }}{{ .message }}{{ else }}{{ .Entry }}{{ end }}"` }}
+      }
+      stage.output {
+        source = "_msg"
       }
       forward_to = [loki.write.backend.receiver]
     }
@@ -93,3 +137,69 @@ data:
         url = env("LOKI_PUSH_URL")
       }
     }
+    {{- if .Values.clickstack.enabled }}
+
+    // === ClickStack dual-ship: OTel-native node-agent collection ===========
+    // Tails the SAME pod stdout files as the Loki path, but builds a REAL OTel
+    // LogRecord with the filelog receiver instead of bridging from Loki — so the
+    // message/attributes split is produced here, by convention, exactly like a
+    // Cloud Logging / Datadog agent. This replaces the per-backend HyperDX
+    // bodyExpression hack (checkpoint 0017). Disappears when the flag is off.
+    //
+    // Operator pipeline (stanza):
+    //   container       — unwrap the CRI/containerd envelope to the raw app JSON
+    //                     AND add k8s.{namespace,pod,container} resource metadata
+    //                     from the /var/log/pods/<ns>_<pod>_<uid>/... file path.
+    //   json_parser     — lift the obslog JSON into typed attributes.
+    //   move            — set Body = the `message` field (the source convention).
+    //   severity_parser — map `level` → OTel SeverityText/Number.
+    //   trace_parser    — lift `trace_id` → the record TraceId (log↔trace link;
+    //                     our trace_id is a 32-hex id = a valid OTel trace id).
+    // on_error=send_quiet + the move `if` guard keep foreign/non-JSON lines
+    // (e.g. uvicorn access logs) flowing with Body = their raw line.
+    // Scoped to the app namespace via the file-path glob (replaces stage.match);
+    // start_at=end ships only new lines, so an agent restart doesn't re-flood.
+    otelcol.receiver.filelog "clickstack" {
+      include  = ["/var/log/pods/{{ .Values.clickstack.scopeNamespace }}_*/*/*.log"]
+      start_at = "end"
+      // The `container` operator's add_metadata_from_filepath needs the file path
+      // on the record — surface it (otherwise it errors per-entry).
+      include_file_path = true
+
+      operators = [
+        { type = "container" },
+        { type = "json_parser", parse_from = "body", parse_to = "attributes", on_error = "send_quiet" },
+        { type = "move", from = "attributes.message", to = "body", if = "attributes.message != nil" },
+        { type = "severity_parser", parse_from = "attributes.level", on_error = "send_quiet" },
+        { type = "trace_parser", trace_id = { parse_from = "attributes.trace_id" }, on_error = "send_quiet" },
+      ]
+
+      output {
+        logs = [otelcol.processor.batch.clickstack.input]
+      }
+    }
+
+    otelcol.processor.batch "clickstack" {
+      output {
+        logs = [otelcol.exporter.otlphttp.clickstack.input]
+      }
+    }
+
+    // ClickStack enforces collector auth — the ingestion API key (HyperDX team
+    // settings) rides as the `authorization` header. Endpoint is the base URL;
+    // the exporter appends /v1/logs.
+    otelcol.exporter.otlphttp "clickstack" {
+      client {
+        endpoint = env("CLICKSTACK_OTLP_URL")
+        headers  = {
+          "authorization" = env("CLICKSTACK_INGESTION_KEY"),
+        }
+      }
+      // Headroom for the order-burst + restart replay so the scoped stream is
+      // buffered, not dropped, while ClickHouse commits.
+      sending_queue {
+        queue_size    = 10000
+        num_consumers = 10
+      }
+    }
+    {{- end }}
