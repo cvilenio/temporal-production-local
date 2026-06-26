@@ -22,10 +22,10 @@ spec:
       labels:
         app.kubernetes.io/name: alloy
       annotations:
-        # Roll pods when the pipeline config changes. Include the clickstack
-        # values so a flag/endpoint/key change (values-only, raw template
-        # unchanged) still rolls the agents.
-        checksum/config: {{ printf "%s%v" (.Files.Get "templates/configmap.yaml") .Values.clickstack | sha256sum }}
+        # Roll pods when the pipeline config changes. Include the clickhouse
+        # values so an endpoint/scope change (values-only, raw template unchanged)
+        # still rolls the agents.
+        checksum/config: {{ printf "%s%v" (.Files.Get "templates/configmap.yaml") .Values.clickhouse | sha256sum }}
     spec:
       serviceAccountName: alloy
       # Run on every node, including the control-plane (it hosts pods too on kind).
@@ -42,22 +42,13 @@ spec:
             - /etc/alloy/config.alloy
             - --storage.path=/var/lib/alloy/data
             - --server.http.listen-addr=0.0.0.0:12345
-            {{- if .Values.clickstack.enabled }}
-            # otelcol.receiver.filelog (ClickStack OTel-native collection) is a
-            # public-preview component; opt in. Only needed when the branch is on.
+            # otelcol.receiver.filelog is a public-preview component — opt in.
             - --stability.level=public-preview
-            {{- end }}
           env:
-            - name: LOKI_PUSH_URL
-              value: {{ .Values.lokiPushUrl | quote }}
-            {{- if .Values.clickstack.enabled }}
-            # ClickStack dual-ship (opt-in bake-off). The agent holds the OTLP
-            # endpoint + ingestion key; the apps never do (same as Loki above).
-            - name: CLICKSTACK_OTLP_URL
-              value: {{ .Values.clickstack.otlpUrl | quote }}
-            - name: CLICKSTACK_INGESTION_KEY
-              value: {{ .Values.clickstack.ingestionKey | quote }}
-            {{- end }}
+            # The agent holds the OTLP endpoint; the apps never do. Ships to the
+            # host-side OTel Collector → ClickHouse (ADR-0020).
+            - name: CLICKHOUSE_OTLP_URL
+              value: {{ .Values.clickhouse.otlpUrl | quote }}
           ports:
             - name: http
               containerPort: 12345

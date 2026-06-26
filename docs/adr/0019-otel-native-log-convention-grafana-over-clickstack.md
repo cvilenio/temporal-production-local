@@ -1,10 +1,12 @@
 # ADR-0019: OTel-native log convention at the source; Grafana viz, log store a three-way choice (Loki default, ClickHouse path)
 
-- **Status:** Accepted
+- **Status:** Accepted. The backend choice (§3) is **superseded by ADR-0020**, which closes the
+  three-way evaluation: ClickHouse adopted as the committed log store, Loki retired, ClickStack/
+  HyperDX removed. §1 (message-as-body convention) and §2 (agent builds the OTel record) stand.
 - **Date:** 2026-06-26
 - **Related:** ADR-0018 (structured logging — `obslog`, the shared schema, Alloy node-agent
-  collection; this ADR evolves its emit/collection convention and settles the backend question
-  the 0018 follow-up spike opened).
+  collection; this ADR evolves its emit/collection convention and settled the backend question
+  the 0018 follow-up spike opened). ADR-0020 (the verdict: adopt ClickHouse, retire Loki).
 
 ## Context
 
@@ -72,17 +74,18 @@ Grafana**, and there are three options — the framing is not the binary the bak
   a preference. Cost: **SQL not LogQL** (ex-Grafana muscle memory is LogQL), Loki's cheap
   economics, and running a stateful columnar DB instead of an object-store sidecar.
 
-**Decision:** Grafana is the pane. **Option A is the default today** (cheapest, in place,
-team-fluent). **Option C is the strategically-aligned path** if/when log *exploration* (the
-unknown-unknowns case) or the per-field-mapping maintenance becomes the pain — it removes the
-mapping entirely and matches where the industry is heading, at the cost of SQL + operating
-ClickHouse. To make that an evidence-based choice rather than a bet, both are wired for an
-**in-Grafana A/B**: the committed **Loki** datasource and a provisioned **ClickHouse (logs)**
-datasource (`grafana-clickhouse-datasource` → `default.otel_logs`, OTel schema), compared in
-Explore on the same logs. ClickStack/HyperDX (B) stays an opt-in overlay
-(`values.clickstack.enabled=false`; local-app-mode, fixed key, sources seeded — zero manual
-steps) as the explorer reference and the source of the ClickHouse `otel_logs` table the C
-datasource reads.
+**Decision (as taken here, 2026-06-26):** Grafana is the pane. **Option A was the default**
+(cheapest, in place, team-fluent), with **Option C as the strategically-aligned path** if/when
+log *exploration* or per-field-mapping maintenance became the pain — it removes the mapping
+entirely and matches where the industry is heading, at the cost of SQL + operating ClickHouse. To
+make that an evidence-based choice rather than a bet, both were wired for an **in-Grafana A/B**:
+the **Loki** datasource and a provisioned **ClickHouse (logs)** datasource, compared in Explore on
+the same logs, with ClickStack/HyperDX (B) as an opt-in overlay supplying the ClickHouse table.
+
+> **Superseded by ADR-0020 (verdict):** the A/B closed in favor of **Option C**. ClickHouse is now
+> the committed log store, behind a standalone OTel Collector (`clickhouseexporter`, standard
+> schema — not HyperDX's bundled store). Loki is retired and the ClickStack/HyperDX overlay is
+> removed. Grafana remains the single pane. The rest of this ADR is the reasoning that led there.
 
 ## Consequences
 
@@ -117,10 +120,12 @@ datasource reads.
 - **Next (metrics/traces pillars):** the metrics ADR (Prometheus pull on kind + Temporal Cloud
   OpenMetrics) and tracing remain. If Option C (or ClickStack) is adopted, folding traces+metrics
   into ClickHouse and retiring lgtm is the single-pane end state; until then Grafana is the pane.
-- **Open decision, evidence to gather:** run the Loki-vs-ClickHouse Explore A/B on real
-  incident-shaped questions (unknown-unknowns, high-card `order_id`/`trace_id` pivots) and weigh
-  the result against the SQL-vs-LogQL learning cost for ex-Grafana teammates and the op-cost of
-  running ClickHouse. Revisit this ADR with the verdict.
+- **Verdict (ADR-0020):** the Loki-vs-ClickHouse A/B closed in favor of ClickHouse — schema-on-read
+  / full fidelity won over Loki's upfront field-mapping for the unknown-unknowns case, and the
+  SQL-vs-LogQL cost was judged acceptable. The shortcut (reusing HyperDX's bundled store) was
+  replaced with a standalone ClickHouse + OTel Collector (`clickhouseexporter`, standard schema),
+  Loki was retired, and the ClickStack/HyperDX overlay was removed. See ADR-0020 for the hardened
+  topology.
 
 ## Grounding
 
