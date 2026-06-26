@@ -35,7 +35,10 @@
 # backend). The same env contract carries to kind/Helm (a k8s Secret instead of an
 # env-file) — see docs/RUNMODES.md.
 #
-#   lgtm (grafana/otel-lgtm) — OTel Collector + Prometheus + Tempo + Loki + Grafana
+#   lgtm (grafana/otel-lgtm) — OTel Collector + Prometheus + Tempo + Grafana
+#                  (its bundled Loki is unused — logs go to ClickHouse, ADR-0020)
+#   clickhouse    — committed log store (OTel otel_logs schema), read by Grafana
+#   otel-collector — OTLP→ClickHouse ingest gateway the kind Alloy agent ships to
 #   mock-api      — simulated external dependency ("the internet"), consumed by workers
 #   platform-console — reaches orders-service + orders-db (compose names via the
 #                      host-apptier overlay, or host.docker.internal on the kind path)
@@ -59,15 +62,19 @@ services:
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
       - GF_AUTH_DISABLE_LOGIN_FORM=false
       - GF_SECURITY_ALLOW_EMBEDDING=true
+      # Logs read from ClickHouse (the committed log store — ADR-0020). Installs
+      # the ClickHouse datasource plugin at boot; the datasource itself is
+      # provisioned via the mount below. Grafana stays the single viz pane; lgtm's
+      # bundled Loki is unused (nothing ships to it anymore).
+      - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
     networks:
       - temporal-network
     ports:
       - "3000:3000"   # Grafana UI
-      # Published for the kind-side Grafana Alloy DaemonSet to ship logs OUT to
-      # this host-side backend (the "observability is a separate, durable tier"
-      # model — ADR-0018). Compose-network peers (mock-api, workers) reach the
+      # Published for direct OTLP pushes to lgtm's bundled collector (metrics/
+      # traces tier). Pod logs do NOT come through here — they go to the standalone
+      # OTel Collector → ClickHouse (ADR-0020). Compose-network peers reach this
       # collector as lgtm:4317 and don't need these host maps.
-      - "3100:3100"   # Loki push (Alloy → loki/api/v1/push)
       - "4317:4317"   # OTLP gRPC
       - "4318:4318"   # OTLP HTTP
     volumes:
@@ -76,6 +83,7 @@ services:
       - ./compose/observability/grafana/dashboards:/var/lib/grafana/dashboards/ziggymart:ro
       - ./compose/observability/grafana/provisioning/dashboards/critical.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/critical.yaml:ro
       - ./compose/observability/grafana/dashboards-critical:/var/lib/grafana/dashboards/critical:ro
+      - ./compose/observability/grafana/provisioning/datasources/clickhouse.yaml:/otel-lgtm/grafana/conf/provisioning/datasources/clickhouse.yaml:ro
       - lgtm-data:/data
     healthcheck:
       test: ["CMD-SHELL", "test -f /tmp/ready"]
@@ -83,6 +91,64 @@ services:
       timeout: 3s
       retries: 24
       start_period: 20s
+
+  # ===========================================================================
+  # OBSERVABILITY — LOG STORE (ClickHouse) + INGEST GATEWAY (OTel Collector)
+  # The committed log pipeline (ADR-0020): kind pods → Alloy DaemonSet (OTLP) →
+  # this OTel Collector → ClickHouse `default.otel_logs`, read by Grafana's
+  # ClickHouse datasource. The committed log store (replaced Loki). Local
+  # workbench creds — not a durable tier; `down -v` wipes it.
+  # ===========================================================================
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: clickhouse
+    # ulimit nofile bump is the image's documented requirement; without it the
+    # server logs a startup warning and can fail to open enough files.
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    environment:
+      # The 24.x image generates a RANDOM default-user password on first boot when
+      # none is given, which rejects the collector + Grafana over the network. Pin
+      # a committed workbench constant (not secret) so the pipeline is declarative
+      # and survives `down -v`. The collector config and the Grafana datasource use
+      # the same value.
+      - CLICKHOUSE_PASSWORD=ziggymart-local-clickhouse
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    networks:
+      - temporal-network
+    ports:
+      - "8123:8123"   # HTTP — Grafana ClickHouse datasource reads here
+      - "9000:9000"   # native TCP — the OTel Collector writes here
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--password", "ziggymart-local-clickhouse", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 10s
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.116.1
+    container_name: otel-collector
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - temporal-network
+    ports:
+      # Host 4319/4320 avoid lgtm's 4317/4318; the kind Alloy agent ships to
+      # host.docker.internal:4320.
+      - "4319:4317"   # OTLP gRPC
+      - "4320:4318"   # OTLP HTTP  (Alloy ships here)
+    volumes:
+      - ./compose/observability/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    restart: unless-stopped
 
   # NOTE: the app data store (orders-db) and the orders REST API (orders-service)
   # are NOT here — they live in compose/host-apptier.yml, an opt-in layer for the
@@ -314,3 +380,5 @@ networks:
 volumes:
   # orders-db-data lives in compose/host-apptier.yml (with the orders-db service).
   lgtm-data:
+  # ClickHouse log store (otel_logs). Throwaway workbench data — wiped by `down -v`.
+  clickhouse-data:

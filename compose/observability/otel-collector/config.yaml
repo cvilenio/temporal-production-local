@@ -1,0 +1,57 @@
+# OpenTelemetry Collector (contrib) — OTLP → ClickHouse log ingest gateway.
+#
+# The committed log pipeline (ADR-0020): the kind-side Grafana Alloy DaemonSet
+# tails pod stdout, builds an OTel-native LogRecord (Body=message, level→
+# severity, trace_id→TraceId), and ships it OTLP/HTTP to this collector
+# (host.docker.internal:4320 → container 4318). This collector writes it into
+# ClickHouse via the contrib `clickhouseexporter`, which owns the standard
+# `otel_logs` schema (Grafana Alloy has no native ClickHouse exporter — see
+# grafana/alloy#3492 — so the standard agent→collector→ClickHouse shape applies).
+#
+# Local workbench: no auth on the OTLP receiver, default ClickHouse creds. The
+# exporter creates the schema on first run (create_schema), so a fresh
+# ClickHouse comes up queryable with zero manual steps.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # The clickhouseexporter inserts best in batches (it recommends >=1000 rows);
+  # a short timeout keeps logs appearing promptly at low local volume.
+  batch:
+    timeout: 5s
+    send_batch_size: 1000
+
+exporters:
+  clickhouse:
+    # Native TCP endpoint (port 9000). The exporter reaches ClickHouse by its
+    # compose service name over temporal-network.
+    endpoint: tcp://clickhouse:9000?dial_timeout=10s
+    database: default
+    logs_table_name: otel_logs
+    username: default
+    # Committed workbench constant — matches docker-compose.yml CLICKHOUSE_PASSWORD.
+    password: ziggymart-local-clickhouse
+    # Let the exporter own the table DDL (standard OTel schema) on first boot.
+    create_schema: true
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+    sending_queue:
+      enabled: true
+      queue_size: 10000
+
+service:
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [clickhouse]
+  telemetry:
+    logs:
+      level: info
