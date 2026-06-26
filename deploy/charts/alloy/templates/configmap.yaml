@@ -1,8 +1,9 @@
 # Alloy pipeline config (River). The canonical k8s log-collection flow:
-#   discover pods → relabel (k8s metadata + log file path) → tail files →
-#   unwrap CRI + parse our JSON → ship to Loki.
-# This is what makes logs queryable BY WORKLOAD in Grafana ({k8s_pod_name=...}),
-# exactly like Cloud Logging's resource.labels. ADR-0018.
+#   discover (via file path) → tail pod stdout → unwrap CRI + build an OTel
+#   LogRecord → ship OTLP to the host-side OTel Collector → ClickHouse.
+# This models the production k8s logging pattern (app→stdout→node agent→backend,
+# the GKE fluentbit→Cloud Logging shape) and makes logs queryable BY WORKLOAD in
+# Grafana via the OTel k8s resource attributes. ADR-0018 / ADR-0020.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -15,136 +16,11 @@ metadata:
     argocd.argoproj.io/sync-wave: "0"
 data:
   config.alloy: |
-    // Discover every pod in the cluster.
-    discovery.kubernetes "pods" {
-      role = "pod"
-    }
-
-    // Attach Kubernetes metadata as labels and compute the on-node log path.
-    discovery.relabel "pod_logs" {
-      targets = discovery.kubernetes.pods.targets
-
-      rule {
-        source_labels = ["__meta_kubernetes_namespace"]
-        target_label  = "k8s_namespace_name"
-      }
-      rule {
-        source_labels = ["__meta_kubernetes_pod_name"]
-        target_label  = "k8s_pod_name"
-      }
-      rule {
-        source_labels = ["__meta_kubernetes_pod_container_name"]
-        target_label  = "k8s_container_name"
-      }
-      rule {
-        source_labels = ["__meta_kubernetes_node_name"]
-        target_label  = "k8s_node_name"
-      }
-      // Surface the workload name as `service_name` so Loki queries line up with
-      // the OTLP path's service.name resource attribute (host-plane services).
-      rule {
-        source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
-        target_label  = "service_name"
-      }
-      // Kubelet writes container logs to /var/log/pods/<ns>_<pod>_<uid>/<container>/*.log.
-      rule {
-        source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
-        separator     = "/"
-        action        = "replace"
-        replacement   = "/var/log/pods/*$1/*.log"
-        target_label  = "__path__"
-      }
-    }
-
-    local.file_match "pod_logs" {
-      path_targets = discovery.relabel.pod_logs.output
-    }
-
-    loki.source.file "pod_logs" {
-      targets    = local.file_match.pod_logs.targets
-      forward_to = [loki.process.pod_logs.receiver]
-    }
-
-    loki.process "pod_logs" {
-      // Containerd (kind's runtime) wraps each stdout line in the CRI format
-      // "<ts> <stream> <flags> <message>"; unwrap to the raw JSON our apps emit.
-      stage.cri {}
-      // Parse the obslog record so its fields are addressable.
-      stage.json {
-        expressions = {
-          message       = "message",
-          level         = "level",
-          logger        = "logger",
-          trace_id      = "trace_id",
-          order_id      = "order_id",
-          step          = "step",
-          request_id    = "request_id",
-          workflow_id   = "workflow_id",
-          run_id        = "run_id",
-          workflow_type = "workflow_type",
-          activity_id   = "activity_id",
-          activity_type = "activity_type",
-          attempt       = "attempt",
-          task_queue    = "task_queue",
-          exception     = "exception",
-        }
-      }
-      // level stays a low-cardinality LABEL — cheap stream selector for the
-      // volume-by-level dashboard panel.
-      stage.labels {
-        values = { level = "" }
-      }
-      // Everything else rides as STRUCTURED METADATA (Loki 3): high-cardinality-
-      // safe (no stream explosion), queryable, and rendered as clean facets in
-      // Logs Drilldown instead of being buried in the line. trace_id here also
-      // lights up lgtm's pre-provisioned Loki→Tempo derived field for one-click
-      // log→trace once tracing is enabled. ADR-0018 / checkpoint 0017.
-      stage.structured_metadata {
-        values = {
-          trace_id      = "",
-          order_id      = "",
-          step          = "",
-          request_id    = "",
-          workflow_id   = "",
-          run_id        = "",
-          workflow_type = "",
-          activity_id   = "",
-          activity_type = "",
-          attempt       = "",
-          task_queue    = "",
-          logger        = "",
-          exception     = "",
-        }
-      }
-      // Make the stored line the human `message`, falling back to the raw line
-      // for foreign/non-JSON logs. This de-noises the Drilldown/Explore preview —
-      // the OTel-native message-as-body convention applied to the Loki path too.
-      // (Helm raw-string wraps the Alloy template braces so Helm leaves them be.)
-      stage.template {
-        source   = "_msg"
-        template = {{ `"{{ if .message }}{{ .message }}{{ else }}{{ .Entry }}{{ end }}"` }}
-      }
-      stage.output {
-        source = "_msg"
-      }
-      forward_to = [loki.write.backend.receiver]
-    }
-
-    // Ship to the host-side Loki (the durable observability tier). The AGENT
-    // holds this endpoint — the apps never do.
-    loki.write "backend" {
-      endpoint {
-        url = env("LOKI_PUSH_URL")
-      }
-    }
-    {{- if .Values.clickstack.enabled }}
-
-    // === ClickStack dual-ship: OTel-native node-agent collection ===========
-    // Tails the SAME pod stdout files as the Loki path, but builds a REAL OTel
-    // LogRecord with the filelog receiver instead of bridging from Loki — so the
-    // message/attributes split is produced here, by convention, exactly like a
-    // Cloud Logging / Datadog agent. This replaces the per-backend HyperDX
-    // bodyExpression hack (checkpoint 0017). Disappears when the flag is off.
+    // === OTel-native node-agent log collection ============================
+    // Tails pod stdout and builds a REAL OTel LogRecord with the filelog
+    // receiver — the message/attributes split is produced HERE, by convention,
+    // exactly like a Cloud Logging / Datadog agent. The agent (not the app)
+    // holds the backend endpoint.
     //
     // Operator pipeline (stanza):
     //   container       — unwrap the CRI/containerd envelope to the raw app JSON
@@ -157,10 +33,10 @@ data:
     //                     our trace_id is a 32-hex id = a valid OTel trace id).
     // on_error=send_quiet + the move `if` guard keep foreign/non-JSON lines
     // (e.g. uvicorn access logs) flowing with Body = their raw line.
-    // Scoped to the app namespace via the file-path glob (replaces stage.match);
-    // start_at=end ships only new lines, so an agent restart doesn't re-flood.
-    otelcol.receiver.filelog "clickstack" {
-      include  = ["/var/log/pods/{{ .Values.clickstack.scopeNamespace }}_*/*/*.log"]
+    // Scoped to the app namespace via the file-path glob; start_at=end ships only
+    // new lines, so an agent restart doesn't re-flood the collector.
+    otelcol.receiver.filelog "logs" {
+      include  = ["/var/log/pods/{{ .Values.clickhouse.scopeNamespace }}_*/*/*.log"]
       start_at = "end"
       // The `container` operator's add_metadata_from_filepath needs the file path
       // on the record — surface it (otherwise it errors per-entry).
@@ -175,31 +51,28 @@ data:
       ]
 
       output {
-        logs = [otelcol.processor.batch.clickstack.input]
+        logs = [otelcol.processor.batch.logs.input]
       }
     }
 
-    otelcol.processor.batch "clickstack" {
+    otelcol.processor.batch "logs" {
       output {
-        logs = [otelcol.exporter.otlphttp.clickstack.input]
+        logs = [otelcol.exporter.otlphttp.logs.input]
       }
     }
 
-    // ClickStack enforces collector auth — the ingestion API key (HyperDX team
-    // settings) rides as the `authorization` header. Endpoint is the base URL;
-    // the exporter appends /v1/logs.
-    otelcol.exporter.otlphttp "clickstack" {
+    // Ship to the host-side OTel Collector (compose), which writes to ClickHouse
+    // via the clickhouseexporter. Endpoint is the base URL; the exporter appends
+    // /v1/logs. No auth — the local collector's OTLP receiver is open on the
+    // workbench network.
+    otelcol.exporter.otlphttp "logs" {
       client {
-        endpoint = env("CLICKSTACK_OTLP_URL")
-        headers  = {
-          "authorization" = env("CLICKSTACK_INGESTION_KEY"),
-        }
+        endpoint = env("CLICKHOUSE_OTLP_URL")
       }
       // Headroom for the order-burst + restart replay so the scoped stream is
-      // buffered, not dropped, while ClickHouse commits.
+      // buffered, not dropped, while the collector/ClickHouse commit.
       sending_queue {
         queue_size    = 10000
         num_consumers = 10
       }
     }
-    {{- end }}

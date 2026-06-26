@@ -124,6 +124,7 @@ SERVICE_REGISTRY = {
     # Tooling strip
     "platform-console": {
         "group": "Tooling",
+        "subgroup": "Consoles & Utilities",
         "icon_key": "window",
         "display_name": "Platform Console",
         "description": "This application",
@@ -131,6 +132,7 @@ SERVICE_REGISTRY = {
     },
     "ui-proxy": {
         "group": "Tooling",
+        "subgroup": "Consoles & Utilities",
         "icon_key": "network",
         "display_name": "Temporal UI Proxy",
         "description": "Nginx CSP proxy",
@@ -139,6 +141,7 @@ SERVICE_REGISTRY = {
     },
     "pgweb-orders": {
         "group": "Tooling",
+        "subgroup": "Consoles & Utilities",
         "icon_key": "window",
         "display_name": "DB Browser (Orders)",
         "description": "pgweb",
@@ -147,6 +150,7 @@ SERVICE_REGISTRY = {
     },
     "pgweb-temporal": {
         "group": "Tooling",
+        "subgroup": "Consoles & Utilities",
         "icon_key": "window",
         "display_name": "DB Browser (Temporal)",
         "description": "pgweb",
@@ -155,13 +159,35 @@ SERVICE_REGISTRY = {
     },
     "lgtm": {
         "group": "Tooling",
+        "subgroup": "Observability",
         "icon_key": "chart",
         "display_name": "Observability (LGTM)",
-        "description": "Grafana, Loki, Tempo, Prometheus",
+        "description": "Grafana, Tempo, Prometheus",
         "http_probe": "http://lgtm:3000/api/health",
+    },
+    "clickhouse": {
+        "group": "Tooling",
+        "subgroup": "Observability",
+        "icon_key": "database",
+        "display_name": "ClickHouse (Logs)",
+        "description": "Log store (OTel otel_logs), read by Grafana",
+        # /ping returns 200 "Ok." without auth — a clean liveness signal.
+        "http_probe": "http://clickhouse:8123/ping",
+    },
+    "otel-collector": {
+        "group": "Tooling",
+        "subgroup": "Observability",
+        "icon_key": "network",
+        "display_name": "OTel Collector",
+        "description": "OTLP→ClickHouse log ingest gateway",
+        "http_probe": None,
+        # No HTTP health endpoint; a TCP connect to the OTLP/HTTP receiver port
+        # (in-network container port) confirms the gateway is listening.
+        "tcp_port": 4318,
     },
     "codec-server": {
         "group": "Tooling",
+        "subgroup": "Consoles & Utilities",
         "icon_key": "network",
         "display_name": "Codec Server",
         "description": "Decodes encrypted payloads for the Temporal UI/CLI",
@@ -170,6 +196,7 @@ SERVICE_REGISTRY = {
     # ── Cluster-visibility tooling (kind only — see KIND_ONLY_KEYS) ──────────
     "headlamp": {
         "group": "Tooling",
+        "subgroup": "Cluster & Delivery",
         "icon_key": "window",
         "display_name": "Headlamp",
         "description": "Kubernetes cluster explorer",
@@ -177,6 +204,7 @@ SERVICE_REGISTRY = {
     },
     "viz-proxy": {
         "group": "Tooling",
+        "subgroup": "Cluster & Delivery",
         "icon_key": "network",
         "display_name": "Visibility Proxy",
         "description": "Frame-stripping proxy fronting Headlamp + ArgoCD",
@@ -187,6 +215,7 @@ SERVICE_REGISTRY = {
     # orders workloads. The read-only console SA has cluster-wide pod get/list/watch.
     "argocd": {
         "group": "Tooling",
+        "subgroup": "Cluster & Delivery",
         "icon_key": "network",
         "display_name": "ArgoCD",
         "description": "GitOps delivery controller",
@@ -205,6 +234,7 @@ SERVICE_REGISTRY = {
     # (cluster liveness); the worker nodes follow it up/down.
     "kind-cluster": {
         "group": "Tooling",
+        "subgroup": "Cluster & Delivery",
         "icon_key": "server-rack",
         "display_name": "kind Cluster",
         "description": "Local Kubernetes cluster (control-plane node)",
@@ -213,6 +243,7 @@ SERVICE_REGISTRY = {
     },
     "artifact-registry": {
         "group": "Tooling",
+        "subgroup": "Cluster & Delivery",
         "icon_key": "database",
         "display_name": "Artifact Registry",
         "description": "Local OCI registry (zot) serving images to kind",

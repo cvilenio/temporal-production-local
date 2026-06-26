@@ -1,20 +1,13 @@
-# Grafana Alloy log-collection DaemonSet (ADR-0018). All values git-safe — no
-# account-bearing data (the agent ships to the host backend, not Temporal Cloud).
+# Grafana Alloy log-collection DaemonSet (ADR-0018 / ADR-0020). All values
+# git-safe — no account-bearing data (the agent ships to the host backend, not
+# Temporal Cloud).
 namespace: observability
 
 image:
   repository: grafana/alloy
-  # v1.17.0: includes otelcol.receiver.filelog (public-preview) for the
-  # OTel-native ClickStack collection (checkpoint 0017). Run with
-  # --stability.level=public-preview (daemonset args).
+  # v1.17.0: includes otelcol.receiver.filelog (public-preview) for OTel-native
+  # collection. Run with --stability.level=public-preview (daemonset args).
   tag: v1.17.0
-
-# Where the agent ships collected logs. The backend (lgtm) runs on the HOST, so
-# kind pods reach it via the cluster's host gateway (host.docker.internal). This
-# is the "observability is a separate, durable tier the cluster ships OUT to"
-# model — the analog of GKE → Cloud Logging. The host publishes Loki's push port
-# (docker-compose.yml). loki/api/v1/push is Loki's native ingest endpoint.
-lokiPushUrl: "http://host.docker.internal:3100/loki/api/v1/push"
 
 resources:
   requests:
@@ -23,22 +16,15 @@ resources:
   limits:
     memory: 256Mi
 
-# ClickStack dual-ship (opt-in bake-off vs Loki — checkpoint 0016 follow-up).
-# When enabled, Alloy fans the SAME tailed pod lines to a second branch that
-# bridges them into OTLP and ships to the host-side ClickStack all-in-one
-# (ClickHouse + HyperDX) ALONGSIDE Loki. Default off → committed Loki path is
-# the only output and this is a pure no-op. The agent holds the endpoint + key.
-clickstack:
-  enabled: false
-  # Namespace the dual-ship branch is scoped to. Loki takes the whole cluster;
-  # the OTLP path to ClickStack is scoped to this one so its sending queue isn't
-  # firehosed (and the two inputs match the Loki bake-off query). The bake-off
-  # subject is the orders app.
+# The committed log pipeline (ADR-0020): Alloy builds an OTel LogRecord from each
+# pod stdout line and ships it OTLP to the host-side OTel Collector, which writes
+# to ClickHouse. The backend runs on the HOST, so kind pods reach it via the
+# cluster's host gateway (host.docker.internal) — the "observability is a
+# separate, durable tier the cluster ships OUT to" model (GKE → Cloud Logging).
+clickhouse:
+  # Namespace the collection is scoped to (the orders app), so the OTLP sending
+  # queue isn't firehosed by the whole cluster's logs.
   scopeNamespace: "orders"
-  # Host-side ClickStack OTLP/HTTP listener (compose/clickstack.yml maps host
+  # Host-side OTel Collector OTLP/HTTP listener (docker-compose.yml maps host
   # 4320 → container 4318). Base URL only — the exporter appends /v1/logs.
   otlpUrl: "http://host.docker.internal:4320"
-  # HyperDX ingestion API key (Team Settings → API Keys). ClickStack enforces
-  # collector auth, so this rides as the `authorization` header. NOT account-
-  # bearing (local workbench key); the real value is injected via terraform.
-  ingestionKey: ""

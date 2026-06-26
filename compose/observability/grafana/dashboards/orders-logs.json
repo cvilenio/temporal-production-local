@@ -7,7 +7,7 @@
   "title": "Ziggymart Orders Logs",
   "tags": ["ziggymart", "logs"],
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "time": { "from": "now-1h", "to": "now" },
   "templating": {
     "list": [
@@ -15,12 +15,17 @@
         "name": "container",
         "label": "Container",
         "type": "query",
-        "datasource": { "type": "loki", "uid": "loki" },
-        "query": "label_values({k8s_namespace_name=\"orders\"}, k8s_container_name)",
-        "definition": "label_values({k8s_namespace_name=\"orders\"}, k8s_container_name)",
+        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-logs" },
+        "query": {
+          "refId": "container",
+          "editorType": "sql",
+          "rawSql": "SELECT DISTINCT ResourceAttributes['k8s.container.name'] AS container FROM default.otel_logs WHERE ResourceAttributes['k8s.namespace.name'] = 'orders' AND container != '' ORDER BY container",
+          "queryType": "table",
+          "format": 1
+        },
         "refresh": 2,
         "includeAll": true,
-        "allValue": ".+",
+        "allValue": ".*",
         "multi": true,
         "current": { "text": "All", "value": "$__all" }
       }
@@ -31,7 +36,7 @@
       "id": 1,
       "type": "timeseries",
       "title": "Log volume by level",
-      "datasource": { "type": "loki", "uid": "loki" },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-logs" },
       "gridPos": { "h": 7, "w": 24, "x": 0, "y": 0 },
       "fieldConfig": {
         "defaults": {
@@ -44,10 +49,12 @@
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "sum by (level) (count_over_time({k8s_namespace_name=\"orders\", k8s_container_name=~\"$container\"} [$__auto]))",
-          "legendFormat": "{{level}}",
-          "queryType": "range"
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-logs" },
+          "editorType": "sql",
+          "rawSql": "SELECT $__timeInterval(Timestamp) AS time, SeverityText AS level, count() AS count FROM default.otel_logs WHERE $__timeFilter(Timestamp) AND ResourceAttributes['k8s.namespace.name'] = 'orders' AND match(ResourceAttributes['k8s.container.name'], '${container:regex}') GROUP BY time, level ORDER BY time",
+          "queryType": "timeseries",
+          "format": 1,
+          "legendFormat": "{{ level }}"
         }
       ]
     },
@@ -55,7 +62,7 @@
       "id": 2,
       "type": "logs",
       "title": "Orders logs — message (expand a row for the full structured context)",
-      "datasource": { "type": "loki", "uid": "loki" },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-logs" },
       "gridPos": { "h": 20, "w": 24, "x": 0, "y": 7 },
       "options": {
         "showTime": true,
@@ -70,9 +77,11 @@
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "{k8s_namespace_name=\"orders\", k8s_container_name=~\"$container\"}",
-          "queryType": "range"
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-logs" },
+          "editorType": "sql",
+          "rawSql": "SELECT Timestamp, Body, SeverityText, LogAttributes, ResourceAttributes FROM default.otel_logs WHERE $__timeFilter(Timestamp) AND ResourceAttributes['k8s.namespace.name'] = 'orders' AND match(ResourceAttributes['k8s.container.name'], '${container:regex}') ORDER BY Timestamp DESC LIMIT 1000",
+          "queryType": "logs",
+          "format": 2
         }
       ]
     }

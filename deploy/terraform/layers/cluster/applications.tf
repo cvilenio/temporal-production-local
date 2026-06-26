@@ -182,15 +182,12 @@ locals {
         repoURL        = var.oci_charts_repo
         chart          = "alloy"
         targetRevision = var.alloy_chart_version
-        # ClickStack dual-ship overlay (opt-in bake-off vs Loki). Off by default
-        # → chart ships to Loki only. When enabled, the agent also fans logs to
-        # the host-side ClickStack all-in-one over OTLP. Not account-bearing.
+        # Committed log pipeline (ADR-0020): the agent ships pod logs OTLP to the
+        # host-side OTel Collector → ClickHouse. Not account-bearing.
         helm = {
           valuesObject = {
-            clickstack = {
-              enabled      = var.alloy_clickstack_enabled
-              otlpUrl      = var.alloy_clickstack_otlp_url
-              ingestionKey = var.alloy_clickstack_ingestion_key
+            clickhouse = {
+              otlpUrl = var.alloy_clickhouse_otlp_url
             }
           }
         }

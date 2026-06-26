@@ -100,29 +100,16 @@ variable "orders_api_chart_version" {
 variable "alloy_chart_version" {
   description = "Published version of the alloy OCI chart (Grafana Alloy log-collection DaemonSet; matches Chart.yaml / just chart-publish)."
   type        = string
-  default     = "0.3.3"
+  default     = "0.4.0"
 }
 
-# ClickStack dual-ship (opt-in log-UX bake-off vs Loki — checkpoint 0016 follow-up).
-# When enabled, Alloy fans the same tailed pod lines to a second OTLP branch
-# shipping to the host-side ClickStack all-in-one, ALONGSIDE Loki. Off by default
-# so the committed Loki-only path is unaffected.
-variable "alloy_clickstack_enabled" {
-  description = "Turn on Alloy's ClickStack dual-ship branch (chart values.clickstack.enabled)."
-  type        = bool
-  default     = false
-}
-
-variable "alloy_clickstack_otlp_url" {
-  description = "Host-side ClickStack OTLP/HTTP base URL the agent ships to (compose maps host 4320 → container 4318)."
+# The committed log pipeline (ADR-0020): Alloy builds an OTel LogRecord from each
+# pod stdout line and ships it OTLP to the host-side OTel Collector, which writes
+# to ClickHouse. Single path — no Loki, no opt-in gate.
+variable "alloy_clickhouse_otlp_url" {
+  description = "Host-side OTel Collector OTLP/HTTP base URL the agent ships to (compose maps host 4320 → container 4318). Not account-bearing."
   type        = string
   default     = "http://host.docker.internal:4320"
-}
-
-variable "alloy_clickstack_ingestion_key" {
-  description = "OTLP `authorization` key the agent sends to ClickStack. Matches compose/clickstack.yml INGESTION_API_KEY (HyperDX local-app-mode fixed key). A local workbench constant, not account-bearing — committed so the path is declarative and survives a volume wipe with no re-wiring."
-  type        = string
-  default     = "ziggymart-local-clickstack-ingest-key"
 }
 
 variable "orders_api_image_tag" {
