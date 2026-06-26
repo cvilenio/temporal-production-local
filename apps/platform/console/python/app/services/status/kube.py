@@ -31,24 +31,37 @@ class KubeProvider:
         # CoreV1Api — typed Any; the kubernetes client is imported lazily so the
         # console boots even when the package's heavy import tree isn't needed.
         self._v1: Any = None
+        # mtime of the kubeconfig the cached client was built from. A cluster
+        # recreate (`down` + `up`) assigns a NEW API-server port and rewrites this
+        # file (cluster-up / headlamp-reload); the cached client still pins the old
+        # endpoint and would poll a dead port forever. Rebuild when the file changes.
+        self._loaded_mtime: float | None = None
 
     def _ensure_client(self) -> bool:
         """Load the kubeconfig and build a CoreV1Api (sync). Returns False if the
-        kubeconfig isn't present/loadable yet (cluster not up) so poll can degrade."""
-        if self._v1 is not None:
-            return True
+        kubeconfig isn't present/loadable yet (cluster not up) so poll can degrade.
+        Rebuilds when the kubeconfig changes on disk so a cluster recreate self-heals
+        without a console restart (the API-server endpoint moves on every recreate)."""
         kubeconfig = os.environ.get("KUBECONFIG")
         if not kubeconfig or not os.path.exists(kubeconfig):
             return False
+        try:
+            mtime = os.path.getmtime(kubeconfig)
+        except OSError:
+            return False
+        if self._v1 is not None and mtime == self._loaded_mtime:
+            return True
         try:
             from kubernetes import client, config
 
             config.load_kube_config(config_file=kubeconfig)
             self._v1 = client.CoreV1Api()
+            self._loaded_mtime = mtime
             return True
         except Exception as e:
             print(f"KubeProvider: kubeconfig load failed ({kubeconfig}): {e}")
             self._v1 = None
+            self._loaded_mtime = None
             return False
 
     async def poll(
