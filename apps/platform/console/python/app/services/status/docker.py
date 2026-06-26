@@ -144,6 +144,9 @@ class DockerProvider:
             for c in all_containers
             if c.labels.get("com.docker.compose.service")
         }
+        # Some nodes (the kind cluster, the zot registry) aren't Compose services,
+        # so they're located by explicit container NAME via `docker_container`.
+        by_name = {c.name: c for c in all_containers}
 
         keys = self._keys(exclude)
         tasks = []
@@ -181,7 +184,8 @@ class DockerProvider:
         snapshot: dict[str, dict] = {}
         for compose_svc, http_res in zip(keys, results, strict=True):
             config = SERVICE_REGISTRY[compose_svc]
-            c = containers.get(compose_svc)
+            loc_name = config.get("docker_container")
+            c = by_name.get(loc_name) if loc_name else containers.get(compose_svc)
             if c:
                 try:
                     state, health, ports, image_tag, c_name = await asyncio.to_thread(

@@ -196,6 +196,29 @@ SERVICE_REGISTRY = {
             "selector": "app.kubernetes.io/name=argocd-server",
         },
     },
+    # ── Cluster substrate (kind only — see KIND_ONLY_KEYS) ───────────────────
+    # The cluster itself and its image registry. NEITHER is a Compose service —
+    # kind nodes and the zot registry are created by the cluster-up scripts, not
+    # docker-compose — so they carry a `docker_container` NAME locator instead of
+    # being matched by the `com.docker.compose.service` label like every other
+    # Docker-sourced node. kind is represented by its control-plane container
+    # (cluster liveness); the worker nodes follow it up/down.
+    "kind-cluster": {
+        "group": "Tooling",
+        "icon_key": "server-rack",
+        "display_name": "kind Cluster",
+        "description": "Local Kubernetes cluster (control-plane node)",
+        "http_probe": None,
+        "docker_container": "kind-control-plane",
+    },
+    "artifact-registry": {
+        "group": "Tooling",
+        "icon_key": "database",
+        "display_name": "Artifact Registry",
+        "description": "Local OCI registry (zot) serving images to kind",
+        "http_probe": None,
+        "docker_container": "artifact-registry",
+    },
 }
 
 # Service keys the cluster owns on the kind substrate (those with a `kube` locator).
@@ -213,7 +236,9 @@ KUBE_OWNED_KEYS = frozenset(
 OSS_ONLY_KEYS = frozenset(
     {"temporal", "temporal-ui", "postgresql", "ui-proxy", "pgweb-temporal"}
 )
-KIND_ONLY_KEYS = frozenset({"headlamp", "viz-proxy", "argocd"})
+KIND_ONLY_KEYS = frozenset(
+    {"headlamp", "viz-proxy", "argocd", "kind-cluster", "artifact-registry"}
+)
 
 _current_snapshot: dict[str, dict] = {}
 
