@@ -96,3 +96,59 @@ pattern (a node agent tailing pod stdout).
   `log-schema.json` shape + its own conformance test; Alloy collection is already language-agnostic.
 - Optional: console/codec-server are stdout-only by design (no OTel dep) — revisit if their logs
   are wanted in Grafana.
+
+## Follow-up spike (next session): ClickHouse/ClickStack vs Loki, side-by-side
+
+**Why.** Grafana Explore's structured-log ergonomics are weak. Grafana **Logs Drilldown**
+(`grafana-lokiexplore-app`, already installed on the bundled Grafana 13.0.1 —
+`http://localhost:3000/a/grafana-lokiexplore-app`) is the in-stack upgrade and should be tried
+FIRST. If it's still not enough, evaluate **ClickStack** (ClickHouse + OTel Collector + HyperDX,
+all OSS) for its log-explorer UX. The OTel-logs-model design means this is a *config* swap, not a
+code one — so a dual-ship side-by-side is cheap and low-risk.
+
+**Key principle — app side is untouched.** `obslog`, the schema (`libs/logging/schema/
+log-schema.json`), and stdout JSON do NOT change for any backend. The swap lives in
+collection-exporter + backend + UI. Keep the committed Loki path intact; ClickStack runs
+*alongside* (dual-ship) for the bake-off.
+
+**Spike plan (branch, additive, opt-in):**
+1. **Compose overlay** `compose/clickstack.yml` (don't touch `docker-compose.yml` base): add
+   `clickhouse` (server + named volume + TTL), an OTel Collector with the contrib
+   `clickhouseexporter`, and `hyperdx` (UI). Pick non-conflicting host ports (HyperDX UI e.g.
+   `:8090`-ish — check the console/viz-proxy map first; ClickHouse `8123`/`9000`; a 2nd OTLP
+   listener if you don't reuse lgtm's collector). Bring up with
+   `docker compose -f docker-compose.yml -f compose/clickstack.yml up`.
+2. **Dual-ship from Alloy** (`deploy/charts/alloy/templates/configmap.yaml`): keep the existing
+   `loki.write "backend"`, ADD a parallel branch `loki.source.file → loki.process →
+   otelcol.receiver.loki → otelcol.exporter.otlphttp` pointed at the ClickStack collector
+   (`host.docker.internal:<otlp>`). `loki.source.file.forward_to` takes a LIST — fan out to both
+   the Loki processor and the otel bridge. Gate it behind a values flag (`clickstack.enabled`,
+   default false) + a new chart version so the committed path is unaffected.
+   - Host-plane (`mock-api`): simplest is to leave it on lgtm, or add a 2nd `OTEL_EXPORTER`
+     target; logs from kind workers are enough for the UI bake-off.
+3. **Same data, both UIs:** run the usual happy-path + a flaky/ghost order, then compare on
+   identical logs:
+   - Loki: Grafana **Logs Drilldown** (`{k8s_namespace_name="orders"}`)
+   - ClickHouse: **HyperDX** search/explorer
+   Score: field faceting, pattern clustering, collapse/expand, trace correlation, high-cardinality
+   filter on `order_id`/`trace_id`, time-to-answer for "why did order X fail".
+4. **Optional Grafana-only variant** (no new UI): add the official `grafana-clickhouse-datasource`
+   and query ClickHouse via SQL — keeps Grafana but loses Drilldown; useful only as a stepping
+   stone, not the goal.
+
+**Files in play:** `compose/clickstack.yml` (new), `deploy/charts/alloy/{values.yaml,
+templates/configmap.yaml}` (dual-ship flag + bump version), maybe `apps/platform/console`
+(a HyperDX embed tab, ADR-0014/15 pattern) — NOT `libs/logging/*` or any app code.
+
+**Decision gate → ADR-0019** if adopting: cut Alloy/host exporters to ClickHouse, replace the
+Loki datasource/Drilldown with HyperDX (or the ClickHouse datasource), fold traces+metrics into
+the same ClickHouse later and retire `lgtm`. Capture the tradeoff: ClickHouse is a real columnar
+DB to run/size/retain (TTL, partitions, merges) vs Loki's cheap object-store model — heavier
+footprint, much stronger query/UX, high-cardinality-friendly. For the disposable kind workbench
+that's a bigger container; for the "central durable observability tier" framing it's a legit
+enterprise choice.
+
+**Caveats to remember:** our dotted OTel attrs (`service.name`, `k8s.*`) fit ClickHouse columns/
+`Map` better than Loki labels (which forced `_`); `order_id`/`trace_id` are cheap columns in CH
+(Loki hates them as labels); and dual-ship is the safe eval mode — never rip out Loki until the
+ADR lands.
