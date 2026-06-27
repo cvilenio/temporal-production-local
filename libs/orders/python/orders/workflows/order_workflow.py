@@ -26,6 +26,7 @@ with workflow.unsafe.imports_passed_through():
         UpdateCustomerStatusRequest,
         VerifyShipmentRequest,
     )
+    from orders.shared.contract_version import CONTRACT_VERSION
     from orders.shared.errors import ErrorType
     from orders.shared.models import OrderStatus
     from orders.shared.temporal_ids import (
@@ -58,6 +59,10 @@ class OrderWorkflow:
         self._cancelled_from_status: OrderStatus | None = None
         self._compensations: list[tuple[ActivityName, Any]] = []
         self._ctx: OrderRunContext | None = None
+        # Contract versions this execution has emitted, surfaced as the
+        # ContractVersions search attribute so an operator can query which
+        # contracts still have live traffic before retiring old activity code.
+        self._contract_versions: set[str] = set()
 
         # Custom workflow metrics — ride the Temporal SDK pull pipeline so they
         # are replay-safe (suppressed during history replay automatically).
@@ -93,6 +98,9 @@ class OrderWorkflow:
             workflow.upsert_search_attributes(
                 [SearchAttribute.TRACE_ID.value_set(ctx.trace_id)]
             )
+
+        # Record the activity contract version this execution emits (ADR-0021).
+        self._record_contract_version(CONTRACT_VERSION)
 
         workflow.logger.info("order workflow started", extra=self._log_ctx(ctx))
 
@@ -161,6 +169,7 @@ class OrderWorkflow:
         await workflow.execute_activity(
             ActivityName.CREATE_ORDER_RECORD,
             CreateOrderRecordRequest(
+                contract_version=CONTRACT_VERSION,
                 order_id=ctx.order_id,
                 workflow_id=ctx.workflow_id,
                 item_id=ctx.item_id,
@@ -168,8 +177,8 @@ class OrderWorkflow:
                 user_id=ctx.user_id,
                 address=ctx.address,
                 payment_authorization_id=ctx.payment_authorization_id,
-                amount=ctx.amount,
-                trace_id=ctx.trace_id,
+                amount_minor=ctx.amount_minor,
+                trace_id=ctx.trace_id or "",
             ),
             start_to_close_timeout=timedelta(seconds=5),
             retry_policy=retry.PERSISTENCE,
@@ -198,9 +207,10 @@ class OrderWorkflow:
         await workflow.execute_activity(
             ActivityName.RESERVE_INVENTORY,
             ReserveInventoryRequest(
+                contract_version=CONTRACT_VERSION,
+                idem_key=ctx.idem_key("reserve_inventory"),
                 item_id=ctx.item_id,
                 quantity=ctx.quantity,
-                idem_key=ctx.idem_key("reserve_inventory"),
             ),
             start_to_close_timeout=timedelta(seconds=12),
             retry_policy=retry.EXTERNAL_CALL,
@@ -214,10 +224,11 @@ class OrderWorkflow:
             (
                 ActivityName.RELEASE_INVENTORY,
                 ReleaseInventoryRequest(
+                    contract_version=CONTRACT_VERSION,
+                    idem_key=ctx.idem_key("release_inventory"),
                     reservation_id=reservation_id,
                     item_id=ctx.item_id,
                     quantity=ctx.quantity,
-                    idem_key=ctx.idem_key("release_inventory"),
                 ),
             )
         )
@@ -225,6 +236,7 @@ class OrderWorkflow:
         await workflow.execute_activity(
             ActivityName.PERSIST_INVENTORY_RESERVATION,
             PersistInventoryReservationRequest(
+                contract_version=CONTRACT_VERSION,
                 order_id=ctx.order_id,
                 reservation_id=reservation_id,
             ),
@@ -262,9 +274,10 @@ class OrderWorkflow:
                 result = await workflow.execute_activity(
                     ActivityName.CREATE_SHIPMENT,
                     CreateShipmentRequest(
+                        contract_version=CONTRACT_VERSION,
+                        idem_key=shipping_idem_key,
                         address=ctx.address,
                         order_id=ctx.order_id,
-                        idem_key=shipping_idem_key,
                     ),
                     result_type=ShipmentCreatedResult,
                     start_to_close_timeout=timedelta(seconds=5),
@@ -285,7 +298,10 @@ class OrderWorkflow:
                 try:
                     result = await workflow.execute_activity(
                         ActivityName.VERIFY_SHIPMENT_STATUS,
-                        VerifyShipmentRequest(idem_key=shipping_idem_key),
+                        VerifyShipmentRequest(
+                            contract_version=CONTRACT_VERSION,
+                            idem_key=shipping_idem_key,
+                        ),
                         result_type=ShipmentCreatedResult,
                         start_to_close_timeout=timedelta(seconds=10),
                         retry_policy=order_retry.VERIFY_SHIPMENT,
@@ -316,15 +332,20 @@ class OrderWorkflow:
             (
                 ActivityName.CANCEL_SHIPMENT,
                 CancelShipmentRequest(
-                    tracking_id=tracking_id,
+                    contract_version=CONTRACT_VERSION,
                     idem_key=ctx.idem_key("cancel_shipment"),
+                    tracking_id=tracking_id,
                 ),
             )
         )
 
         await workflow.execute_activity(
             ActivityName.PERSIST_SHIPMENT,
-            PersistShipmentRequest(order_id=ctx.order_id, tracking_id=tracking_id),
+            PersistShipmentRequest(
+                contract_version=CONTRACT_VERSION,
+                order_id=ctx.order_id,
+                tracking_id=tracking_id,
+            ),
             start_to_close_timeout=timedelta(seconds=5),
             retry_policy=retry.PERSISTENCE,
             task_queue=TaskQueue.ORDERS_ACTIVITY,
@@ -354,9 +375,10 @@ class OrderWorkflow:
         await workflow.execute_activity(
             ActivityName.CAPTURE_PAYMENT,
             CapturePaymentRequest(
-                auth_token=ctx.payment_authorization_id,
-                amount=ctx.amount,
+                contract_version=CONTRACT_VERSION,
                 idem_key=ctx.idem_key("payment_capture"),
+                auth_token=ctx.payment_authorization_id,
+                amount_minor=ctx.amount_minor,
             ),
             start_to_close_timeout=timedelta(seconds=12),
             retry_policy=retry.EXTERNAL_CALL,
@@ -368,16 +390,21 @@ class OrderWorkflow:
             (
                 ActivityName.REFUND_PAYMENT,
                 RefundPaymentRequest(
-                    capture_id=capture_id,
-                    amount=ctx.amount,
+                    contract_version=CONTRACT_VERSION,
                     idem_key=ctx.idem_key("refund_payment"),
+                    capture_id=capture_id,
+                    amount_minor=ctx.amount_minor,
                 ),
             )
         )
 
         await workflow.execute_activity(
             ActivityName.PERSIST_PAYMENT_CAPTURE,
-            PersistPaymentCaptureRequest(order_id=ctx.order_id, capture_id=capture_id),
+            PersistPaymentCaptureRequest(
+                contract_version=CONTRACT_VERSION,
+                order_id=ctx.order_id,
+                capture_id=capture_id,
+            ),
             start_to_close_timeout=timedelta(seconds=5),
             retry_policy=retry.PERSISTENCE,
             task_queue=TaskQueue.ORDERS_ACTIVITY,
@@ -401,7 +428,10 @@ class OrderWorkflow:
 
         await workflow.execute_activity(
             ActivityName.FINALIZE_ORDER,
-            FinalizeOrderRequest(order_id=ctx.order_id),
+            FinalizeOrderRequest(
+                contract_version=CONTRACT_VERSION,
+                order_id=ctx.order_id,
+            ),
             start_to_close_timeout=timedelta(seconds=5),
             retry_policy=retry.PERSISTENCE,
             task_queue=TaskQueue.ORDERS_ACTIVITY,
@@ -448,8 +478,8 @@ class OrderWorkflow:
         return OrderWorkflowResult(
             status=status,
             order_id=ctx.order_id,
-            tracking_id=tracking_id,
-            trace_id=ctx.trace_id,
+            tracking_id=tracking_id or "",
+            trace_id=ctx.trace_id or "",
         )
 
     def _set_status(self, status: OrderStatus) -> None:
@@ -457,6 +487,22 @@ class OrderWorkflow:
         workflow.upsert_search_attributes(
             [SearchAttribute.ORDER_STATUS.value_set(status.value)]
         )
+
+    def _record_contract_version(self, version: int) -> None:
+        """Track a contract version emitted to activities and reflect the set in
+        the ContractVersions search attribute. Idempotent: only upserts when a
+        new version first appears, so adding a v2 emit-site later just extends
+        the list operators can query."""
+        key = str(version)
+        if key not in self._contract_versions:
+            self._contract_versions.add(key)
+            workflow.upsert_search_attributes(
+                [
+                    SearchAttribute.CONTRACT_VERSIONS.value_set(
+                        sorted(self._contract_versions)
+                    )
+                ]
+            )
 
     def _raise_if_cancelled(self) -> None:
         if self._cancel_requested:
@@ -473,8 +519,9 @@ class OrderWorkflow:
         await workflow.execute_activity(
             ActivityName.UPDATE_CUSTOMER_STATUS,
             UpdateCustomerStatusRequest(
+                contract_version=CONTRACT_VERSION,
                 order_id=ctx.order_id,
-                status=status,
+                status=status.value,
                 message=message,
                 level=level,
             ),
@@ -495,12 +542,13 @@ class OrderWorkflow:
         await workflow.execute_activity(
             ActivityName.MARK_ORDER_FAILED,
             MarkOrderFailedRequest(
+                contract_version=CONTRACT_VERSION,
                 order_id=ctx.order_id,
-                status=status,
-                failure_reason=failure_reason,
+                status=status.value,
+                failure_reason=failure_reason or "",
                 customer_message=message,
                 customer_message_level=level,
-                last_reached_status=last_reached_status or self._status,
+                last_reached_status=(last_reached_status or self._status).value,
             ),
             start_to_close_timeout=timedelta(seconds=5),
             retry_policy=retry.PERSISTENCE,

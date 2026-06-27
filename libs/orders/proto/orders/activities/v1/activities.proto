@@ -1,0 +1,124 @@
+syntax = "proto3";
+
+package orders.activities.v1;
+
+// Wire contracts for all order activities. Convention: field 1 is always
+// contract_version (the version-in-command semantic guard); for the external
+// activities field 2 is idem_key; business fields start at 3 (or 2 for the
+// internal persistence calls that carry no idem_key). Evolve additively — add a
+// new field number, never renumber/reuse — so old readers ignore unknown fields
+// and new readers see defaults for missing ones. See ADR-0021.
+
+// ── External side-effects (inventory, shipping, payment) ─────────────────────
+
+message ReserveInventoryRequest {
+  uint32 contract_version = 1;
+  string idem_key = 2;
+  string item_id = 3;
+  int32 quantity = 4;
+}
+
+message CreateShipmentRequest {
+  uint32 contract_version = 1;
+  string idem_key = 2;
+  string address = 3;
+  string order_id = 4;
+}
+
+message ShipmentCreatedResult {
+  string tracking_id = 1;
+}
+
+message VerifyShipmentRequest {
+  uint32 contract_version = 1;
+  string idem_key = 2;
+}
+
+message CapturePaymentRequest {
+  uint32 contract_version = 1;
+  string idem_key = 2;
+  string auth_token = 3;
+  // Money in minor units (cents) — integer, not float (ADR-0021).
+  int64 amount_minor = 4;
+}
+
+message ReleaseInventoryRequest {
+  uint32 contract_version = 1;
+  string idem_key = 2;
+  string reservation_id = 3;
+  string item_id = 4;
+  int32 quantity = 5;
+}
+
+message CancelShipmentRequest {
+  uint32 contract_version = 1;
+  string idem_key = 2;
+  string tracking_id = 3;
+}
+
+message RefundPaymentRequest {
+  uint32 contract_version = 1;
+  string idem_key = 2;
+  string capture_id = 3;
+  int64 amount_minor = 4;
+}
+
+// ── Persistence (the workflow's writes to the orders service) ────────────────
+// No idem_key (internal calls): field 1 is contract_version, business from 2.
+// Status values ride as the existing OrderStatus strings, not a proto enum.
+
+message CreateOrderRecordRequest {
+  uint32 contract_version = 1;
+  string order_id = 2;
+  string item_id = 3;
+  int32 quantity = 4;
+  string user_id = 5;
+  string address = 6;
+  string payment_authorization_id = 7;
+  int64 amount_minor = 8;
+  string trace_id = 9;
+  string workflow_id = 10;
+}
+
+message PersistInventoryReservationRequest {
+  uint32 contract_version = 1;
+  string order_id = 2;
+  string reservation_id = 3;
+}
+
+message PersistShipmentRequest {
+  uint32 contract_version = 1;
+  string order_id = 2;
+  string tracking_id = 3;
+}
+
+message PersistPaymentCaptureRequest {
+  uint32 contract_version = 1;
+  string order_id = 2;
+  string capture_id = 3;
+}
+
+message MarkOrderFailedRequest {
+  uint32 contract_version = 1;
+  string order_id = 2;
+  string status = 3;
+  string failure_reason = 4;
+  string customer_message = 5;
+  string customer_message_level = 6;
+  string last_reached_status = 7;
+}
+
+message FinalizeOrderRequest {
+  uint32 contract_version = 1;
+  string order_id = 2;
+}
+
+// ── Customer messaging ───────────────────────────────────────────────────────
+
+message UpdateCustomerStatusRequest {
+  uint32 contract_version = 1;
+  string order_id = 2;
+  string status = 3;
+  string message = 4;
+  string level = 5;
+}

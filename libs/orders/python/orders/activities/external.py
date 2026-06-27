@@ -5,6 +5,7 @@ from obslog import bound
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+from orders.activities.contract_gate import gate
 from orders.clients.mock_api import MockApiClient
 from orders.shared.activity_io import (
     CancelShipmentRequest,
@@ -41,6 +42,7 @@ def make_external_activities(mock_api: MockApiClient) -> list:
 
     @activity.defn(name=ActivityName.RESERVE_INVENTORY)
     async def reserve_inventory(req: ReserveInventoryRequest) -> None:
+        gate(req)
         # bound() enriches EVERY log under it (including the mock_api client's own
         # logs) with this business context, concurrency-safe via contextvars —
         # two orders reserving inventory at once never cross-contaminate.
@@ -62,6 +64,7 @@ def make_external_activities(mock_api: MockApiClient) -> list:
 
     @activity.defn(name=ActivityName.CREATE_SHIPMENT)
     async def create_shipment(req: CreateShipmentRequest) -> ShipmentCreatedResult:
+        gate(req)
         with bound(order_id=req.order_id, idem_key=req.idem_key):
             tracking_id = await mock_api.create_shipment(
                 address=req.address,
@@ -72,15 +75,17 @@ def make_external_activities(mock_api: MockApiClient) -> list:
 
     @activity.defn(name=ActivityName.CAPTURE_PAYMENT)
     async def capture_payment(req: CapturePaymentRequest) -> None:
+        gate(req)
         with bound(idem_key=req.idem_key):
             activity.logger.info(
                 "capturing payment",
-                extra={"amount": float(req.amount)},
+                extra={"amount_minor": req.amount_minor},
             )
             t0 = time.monotonic()
             result = await mock_api.charge_payment(
                 token=req.auth_token,
-                amount=req.amount,
+                # mock API's external contract is in major units (dollars).
+                amount=req.amount_minor / 100,
                 idem_key=req.idem_key,
             )
             elapsed = datetime.timedelta(seconds=time.monotonic() - t0)
@@ -100,17 +105,19 @@ def make_external_activities(mock_api: MockApiClient) -> list:
             ).record(elapsed)
 
             # Business metrics (OTLP push pipeline via business_meter) — safe in
-            # activities since they run outside the workflow sandbox.
+            # activities since they run outside the workflow sandbox. amount_minor
+            # is already in cents, matching the histogram's usd_cents unit.
             _payments_captured.add(1)
-            _payment_amount.record(int(req.amount * 100))
+            _payment_amount.record(req.amount_minor)
             activity.logger.info(
-                "payment captured", extra={"amount": float(req.amount)}
+                "payment captured", extra={"amount_minor": req.amount_minor}
             )
 
     @activity.defn(name=ActivityName.VERIFY_SHIPMENT_STATUS)
     async def verify_shipment_status(
         req: VerifyShipmentRequest,
     ) -> ShipmentCreatedResult:
+        gate(req)
         result = await mock_api.verify_shipment_status(
             idem_key=req.idem_key,
         )
@@ -124,6 +131,7 @@ def make_external_activities(mock_api: MockApiClient) -> list:
 
     @activity.defn(name=ActivityName.RELEASE_INVENTORY)
     async def release_inventory(req: ReleaseInventoryRequest) -> None:
+        gate(req)
         await mock_api.release_inventory(
             reservation_id=req.reservation_id,
             item_id=req.item_id,
@@ -133,6 +141,7 @@ def make_external_activities(mock_api: MockApiClient) -> list:
 
     @activity.defn(name=ActivityName.CANCEL_SHIPMENT)
     async def cancel_shipment(req: CancelShipmentRequest) -> None:
+        gate(req)
         await mock_api.cancel_shipment(
             tracking_id=req.tracking_id,
             idem_key=req.idem_key,
@@ -140,9 +149,11 @@ def make_external_activities(mock_api: MockApiClient) -> list:
 
     @activity.defn(name=ActivityName.REFUND_PAYMENT)
     async def refund_payment(req: RefundPaymentRequest) -> None:
+        gate(req)
         await mock_api.refund_payment(
             capture_id=req.capture_id,
-            amount=req.amount,
+            # mock API's external contract is in major units (dollars).
+            amount=req.amount_minor / 100,
             idem_key=req.idem_key,
         )
 

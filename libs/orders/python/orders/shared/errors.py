@@ -11,3 +11,5 @@ class ErrorType(StrEnum):
     COMPENSATION_FAILED = "CompensationFailed"
     UNEXPECTED_ORDER_FAILURE = "UnexpectedOrderFailure"
     UNRECOGNIZED_ACTIVITY_FAILURE = "UnrecognizedActivityFailure"
+    # Activity received a contract_version it does not support (ADR-0021).
+    CONTRACT_VERSION_UNSUPPORTED = "ContractVersionUnsupported"

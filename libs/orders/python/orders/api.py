@@ -160,6 +160,8 @@ async def submit_order(
     await session.commit()
 
     # 5. Start Temporal workflow
+    # Convert the client-facing dollar amount to minor units (cents) at the edge;
+    # the Temporal contract carries integer minor units (ADR-0021).
     workflow_input = OrderWorkflowInput(
         order_id=order_id,
         item_id=request.item_id,
@@ -167,8 +169,8 @@ async def submit_order(
         user_id=request.user_id,
         address=request.address,
         payment_authorization_id=request.payment_authorization_id,
-        amount=request.amount,
-        trace_id=request.trace_id,
+        amount_minor=round(request.amount * 100),
+        trace_id=request.trace_id or "",
     )
 
     await temporal_service.start_order_workflow(

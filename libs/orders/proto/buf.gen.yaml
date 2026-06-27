@@ -1,0 +1,12 @@
+# Generated Python + type stubs land in the orders kernel package (orders/_pb) so
+# they ship in the wheel (hatch packages = ["orders"]). Plugins are pinned to a
+# protobuf release matching the installed runtime (google.protobuf 6.33.x) — the
+# gencode major version must equal the runtime major or import-time validation
+# fails. Codegen pulls remote plugins over the network (Resolve tier, ADR-0013);
+# the generated output is committed so offline rebuilds (Tier 1/2) need no network.
+version: v2
+plugins:
+  - remote: buf.build/protocolbuffers/python:v33.1
+    out: ../python/orders/_pb
+  - remote: buf.build/protocolbuffers/pyi:v33.1
+    out: ../python/orders/_pb
