@@ -41,10 +41,32 @@ render-oss-bootstrap:
 lint-manifests:
     uv run bash deploy/lint-manifests.sh
 
-# All static checks: python (poe) + k8s manifests (helm/kubeconform).
+# Protobuf codegen — buf + remote plugins (network/Resolve tier, ADR-0013). The
+# generated *_pb2.py/.pyi are committed (orders kernel ships them in the wheel),
+# so this only runs when contracts change, never on the offline gate.
+proto-gen:
+    cd libs/orders/proto && buf generate
+
+# Lint the proto contracts. Wired into the static gate.
+proto-lint:
+    cd libs/orders/proto && buf lint
+
+# Check the contracts for wire-breaking changes vs main. Run on branches once the
+# baseline exists on main; skipped from the gate because the first introduction
+# has no baseline to compare against. This is the payload-compatibility guard.
+proto-breaking:
+    cd libs/orders/proto && buf breaking --against '../../../.git#branch=main,subdir=libs/orders/proto'
+
+# Fail if committed generated code has drifted from the .proto sources (networked
+# CI lane only — needs buf + remote plugins; do not add to the offline gate).
+proto-check: proto-gen
+    git diff --exit-code -- libs/orders/python/orders/_pb
+
+# All static checks: python (poe) + k8s manifests (helm/kubeconform) + proto lint.
 lint:
     uv run poe lint
     just lint-manifests
+    just proto-lint
 
 # Run tests (python leaf).
 test:

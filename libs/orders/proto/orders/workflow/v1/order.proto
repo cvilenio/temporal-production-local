@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package orders.workflow.v1;
+
+// Wire contracts for the order workflow's own input and result. Distinct package
+// (workflow vs activities) so the two contract families version independently.
+// Money is carried in minor units (cents); status is the OrderResultStatus
+// string value. See ADR-0021.
+
+message OrderWorkflowInput {
+  string order_id = 1;
+  string item_id = 2;
+  int32 quantity = 3;
+  string user_id = 4;
+  string address = 5;
+  string payment_authorization_id = 6;
+  int64 amount_minor = 7;
+  string trace_id = 8;
+}
+
+message OrderWorkflowResult {
+  string status = 1;
+  string order_id = 2;
+  string tracking_id = 3;
+  string trace_id = 4;
+}

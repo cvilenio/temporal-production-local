@@ -1,7 +1,7 @@
 from datetime import timedelta
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from orders.shared.contracts import OrderWorkflowInput, OrderWorkflowResult
 
 # Upper bound for a single order workflow execution. Sized above worst-case
 # activity retries, two shipping create/verify cycles, and saga compensations
@@ -9,27 +9,15 @@ from pydantic import BaseModel, ConfigDict
 ORDER_WORKFLOW_EXECUTION_TIMEOUT = timedelta(minutes=30)
 
 # Terminal status reported on the workflow result. Shared so the workflow,
-# terminal config, and result model stay in sync.
+# terminal config, and result model stay in sync. Carried as a plain string on
+# the OrderWorkflowResult proto (ADR-0021: status stays a string on the wire).
 OrderResultStatus = Literal["Success", "Cancelled", "Failed - Shipping"]
 
-
-class OrderWorkflowInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    order_id: str
-    item_id: str
-    quantity: int
-    user_id: str
-    address: str
-    payment_authorization_id: str
-    amount: float
-    trace_id: str | None = None
-
-
-class OrderWorkflowResult(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    status: OrderResultStatus
-    order_id: str
-    tracking_id: str | None = None
-    trace_id: str | None = None
+# OrderWorkflowInput / OrderWorkflowResult are now protobuf messages (generated
+# from libs/orders/proto). Money is carried as amount_minor (cents).
+__all__ = [
+    "ORDER_WORKFLOW_EXECUTION_TIMEOUT",
+    "OrderResultStatus",
+    "OrderWorkflowInput",
+    "OrderWorkflowResult",
+]
