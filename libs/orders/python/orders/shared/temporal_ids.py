@@ -39,3 +39,7 @@ class SearchAttribute:
     ORDER_ID = SearchAttributeKey.for_keyword("OrderId")
     ORDER_STATUS = SearchAttributeKey.for_keyword("OrderStatus")
     TRACE_ID = SearchAttributeKey.for_keyword("TraceId")
+    # Contract versions this execution has emitted to its activities (ADR-0021).
+    # KeywordList so retirement of an old contract is a query, not a guess:
+    #   ContractVersions in ("1") AND ExecutionStatus = "Running"
+    CONTRACT_VERSIONS = SearchAttributeKey.for_keyword_list("ContractVersions")

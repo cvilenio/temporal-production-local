@@ -12,6 +12,9 @@ dependencies = [
     "opentelemetry-api>=1.25",
     "opentelemetry-exporter-otlp-proto-grpc>=1.25",
     "opentelemetry-sdk>=1.25",
+    # Runtime for the generated activity/workflow proto contracts (orders/_pb).
+    # Major must match the buf gencode plugin pin in libs/orders/proto/buf.gen.yaml.
+    "protobuf>=6.30,<7",
     "pydantic-settings>=2.14.0",
     "pydantic==2.7.1",
     "sqlalchemy[asyncio]>=2.0.30,<3",

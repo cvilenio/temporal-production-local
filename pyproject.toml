@@ -117,7 +117,7 @@ PY
 typeCheckingMode = "standard"
 pythonVersion = "3.12"
 include = ["libs", "apps"]
-exclude = ["**/.venv", "**/__pycache__", "archive"]
+exclude = ["**/.venv", "**/__pycache__", "archive", "**/orders/_pb"]
 # The kernel is an installable package (import `orders`); thin apps run
 # from their own directory and import the kernel. Console keeps its `from app...`
 # layout, so its root is its own app dir.
@@ -145,6 +145,8 @@ filterwarnings = [
 
 [tool.ruff]
 target-version = "py312"
+# Generated protobuf code is committed but never hand-edited or linted.
+extend-exclude = ["libs/orders/python/orders/_pb"]
 
 [tool.ruff.lint]
 # E/F = pyflakes + pycodestyle (defaults), I = import sorting,

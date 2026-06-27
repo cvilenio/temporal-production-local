@@ -17,10 +17,16 @@ resource "temporalcloud_namespace" "this" {
 # Custom search attributes — namespace setup, declared here (the OSS equivalent is the
 # temporal-search-attributes bootstrap container in compose/oss-server.yml). On Cloud
 # these are control-plane operations; the provider handles them without a data-plane key.
+#
+# The shared spec (config/temporal/namespaces.yaml) uses the CLI-style type names
+# (Text, Keyword, KeywordList) the OSS bootstrap feeds to `temporal operator
+# search-attribute create`. The Cloud provider's enum spells the multi-word type
+# differently (keyword_list); translate just that one so the single-word types pass
+# through unchanged (no churn on the already-provisioned attributes).
 resource "temporalcloud_namespace_search_attribute" "this" {
   for_each = var.search_attributes
 
   namespace_id = temporalcloud_namespace.this.id
   name         = each.key
-  type         = each.value
+  type         = each.value == "KeywordList" ? "keyword_list" : each.value
 }

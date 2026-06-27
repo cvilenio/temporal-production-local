@@ -30,3 +30,6 @@ domains:
       OrderId: Text
       TraceId: Text
       OrderStatus: Keyword
+      # Activity contract versions with live traffic (ADR-0021): retire an old
+      # contract by query, e.g. ContractVersions in ("1") AND ExecutionStatus="Running".
+      ContractVersions: KeywordList

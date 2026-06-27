@@ -14,8 +14,11 @@ class OrderRunContext:
         self.user_id = input.user_id
         self.address = input.address
         self.payment_authorization_id = input.payment_authorization_id
-        self.amount = input.amount
-        self.trace_id = input.trace_id
+        # Money in minor units (cents) — see ADR-0021.
+        self.amount_minor = input.amount_minor
+        # proto3 strings default to "" (never None); restore None for absent so
+        # downstream truthiness / log-None-dropping behaves as before.
+        self.trace_id = input.trace_id or None
 
     def idem_key(self, step_name: str) -> str:
         return f"{self.order_id}-{step_name}-1"

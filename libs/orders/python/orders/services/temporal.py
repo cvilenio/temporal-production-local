@@ -94,6 +94,9 @@ class TemporalService:
         pairs = [
             SearchAttributePair(SearchAttribute.ORDER_ID, order_id),
             SearchAttributePair(SearchAttribute.ORDER_STATUS, "pending"),
+            # Pre-set the contract-version list the workflow will also upsert, so
+            # the attribute is queryable from the first task (ADR-0021).
+            SearchAttributePair(SearchAttribute.CONTRACT_VERSIONS, ["1"]),
         ]
         if trace_id:
             pairs.append(SearchAttributePair(SearchAttribute.TRACE_ID, trace_id))
