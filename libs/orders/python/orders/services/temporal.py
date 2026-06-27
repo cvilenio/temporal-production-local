@@ -4,6 +4,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+from appkit import build_temporal_client
 from orders.shared.temporal_ids import SearchAttribute, SignalName, TaskQueue
 from orders.shared.workflow_io import (
     ORDER_WORKFLOW_EXECUTION_TIMEOUT,
@@ -18,8 +19,7 @@ from temporalio.common import (
     TypedSearchAttributes,
     WorkflowIDConflictPolicy,
 )
-from temporalio.contrib.pydantic import pydantic_data_converter
-from temporalio.service import RPCError, RPCStatusCode, TLSConfig
+from temporalio.service import RPCError, RPCStatusCode
 
 logger = logging.getLogger(__name__)
 
@@ -54,30 +54,18 @@ class TemporalService:
         self.client: Client | None = None
 
     async def connect(self):
-        # Connection profile (driven by Settings / env):
-        #   Local (compose or self-hosted on kind): tls=False, no auth.
-        #   Temporal Cloud: tls=True + API key, or mTLS client cert/key.
-        # TracingInterceptor propagates OTel span context across the
-        # client → workflow → activity boundary; pydantic_data_converter handles
-        # typed payload serialisation. Both are independent of the transport.
-        tls_config: bool | TLSConfig = self.tls
-        if self.tls_client_cert_path and self.tls_client_key_path:
-            with open(self.tls_client_cert_path, "rb") as cert_file:
-                client_cert = cert_file.read()
-            with open(self.tls_client_key_path, "rb") as key_file:
-                client_key = key_file.read()
-            tls_config = TLSConfig(
-                client_cert=client_cert, client_private_key=client_key
-            )
-
-        self.client = await Client.connect(
-            self.temporal_address,
+        # The client (and the data-converter contract it carries) is built by the
+        # appkit factory so the API and the workers can never wire different
+        # converters — see appkit.build_temporal_client / ADR-0021, ADR-0022.
+        self.client = await build_temporal_client(
+            address=self.temporal_address,
             namespace=self.temporal_namespace,
-            data_converter=pydantic_data_converter,
-            interceptors=self.interceptors,
             runtime=self.runtime,
-            tls=tls_config,
-            api_key=self.api_key or None,
+            interceptors=self.interceptors,
+            tls=self.tls,
+            api_key=self.api_key,
+            tls_client_cert_path=self.tls_client_cert_path,
+            tls_client_key_path=self.tls_client_key_path,
         )
         return self.client
 

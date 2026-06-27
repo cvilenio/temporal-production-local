@@ -4,6 +4,7 @@ version = "0.0.0"
 description = "Orders domain shared kernel: workflows, activities, clients, db, telemetry, and the API/worker entrypoints apps build on."
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "appkit",
     "asyncpg>=0.29.0",
     "dependency-injector>=4.49",
     "obslog",

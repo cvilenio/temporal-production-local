@@ -5,13 +5,13 @@ import socket
 import uuid
 from contextlib import asynccontextmanager
 
+from appkit import Database
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response
 from obslog import bound, get_logger
 from sqlalchemy import select, text
 
 from orders.config import settings
-from orders.db.engine import Database
 from orders.db.models import Base, IdempotencyRecord, Order
 from orders.resources import container, get_database, get_temporal_service
 from orders.services.temporal import TemporalService

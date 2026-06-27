@@ -4,6 +4,7 @@ requires-python = "==3.12.*"
 
 [manifest]
 members = [
+    "appkit",
     "obslog",
     "orders",
     "temporal-demo",
@@ -96,6 +97,31 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/1c/b5/001890774a9552aff22502b8da382593109ce0c95314abaebbb116567545/anyio-4.14.0.tar.gz", hash = "sha256:b47c1f9ccf73e67021df785332508f99379c68fa7d0684e8e3492cb1d4b23f89", size = 253586, upload-time = "2026-06-15T22:00:49.021Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ba/16/9826f089383c593cdfc4a6e5aca94d9e91ae1692c57af82c3b2aa5e810f7/anyio-4.14.0-py3-none-any.whl", hash = "sha256:dd9b7a2a9799ed6552fde617b2c5df02b7fdd7d88392fc48101e51bae46164d9", size = 123506, upload-time = "2026-06-15T22:00:47.595Z" },
+]
+
+[[package]]
+name = "appkit"
+version = "0.0.0"
+source = { editable = "libs/appkit/python" }
+dependencies = [
+    { name = "obslog" },
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-exporter-otlp-proto-grpc" },
+    { name = "opentelemetry-sdk" },
+    { name = "pydantic-settings" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "temporalio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "obslog", editable = "libs/logging/python" },
+    { name = "opentelemetry-api", specifier = ">=1.25" },
+    { name = "opentelemetry-exporter-otlp-proto-grpc", specifier = ">=1.25" },
+    { name = "opentelemetry-sdk", specifier = ">=1.25" },
+    { name = "pydantic-settings", specifier = ">=2.14.0" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.30,<3" },
+    { name = "temporalio", specifier = ">=1.28,<1.29" },
 ]
 
 [[package]]
@@ -650,6 +676,7 @@ name = "orders"
 version = "0.0.0"
 source = { editable = "libs/orders/python" }
 dependencies = [
+    { name = "appkit" },
     { name = "asyncpg" },
     { name = "dependency-injector" },
     { name = "fastapi" },
@@ -668,6 +695,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "appkit", editable = "libs/appkit/python" },
     { name = "asyncpg", specifier = ">=0.29.0" },
     { name = "dependency-injector", specifier = ">=4.49" },
     { name = "fastapi", specifier = "==0.111.0" },
@@ -1136,6 +1164,7 @@ mock-api = [
     { name = "uvicorn" },
 ]
 orders-api = [
+    { name = "appkit" },
     { name = "orders" },
 ]
 platform-console = [
@@ -1151,6 +1180,7 @@ platform-console = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 workers = [
+    { name = "appkit" },
     { name = "orders" },
 ]
 
@@ -1181,7 +1211,10 @@ mock-api = [
     { name = "pydantic", specifier = "==2.7.1" },
     { name = "uvicorn", specifier = "==0.29.0" },
 ]
-orders-api = [{ name = "orders", editable = "libs/orders/python" }]
+orders-api = [
+    { name = "appkit", editable = "libs/appkit/python" },
+    { name = "orders", editable = "libs/orders/python" },
+]
 platform-console = [
     { name = "asyncpg", specifier = ">=0.29.0" },
     { name = "docker", specifier = ">=7.1.0" },
@@ -1194,7 +1227,10 @@ platform-console = [
     { name = "temporalio", specifier = ">=1.28,<1.29" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.29.0" },
 ]
-workers = [{ name = "orders", editable = "libs/orders/python" }]
+workers = [
+    { name = "appkit", editable = "libs/appkit/python" },
+    { name = "orders", editable = "libs/orders/python" },
+]
 
 [[package]]
 name = "temporalio"

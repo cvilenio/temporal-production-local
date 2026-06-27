@@ -20,13 +20,12 @@ Entrypoint pattern (sync resources → do NOT await):
 
 from collections.abc import Iterator
 
+from appkit import Database, Telemetry, init_observability
 from dependency_injector import containers, providers
 
 from orders.clients.mock_api import MockApiClient
 from orders.clients.orders_service import OrdersServiceClient
-from orders.db.engine import Database
 from orders.services.temporal import TemporalService
-from orders.shared.telemetry import Telemetry, init_observability
 
 
 def _telemetry_resource(

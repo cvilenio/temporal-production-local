@@ -2,10 +2,10 @@ import argparse
 import asyncio
 import os
 import socket
-from dataclasses import dataclass, field
 
+from appkit import WorkerProfile, WorkerTuning, build_deployment_config
+from appkit import run_worker as _run_worker
 from obslog import get_logger
-from temporalio.worker import Worker
 
 from orders.activities import (
     make_customer_message_activities,
@@ -40,22 +40,6 @@ def _build_activity_group(name: str) -> list:
     raise ValueError(f"Unknown activity group: {name}")
 
 
-@dataclass(frozen=True)
-class WorkerProfile:
-    """One deployable worker.
-
-    Scaling out the fleet is additive: register another profile here and add a
-    matching thin entrypoint under apps/workers/<lang>/<name>/. That is how a
-    CPU-bound activity worker lives alongside an IO-bound one — separate
-    profiles, separate task queues, scaled and tuned independently.
-    """
-
-    name: str
-    task_queue: str
-    workflows: list = field(default_factory=list)
-    activity_groups: tuple[str, ...] = ()
-
-
 # The worker fleet, keyed by profile name. Each thin app passes its own name.
 WORKER_PROFILES: dict[str, WorkerProfile] = {
     "workflow": WorkerProfile(
@@ -76,35 +60,13 @@ WORKER_PROFILES: dict[str, WorkerProfile] = {
 }
 
 
-def _deployment_config():
-    """Build a WorkerDeploymentConfig from env when Worker Versioning is enabled.
-
-    Returns None unless TEMPORAL_WORKER_BUILD_ID is set. In Kubernetes the
-    Temporal Worker Controller injects TEMPORAL_DEPLOYMENT_NAME and
-    TEMPORAL_WORKER_BUILD_ID (the Build ID is derived from the pod-template
-    hash, so shipping a new version is just a new image tag). Local/compose
-    runs leave both unset and stay version-agnostic, preserving prior behavior.
-    """
-    build_id = os.getenv("TEMPORAL_WORKER_BUILD_ID")
-    if not build_id:
-        return None
-    from temporalio.common import WorkerDeploymentVersion
-    from temporalio.worker import WorkerDeploymentConfig
-
-    deployment_name = os.getenv("TEMPORAL_DEPLOYMENT_NAME", "orders")
-    return WorkerDeploymentConfig(
-        version=WorkerDeploymentVersion(
-            deployment_name=deployment_name, build_id=build_id
-        ),
-        use_worker_versioning=True,
-    )
-
-
 async def run_worker(profile_name: str) -> None:
     """Run the worker described by the named profile.
 
     Thin app entrypoints under apps/workers/<lang>/<name>/ call this with a
-    fixed profile name, so each deployment unit hosts exactly one worker.
+    fixed profile name, so each deployment unit hosts exactly one worker. The
+    generic build-and-run loop lives in appkit.run_worker; this resolves the
+    orders profile (workflows + activity groups) and owns the telemetry lifecycle.
     """
     profile = WORKER_PROFILES.get(profile_name)
     if profile is None:
@@ -143,43 +105,24 @@ async def run_worker(profile_name: str) -> None:
     for group in profile.activity_groups:
         activities.extend(_build_activity_group(group))
 
-    deployment_config = _deployment_config()
-    log.info(
-        "starting Temporal worker",
-        profile=profile.name,
-        task_queue=str(profile.task_queue),
-        versioning="on" if deployment_config else "off",
-        concurrency={
-            "activities": settings.worker_max_concurrent_activities,
-            "workflow_tasks": settings.worker_max_concurrent_workflow_tasks,
-            "local_activities": settings.worker_max_concurrent_local_activities,
-            "activity_polls": settings.worker_max_concurrent_activity_task_polls,
-            "workflow_polls": settings.worker_max_concurrent_workflow_task_polls,
-            "cached_workflows": settings.worker_max_cached_workflows,
-        },
-    )
-
-    worker = Worker(
+    await _run_worker(
         client,
         task_queue=profile.task_queue,
         workflows=profile.workflows,
         activities=activities,
-        deployment_config=deployment_config,
-        max_concurrent_activities=settings.worker_max_concurrent_activities,
-        max_concurrent_workflow_tasks=settings.worker_max_concurrent_workflow_tasks,
-        max_concurrent_local_activities=settings.worker_max_concurrent_local_activities,
-        max_concurrent_activity_task_polls=settings.worker_max_concurrent_activity_task_polls,
-        max_concurrent_workflow_task_polls=settings.worker_max_concurrent_workflow_task_polls,
-        max_cached_workflows=settings.worker_max_cached_workflows,
+        tuning=WorkerTuning(
+            max_concurrent_activities=settings.worker_max_concurrent_activities,
+            max_concurrent_workflow_tasks=settings.worker_max_concurrent_workflow_tasks,
+            max_concurrent_local_activities=settings.worker_max_concurrent_local_activities,
+            max_concurrent_activity_task_polls=settings.worker_max_concurrent_activity_task_polls,
+            max_concurrent_workflow_task_polls=settings.worker_max_concurrent_workflow_task_polls,
+            max_cached_workflows=settings.worker_max_cached_workflows,
+        ),
+        deployment_config=build_deployment_config(default_deployment_name="orders"),
+        # Flush in-flight spans / logs / metrics before the process exits. Runs on
+        # SIGTERM after worker.run() returns.
+        on_shutdown=container.shutdown_resources,
     )
-
-    try:
-        await worker.run()
-    finally:
-        # Flush in-flight spans / logs / metrics before the process exits.
-        # Runs on SIGTERM — Temporal's worker handles the signal and returns
-        # from worker.run(), then this drains the last telemetry batch.
-        container.shutdown_resources()
 
 
 async def main() -> None:
