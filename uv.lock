@@ -677,39 +677,25 @@ version = "0.0.0"
 source = { editable = "libs/orders/python" }
 dependencies = [
     { name = "appkit" },
-    { name = "asyncpg" },
-    { name = "dependency-injector" },
-    { name = "fastapi" },
     { name = "httpx" },
     { name = "obslog" },
     { name = "opentelemetry-api" },
-    { name = "opentelemetry-exporter-otlp-proto-grpc" },
-    { name = "opentelemetry-sdk" },
     { name = "protobuf" },
     { name = "pydantic" },
-    { name = "pydantic-settings" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "temporalio" },
-    { name = "uvicorn" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "appkit", editable = "libs/appkit/python" },
-    { name = "asyncpg", specifier = ">=0.29.0" },
-    { name = "dependency-injector", specifier = ">=4.49" },
-    { name = "fastapi", specifier = "==0.111.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "obslog", editable = "libs/logging/python" },
     { name = "opentelemetry-api", specifier = ">=1.25" },
-    { name = "opentelemetry-exporter-otlp-proto-grpc", specifier = ">=1.25" },
-    { name = "opentelemetry-sdk", specifier = ">=1.25" },
     { name = "protobuf", specifier = ">=6.30,<7" },
     { name = "pydantic", specifier = "==2.7.1" },
-    { name = "pydantic-settings", specifier = ">=2.14.0" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.30,<3" },
     { name = "temporalio", specifier = ">=1.28,<1.29" },
-    { name = "uvicorn", specifier = "==0.29.0" },
 ]
 
 [[package]]
@@ -1165,7 +1151,11 @@ mock-api = [
 ]
 orders-api = [
     { name = "appkit" },
+    { name = "asyncpg" },
+    { name = "dependency-injector" },
+    { name = "fastapi" },
     { name = "orders" },
+    { name = "uvicorn" },
 ]
 platform-console = [
     { name = "asyncpg" },
@@ -1181,6 +1171,7 @@ platform-console = [
 ]
 workers = [
     { name = "appkit" },
+    { name = "dependency-injector" },
     { name = "orders" },
 ]
 
@@ -1213,7 +1204,11 @@ mock-api = [
 ]
 orders-api = [
     { name = "appkit", editable = "libs/appkit/python" },
+    { name = "asyncpg", specifier = ">=0.29.0" },
+    { name = "dependency-injector", specifier = ">=4.49" },
+    { name = "fastapi", specifier = "==0.111.0" },
     { name = "orders", editable = "libs/orders/python" },
+    { name = "uvicorn", specifier = "==0.29.0" },
 ]
 platform-console = [
     { name = "asyncpg", specifier = ">=0.29.0" },
@@ -1229,6 +1224,7 @@ platform-console = [
 ]
 workers = [
     { name = "appkit", editable = "libs/appkit/python" },
+    { name = "dependency-injector", specifier = ">=4.49" },
     { name = "orders", editable = "libs/orders/python" },
 ]
 
