@@ -8,11 +8,13 @@ around it there. Provider *lifetimes* are this app's choice (policy); the conver
 (contract).
 
 No dependency-injector "wiring" (@inject / Provide[]) is used; providers are resolved
-explicitly via the accessors in main.py and FastAPI's Depends().
+explicitly via the accessors below and FastAPI's Depends().
 """
 
 from appkit import Database, Telemetry, telemetry_resource
 from dependency_injector import containers, providers
+from fastapi import Depends, Request
+from orders.services.temporal import TemporalService
 from settings import settings
 
 
@@ -39,3 +41,19 @@ class Container(containers.DeclarativeContainer):
 
 container = Container()
 container.config.from_pydantic(settings)
+
+
+# ── FastAPI dependency accessors (the DI → request bridge) ────────────────────
+def get_database() -> Database:
+    return container.database()
+
+
+def get_temporal_service(request: Request) -> TemporalService:
+    # Connected once in the lifespan and stashed on app.state — domain service over
+    # the shared-converter client (see main.py).
+    return request.app.state.temporal_service
+
+
+async def get_db_session(db: Database = Depends(get_database)):
+    async for session in db.get_session():
+        yield session
