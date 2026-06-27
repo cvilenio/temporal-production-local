@@ -1147,6 +1147,7 @@ mock-api = [
     { name = "opentelemetry-exporter-otlp-proto-grpc" },
     { name = "opentelemetry-sdk" },
     { name = "pydantic" },
+    { name = "pydantic-settings" },
     { name = "uvicorn" },
 ]
 orders-api = [
@@ -1200,6 +1201,7 @@ mock-api = [
     { name = "opentelemetry-exporter-otlp-proto-grpc", specifier = ">=1.25" },
     { name = "opentelemetry-sdk", specifier = ">=1.25" },
     { name = "pydantic", specifier = "==2.7.1" },
+    { name = "pydantic-settings", specifier = ">=2.2.1" },
     { name = "uvicorn", specifier = "==0.29.0" },
 ]
 orders-api = [

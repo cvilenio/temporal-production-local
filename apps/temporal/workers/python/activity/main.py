@@ -1,6 +1,6 @@
 """Orders activity worker (IO-bound side-effects) — the deployable app (ADR-0022).
 
-Standard three-module app layout: settings.py (env mapping), composition.py (DI wiring),
+Standard three-module app layout: settings.py (env mapping), dependencies.py (DI wiring),
 and this main.py (startup/lifecycle). One worker profile per directory; this is the
 activity worker. It builds the Temporal client via appkit (data-converter contract baked
 in), hosts the orders activities (no workflow), and owns the telemetry lifecycle. To add a
@@ -18,7 +18,7 @@ from appkit import (
     build_temporal_client,
     run_worker,
 )
-from composition import container
+from dependencies import container
 from orders.activities import (
     make_customer_message_activities,
     make_external_activities,
