@@ -1,7 +1,10 @@
 # 0020 — /libs vs /apps: domain core vs application composition boundary
 
-- **Status:** **DECISION LANDED (ADR-0022); migration NOT yet started.** This checkpoint is the
-  handoff to execute the migration in a fresh session.
+- **Status:** **DONE (2026-06-27).** Migration executed as two PRs — phase A created `libs/appkit`
+  and extracted the 3a kit; phase B moved composition into the apps and deleted it from
+  `libs/orders`. Gate green (lint + pyright + 13 tests); one live happy-path order on the
+  kind→Temporal Cloud path reached `completed`, confirming the data converter is uniform across
+  the orders-api and both workers. ADR-0022 status flipped to executed; ADR-0001 cross-ref added.
 - **Date:** 2026-06-26
 - **ADRs:** **ADR-0022** (new) — refines ADR-0001 (shared-kernel layout). Builds on ADR-0005
   (connection profiles), ADR-0004 (worker-deployment identity = contract), ADR-0021 (data

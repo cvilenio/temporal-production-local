@@ -13,7 +13,7 @@ from appkit.settings import (
     TemporalConnectionSettings,
     WorkerTuningSettings,
 )
-from appkit.telemetry import Telemetry, init_observability
+from appkit.telemetry import Telemetry, init_observability, telemetry_resource
 from appkit.temporal import build_temporal_client
 from appkit.worker import (
     WorkerProfile,
@@ -34,4 +34,5 @@ __all__ = [
     "build_temporal_client",
     "init_observability",
     "run_worker",
+    "telemetry_resource",
 ]

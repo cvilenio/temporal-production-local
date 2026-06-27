@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
 
-from appkit import build_temporal_client
 from orders.shared.temporal_ids import SearchAttribute, SignalName, TaskQueue
 from orders.shared.workflow_io import (
     ORDER_WORKFLOW_EXECUTION_TIMEOUT,
@@ -27,47 +25,18 @@ logger = logging.getLogger(__name__)
 # doesn't flood the frontend with simultaneous calls.
 _RESET_CONCURRENCY = 20
 
-if TYPE_CHECKING:
-    from temporalio.runtime import Runtime
-
 
 class TemporalService:
-    def __init__(
-        self,
-        temporal_address: str,
-        temporal_namespace: str,
-        runtime: Runtime | None = None,
-        interceptors: list | None = None,
-        tls: bool = False,
-        api_key: str | None = None,
-        tls_client_cert_path: str | None = None,
-        tls_client_key_path: str | None = None,
-    ):
-        self.temporal_address = temporal_address
-        self.temporal_namespace = temporal_namespace
-        self.runtime = runtime
-        self.interceptors = interceptors or []
-        self.tls = tls
-        self.api_key = api_key
-        self.tls_client_cert_path = tls_client_cert_path
-        self.tls_client_key_path = tls_client_key_path
-        self.client: Client | None = None
+    """Domain operations over a connected Temporal client (ADR-0022).
 
-    async def connect(self):
-        # The client (and the data-converter contract it carries) is built by the
-        # appkit factory so the API and the workers can never wire different
-        # converters — see appkit.build_temporal_client / ADR-0021, ADR-0022.
-        self.client = await build_temporal_client(
-            address=self.temporal_address,
-            namespace=self.temporal_namespace,
-            runtime=self.runtime,
-            interceptors=self.interceptors,
-            tls=self.tls,
-            api_key=self.api_key,
-            tls_client_cert_path=self.tls_client_cert_path,
-            tls_client_key_path=self.tls_client_key_path,
-        )
-        return self.client
+    Lifecycle-agnostic: it receives an already-connected `Client` (built by the
+    app's composition root via `appkit.build_temporal_client`, which bakes in the
+    data-converter contract) and owns none of the connection policy — just the
+    orders-domain start / cancel / reset behaviour.
+    """
+
+    def __init__(self, client: Client):
+        self.client = client
 
     async def start_order_workflow(
         self,
@@ -76,9 +45,6 @@ class TemporalService:
         trace_id: str | None,
         order_input: OrderWorkflowInput,
     ):
-        if not self.client:
-            raise RuntimeError("Temporal client not connected")
-
         pairs = [
             SearchAttributePair(SearchAttribute.ORDER_ID, order_id),
             SearchAttributePair(SearchAttribute.ORDER_STATUS, "pending"),
@@ -124,10 +90,6 @@ class TemporalService:
         closed when pass 2 lists them, so a few may survive deletion until the
         next reset. Counts in the return value reflect what actually happened.
         """
-        if not self.client:
-            raise RuntimeError("Temporal client not connected")
-
-        # Bind to a local so the None-narrowing holds inside the closures below.
         client = self.client
         sem = asyncio.Semaphore(_RESET_CONCURRENCY)
 
@@ -163,7 +125,7 @@ class TemporalService:
                     try:
                         await client.workflow_service.delete_workflow_execution(
                             DeleteWorkflowExecutionRequest(
-                                namespace=self.temporal_namespace,
+                                namespace=client.namespace,
                                 workflow_execution=WorkflowExecutionMsg(
                                     workflow_id=wf_id, run_id=run_id
                                 ),
@@ -190,8 +152,6 @@ class TemporalService:
         }
 
     async def cancel_order(self, workflow_id: str) -> dict:
-        if not self.client:
-            raise RuntimeError("Temporal client not connected")
         try:
             handle = self.client.get_workflow_handle(workflow_id)
             await handle.signal(SignalName.CANCEL_ORDER)

@@ -24,6 +24,8 @@ LOGS                        — Owned by `obslog` (the shared logging kernel), n
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import obslog
 from opentelemetry import metrics, trace
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
@@ -175,3 +177,38 @@ def init_observability(
         meter_provider=meter_provider,
         log_handle=log_handle,
     )
+
+
+def telemetry_resource(
+    service_name: str,
+    otlp_endpoint: str,
+    sdk_metrics_port: int,
+    log_level: str,
+    log_format: str,
+    log_otlp_push: bool,
+    namespace: str | None,
+    instance_id: str | None,
+    version: str | None,
+) -> Iterator[Telemetry]:
+    """Sync generator resource: init → yield → shutdown on teardown.
+
+    Shaped for a DI provider (e.g. dependency-injector `providers.Resource`) but
+    imports no DI framework — it's just a generator an app's composition root wraps.
+    Kept synchronous on purpose: an async generator resource resolves to a coroutine
+    when accessed (including via `.provided`), which breaks synchronous accessors and
+    any Singleton built from it. With a sync resource, init/shutdown run inline and
+    `.provided` resolves to the real attribute value.
+    """
+    tel = init_observability(
+        service_name,
+        otlp_endpoint,
+        int(sdk_metrics_port),
+        log_level=log_level,
+        log_format=log_format,
+        log_otlp_push=bool(log_otlp_push),
+        namespace=namespace,
+        instance_id=instance_id,
+        version=version,
+    )
+    yield tel
+    tel.shutdown()
