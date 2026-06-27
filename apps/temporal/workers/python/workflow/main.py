@@ -1,9 +1,9 @@
 """Orders workflow worker — the deployable app (ADR-0022).
 
-One worker profile per directory; this is the workflow worker. Its composition root
-wires only what it needs: telemetry and a Temporal client (built by appkit, with the
-data-converter contract baked in). It hosts the OrderWorkflow and no activities, so it
-carries no mock-api / orders-service ports — each worker reasons about what it truly needs.
+Standard three-module app layout: settings.py (env mapping), composition.py (DI wiring),
+and this main.py (startup/lifecycle). One worker profile per directory; this is the
+workflow worker. It builds the Temporal client via appkit (data-converter contract baked
+in), hosts the OrderWorkflow and no activities, and owns the telemetry lifecycle.
 Run with: python main.py
 """
 
@@ -12,48 +12,15 @@ import os
 import socket
 
 from appkit import (
-    Telemetry,
-    TelemetrySettings,
-    TemporalConnectionSettings,
     WorkerTuning,
-    WorkerTuningSettings,
     build_deployment_config,
     build_temporal_client,
     run_worker,
-    telemetry_resource,
 )
-from dependency_injector import containers, providers
+from composition import container
 from orders.shared.temporal_ids import TaskQueue
 from orders.workflows.order_workflow import OrderWorkflow
-
-
-class Settings(TemporalConnectionSettings, WorkerTuningSettings, TelemetrySettings):
-    temporal_namespace: str = "ziggymart"
-    otel_service_name: str = "orders-worker-workflow"
-
-
-settings = Settings()
-
-
-class Container(containers.DeclarativeContainer):
-    config = providers.Configuration()
-
-    telemetry: providers.Resource[Telemetry] = providers.Resource(
-        telemetry_resource,
-        service_name=config.otel_service_name,
-        otlp_endpoint=config.otel_exporter_otlp_endpoint,
-        sdk_metrics_port=config.sdk_metrics_port,
-        log_level=config.log_level,
-        log_format=config.log_format,
-        log_otlp_push=config.log_otlp_push,
-        namespace=config.service_namespace,
-        instance_id=config.service_instance_id,
-        version=config.worker_build_id,
-    )
-
-
-container = Container()
-container.config.from_pydantic(settings)
+from settings import settings
 
 
 async def main() -> None:
