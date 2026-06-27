@@ -1,7 +1,9 @@
 # ADR-0022: Domain core vs. application composition — the /libs vs /apps boundary
 
-- **Status:** Accepted (convention adopted; migration staged below, not yet executed)
-- **Date:** 2026-06-26
+- **Status:** Accepted — **migration executed** (libs/appkit created; composition moved into
+  the apps; `libs/orders` is domain-core only). Done as two PRs (3a extraction, then app
+  composition roots).
+- **Date:** 2026-06-26 (migration executed 2026-06-27)
 - **Related:** Refines ADR-0001 (shared-kernel monorepo layout). Builds on ADR-0005 (connection
   profiles → settings field-groups), ADR-0004 (Worker Deployment identity = a contract), and
   ADR-0021 (the data converter is a cross-app contract — the worked cautionary example here).
@@ -106,8 +108,9 @@ never redefine them.
 
 ## Migration plan
 
-Mechanical and stageable; each phase keeps the gate green. **Not yet executed** — separate PR(s)
-from the proto work. File-by-file disposition of today's `libs/orders/python/orders/`:
+Mechanical and stageable; each phase keeps the gate green. **Executed** (2026-06-27) as two PRs —
+phase A (3a extraction into `libs/appkit`) then phase B (app composition roots + deletions) —
+separate from the proto work. File-by-file disposition of `libs/orders/python/orders/`:
 
 | Today | Class | Destination |
 |---|---|---|

@@ -1,7 +1,11 @@
 # ADR-0001: Polyglot shared-kernel monorepo layout
 
-- **Status:** Accepted
+- **Status:** Accepted (boundary refined by [ADR-0022](0022-domain-core-vs-application-composition-boundary.md))
 - **Date:** 2026-06-23
+- **Superseding note:** This ADR's "fat shared kernel + razor-thin apps" is refined by
+  **ADR-0022**: composition (settings, DI, entrypoints, lifecycle) moved out of the domain
+  kernel into the apps + a generic kit (`libs/appkit`). `/libs` is now domain cores + the
+  kit (reusable, not deployable); `/apps` owns assembly. See ADR-0022 for the boundary.
 
 ## Context
 

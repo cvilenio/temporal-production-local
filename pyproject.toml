@@ -10,8 +10,19 @@ dependencies = []
 # source of truth. Worker and API apps are thin definitions on top.
 # `obslog` is the shared structured-logging kernel — apps that don't import the
 # orders kernel (console, mock-api) still share one logging facade via it.
-workers = ["orders", "appkit"]
-orders-api = ["orders", "appkit"]
+# The kernel (libs/orders) carries domain deps only; each app's composition root
+# adds the composition deps it uses (ADR-0022). Workers run python main.py and wire
+# ports via dependency-injector; orders-api additionally serves FastAPI and talks to
+# Postgres (asyncpg driver for the appkit SQL engine).
+workers = ["orders", "appkit", "dependency-injector>=4.49"]
+orders-api = [
+  "orders",
+  "appkit",
+  "dependency-injector>=4.49",
+  "fastapi==0.111.0",
+  "uvicorn==0.29.0",
+  "asyncpg>=0.29.0",
+]
 codec-server = [
   "fastapi==0.111.0",
   "uvicorn==0.29.0",
