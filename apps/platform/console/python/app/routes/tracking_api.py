@@ -3,8 +3,8 @@ import json
 
 import httpx
 from app import db
-from app.config import settings
 from app.order_client import fetch_order as http_fetch_order
+from app.settings import settings
 from app.sse import broker
 from app.submission_log import submission_log
 from fastapi import APIRouter, HTTPException, Query, Request

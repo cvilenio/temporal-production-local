@@ -47,6 +47,7 @@ mock-api = [
   "fastapi==0.111.0",
   "uvicorn==0.29.0",
   "pydantic==2.7.1",
+  "pydantic-settings>=2.2.1",
   "obslog",
   # Host-plane mock pushes logs straight to the observability backend (no node
   # agent on the host) — needs the OTLP log exporter obslog imports lazily.

@@ -1,13 +1,15 @@
-"""Composition root for the orders workflow worker (ADR-0022).
+"""Dependency providers for the orders activity worker — the composition root (ADR-0022).
 
-Wires only what this worker needs: telemetry (a Resource — owns init/shutdown). The
-Temporal client is async to construct, so it is built in main.py from
-appkit.build_temporal_client (data-converter contract baked in). This worker hosts the
-OrderWorkflow and no activities, so it wires no mock-api / orders-service ports.
+Wires the ports this worker's activities need — the mock-api client and the orders-service
+client (both Singletons) — plus telemetry (a Resource — owns init/shutdown). The Temporal
+client is async to construct, so it is built in main.py from appkit.build_temporal_client
+(data-converter contract baked in). This worker hosts no workflow.
 """
 
 from appkit import Telemetry, telemetry_resource
 from dependency_injector import containers, providers
+from orders.clients.mock_api import MockApiClient
+from orders.clients.orders_service import OrdersServiceClient
 from settings import settings
 
 
@@ -25,6 +27,11 @@ class Container(containers.DeclarativeContainer):
         namespace=config.service_namespace,
         instance_id=config.service_instance_id,
         version=config.worker_build_id,
+    )
+
+    mock_api = providers.Singleton(MockApiClient, base_url=config.mock_api_url)
+    orders_service_client = providers.Singleton(
+        OrdersServiceClient, base_url=config.orders_service_url
     )
 
 

@@ -8,7 +8,7 @@ async def submit_order(
 ) -> dict[str, Any]:
     try:
         response = await client.post(
-            f"{base_url.rstrip('/')}/submit-order",
+            f"{base_url.rstrip('/')}/orders",
             json=payload,
             headers={"X-Idempotency-Key": idem_key},
         )

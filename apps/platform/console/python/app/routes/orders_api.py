@@ -9,9 +9,9 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Body
 
-from ..config import settings
 from ..order_client import submit_order
 from ..scenarios import SCENARIOS
+from ..settings import settings
 from ..submission_log import submission_log
 
 router = APIRouter(prefix="/api")

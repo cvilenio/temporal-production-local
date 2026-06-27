@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from . import db
-from .config import settings
+from .settings import settings
 
 logger = logging.getLogger(__name__)
 

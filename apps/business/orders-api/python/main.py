@@ -1,6 +1,6 @@
 """Orders REST API — the deployable app (ADR-0022).
 
-Standard three-module app layout: settings.py (env mapping), composition.py (DI wiring +
+Standard three-module app layout: settings.py (env mapping), dependencies.py (DI wiring +
 the FastAPI dependency accessors), and this main.py (the app factory, lifespan, and
 middleware). Routes live under routes/. The lifespan builds the Temporal client via
 appkit (data-converter contract baked in) and wraps the domain TemporalService around it.
@@ -13,7 +13,7 @@ import uuid
 from contextlib import asynccontextmanager
 
 from appkit import build_temporal_client
-from composition import container
+from dependencies import container
 from fastapi import FastAPI, Request
 from obslog import bound
 from orders.db.models import Base
