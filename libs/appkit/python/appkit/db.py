@@ -1,3 +1,9 @@
+"""Generic async SQLAlchemy engine + session factory (ADR-0022, class 3a).
+
+Names no table or domain model — `Database(dsn)` builds the engine; domain models
+(e.g. `orders.db.models`) and the app's chosen provider lifetime live elsewhere.
+"""
+
 import logging
 from contextlib import asynccontextmanager
 

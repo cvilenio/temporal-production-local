@@ -12,11 +12,12 @@ any accessor that depends on telemetry (get_temporal_service). Teardown calls
 `container.shutdown_resources()` to flush telemetry.
 """
 
+from appkit import Database
+
 from orders.clients.mock_api import MockApiClient
 from orders.clients.orders_service import OrdersServiceClient
 from orders.config import settings
 from orders.containers import Container
-from orders.db.engine import Database
 from orders.services.temporal import TemporalService
 
 container = Container()
