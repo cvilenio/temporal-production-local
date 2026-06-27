@@ -13,9 +13,11 @@ task-queue compatibility-set API is superseded.
 
 ## Decision
 
-- **Kernel:** `orders.worker` reads `TEMPORAL_DEPLOYMENT_NAME` and
+- **Kernel:** the worker reads `TEMPORAL_DEPLOYMENT_NAME` and
   `TEMPORAL_WORKER_BUILD_ID` from env and builds a `WorkerDeploymentConfig` when present;
   unset → version-agnostic (local/compose unchanged).
+  *(Post-[ADR-0022](0022-domain-core-vs-application-composition-boundary.md): this is now
+  `appkit.build_deployment_config`, called by each worker app's `main.py` — not the kernel.)*
 - **Kubernetes:** use the **Temporal Worker Controller** (`kind: WorkerDeployment` CRD +
   `kind: Connection`). The controller injects the env vars and derives the Build ID from the
   pod-template hash, so **shipping a version = a new image tag**. No edits to the worker pod

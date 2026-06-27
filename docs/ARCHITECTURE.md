@@ -44,27 +44,31 @@ entirely by the connection profile (env), see [Connection profiles](#connection-
 ## Repository layout
 
 ```
-apps/                         THIN deployment units — what you DEPLOY. Grouped by class.
+apps/                         DEPLOYABLE assembly — what you DEPLOY. Grouped by class.
   temporal/                     Orchestration substrate — required for workflows to run.
-    workers/python/
-      workflow/  main.py          run_worker("workflow")
-      activity/  main.py          run_worker("activity")
-      (activity-cpu/, activity-io/ … add a profile + a dir — see Worker fleet)
+    workers/python/               each worker app = settings.py + dependencies.py + main.py
+      workflow/                     hosts OrderWorkflow (wires no activity ports)
+      activity/                     hosts the activities (wires mock-api/orders-service ports)
+      (activity-cpu/, activity-io/ … add a sibling dir — see Worker fleet)
     codec-server/python/        Temporal-adjacent: remote codec proxy (scaffold).
   platform/                     Platform/operability tooling (not required by business logic).
     console/python/               Host-plane operator UI (HTMX + SSE); aggregates infra UIs.
   business/                     Temporal-agnostic domain apps + simulated integrations.
-    orders-api/python/            REST gateway that starts/signals workflows (entrypoint).
-    mock-api/python/              External-system simulator (a stand-in dependency).
+    orders-api/python/            REST gateway (FastAPI): settings/dependencies/main + routes/.
+    mock-api/python/              External-system simulator: settings/dependencies/main + routes/.
 
-libs/                         Shared code — what apps IMPORT. Use case ABOVE language.
-  orders/                       the orders domain (polyglot pieces stay together).
-    python/                       uv workspace package `orders`.
-      orders/                workflows/ activities/ clients/ db/ shared/
-                                    services/ config.py containers.py resources.py
-                                    api.py (FastAPI app)  worker.py (profiles + runner)
-      pyproject.toml                Owns the concrete library versions (single source of truth).
-    go/  typescript/              (future) same use case, other languages — side by side.
+libs/                         REUSABLE, not-deployable — what apps IMPORT (ADR-0022).
+  orders/                       domain core (the orders domain; polyglot pieces together).
+    python/                       uv package `orders`: workflows/ activities/ clients/
+      orders/                     db/models.py shared/ (contracts, ids, errors). NO env
+                                    reads, client/DB construction, or process lifecycle.
+      pyproject.toml                Domain deps only (single source of truth for them).
+    go/  typescript/              (future) same domain, other languages — side by side.
+  appkit/                       generic composition kit (domain- & app-agnostic, class 3a):
+    python/                       uv package `appkit`: build_temporal_client (bakes the
+                                  data-converter contract), SQL engine factory, telemetry
+                                  bootstrap, run_worker loop, settings field-groups.
+  logging/                      uv package `obslog` — the structured-logging kernel (ADR-0018).
 
 images/
   python.Dockerfile             Configurable image; build args pick the dep group +
@@ -88,12 +92,19 @@ Temporal / business / demo) · **`libs/`** (what they share) · **`images/`** (h
 build) · **`deploy/`** (how they ship). The deployable-vs-library line uses the names a
 newcomer already knows (`apps/` + `libs/`, per the Nx / uv monorepo convention).
 
-### Why shared-kernel + thin apps
+### Why domain core + generic kit + app composition (ADR-0022)
 
-The kernel holds everything reusable (workflow definitions, activity implementations,
-clients, DB models, telemetry, the API app factory, the worker runner). A deployable app
-is a few lines that import the kernel and start one thing. This matches the proven
-"shared base image + thin app" pattern and the official samples:
+`/libs` is **reusable and not deployable**, in two species: **domain cores** (`libs/orders` —
+workflow/activity definitions, client ports, proto contracts, DB models, ids/errors; no env,
+no client construction, no lifecycle) and a **generic composition kit** (`libs/appkit` —
+the Temporal client builder that bakes in the data-converter contract, the SQL engine factory,
+the telemetry bootstrap, the `run_worker` loop, and settings field-groups; names no workflow or
+service). `/apps` is the **deployable assembly**: each app has a `settings.py` / `dependencies.py`
+(composition root) / `main.py`, wires only the ports it uses, and chooses its own provider
+lifetimes — while *consuming* the shared contracts (data converter, queue/namespace/SA keys),
+never re-deciding them. The earlier "fat kernel + thin apps" (ADR-0001) put composition in the
+lib; ADR-0022 moved it to the apps + the kit. The reusable-code-by-use-case-then-language idea
+still matches the official samples:
 
 - **Python** — `bedrock/shared/` subpackage + per-app `TASK_QUEUE` constants
   (`samples-python`).
@@ -103,33 +114,31 @@ is a few lines that import the kernel and start one thing. This matches the prov
   (`samples-java`).
 - **Go** — lib package + thin `worker/main.go` + `constants.go` (`samples-go`).
 
-The image follows the same shape: `images/python.Dockerfile` always installs the kernel
-(the "base") and then copies a thin app directory (the "definition"). Build args select
-the uv dependency group and the entrypoint, so each app's footprint in the Dockerfile is
-zero — only `docker-compose.yml` / the Helm chart names them. One configurable image per
-language (`images/<lang>.Dockerfile`).
+The image follows the same shape: `images/python.Dockerfile` installs the app's uv
+dependency group (which pulls the `libs/` it needs — always the full `libs/` tree is copied
+so the workspace resolves) and then copies the app directory (its composition root +
+entrypoint). Build args select the dependency group and the entrypoint, so each app's
+footprint in the Dockerfile is zero — only `docker-compose.yml` / the Helm chart names them.
+One configurable image per language (`images/<lang>.Dockerfile`).
 
 ---
 
 ## Worker fleet (scales per language and per resource profile)
 
-A worker is described by a **profile** in `orders.worker.WORKER_PROFILES`:
-
-```python
-WorkerProfile(name, task_queue, workflows=[...], activity_groups=(...))
-```
-
-Each profile maps to one thin app under `apps/temporal/workers/<lang>/<name>/`. Today:
+Each worker is its own deployable app under `apps/temporal/workers/<lang>/<name>/`, whose
+`main.py` builds a Temporal client via `appkit.build_temporal_client` and runs the generic
+`appkit.run_worker` loop with the task queue, workflows, and activities it declares inline
+(`appkit.WorkerProfile` is the data shape). Today:
 
 | Profile | Task queue | Hosts |
 |---|---|---|
 | `workflow` | `orders-workflow-task-queue` | `OrderWorkflow` |
 | `activity` | `orders-activity-task-queue` | external + persistence + customer-message activities |
 
-Adding a worker is **additive** — register a profile, add a sibling app dir. This is how a
-**CPU-bound** activity worker lives alongside an **IO-bound** one: separate profiles,
-separate task queues, scaled and tuned independently. The kernel comments show the
-`activity-cpu` / `activity-io` extension. Nothing in the kernel changes.
+Adding a worker is **additive** — add a sibling app dir that wires its own ports and task
+queue. This is how a **CPU-bound** activity worker lives alongside an **IO-bound** one:
+separate apps, separate task queues, scaled and tuned independently. `libs/orders` (the
+domain) and `libs/appkit` (the kit) don't change.
 
 ---
 
@@ -138,9 +147,9 @@ separate task queues, scaled and tuned independently. The kernel comments show t
 Versioning uses the modern **Worker Deployment Versioning** model (Server ≥ 1.28 / CLI ≥
 1.4; our server is 1.31, SDK pinned `temporalio>=1.28,<1.29`).
 
-- **Deployment identity is a worker option.** `orders.worker` reads
+- **Deployment identity is a worker option.** `appkit.build_deployment_config` reads
   `TEMPORAL_DEPLOYMENT_NAME` and `TEMPORAL_WORKER_BUILD_ID` from the environment and, when
-  present, builds a `WorkerDeploymentConfig`. Absent (local/compose), the worker stays
+  present, builds a `WorkerDeploymentConfig` (each worker app calls it). Absent (local/compose), the worker stays
   version-agnostic — behavior is unchanged.
 - **Behavior is a per-workflow declaration.** `PINNED` (in-flight executions never replay
   against new code) vs `AUTO_UPGRADE` (migrate to current) is set on the workflow
@@ -161,8 +170,8 @@ See ADR-0004 and `deploy/charts/orders-workers`.
 Unchanged in model from the current stack (see `OBSERVABILITY.md`), carried onto kind:
 
 - **PUSH (OTLP gRPC):** traces → Tempo, logs → Loki, business metrics → Prometheus, via the
-  OpenTelemetry Collector. `orders.shared.telemetry` initializes the providers and
-  the Temporal `Runtime`.
+  OpenTelemetry Collector. `appkit`'s telemetry bootstrap (`init_observability`) initializes
+  the providers and the Temporal `Runtime`; each app starts it in its lifecycle.
 - **PULL (Prometheus scrape):** Temporal SDK operational metrics + Temporal server metrics.
 - On kind, the colleague reference (`alexandreroman/temporal-k8s`) supplies a turnkey
   **backlog-driven worker autoscaler**: PrometheusRule recording rules → prometheus-adapter
@@ -173,8 +182,9 @@ Unchanged in model from the current stack (see `OBSERVABILITY.md`), carried onto
 
 ## Connection profiles
 
-`orders.config.Settings` is the single source of connection config (one-stop
-config). Local is the default; Cloud is opt-in via env:
+`appkit`'s connection-profile field-group (`TemporalConnectionSettings`) defines the
+connection config; each app's `settings.py` composes it (with its own deltas). Local is the
+default; Cloud is opt-in via env:
 
 | Setting (env) | Local default | Temporal Cloud |
 |---|---|---|
