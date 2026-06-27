@@ -31,7 +31,7 @@ class OrdersServiceClient:
 
     async def update_customer_status(self, order_id: str, payload: dict) -> None:
         await self._request(
-            "PATCH", f"/orders/{order_id}/customer-status", json=payload
+            "PATCH", f"/internal/orders/{order_id}/customer-status", json=payload
         )
 
     async def persist_inventory_reservation(
@@ -58,7 +58,7 @@ class OrdersServiceClient:
         )
 
     async def mark_order_failed(self, order_id: str, payload: dict) -> None:
-        await self._request("POST", f"/orders/{order_id}/fail", json=payload)
+        await self._request("POST", f"/internal/orders/{order_id}/fail", json=payload)
 
     async def finalize_order(self, order_id: str) -> None:
         await self._request("POST", f"/internal/orders/{order_id}/finalize")

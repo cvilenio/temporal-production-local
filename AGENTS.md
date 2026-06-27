@@ -82,6 +82,36 @@ Notes:
   and push directly, no PR"). Then commit + push as they specify.
 - All commit/PR titles still obey the Commit Convention above.
 
+# Python app layout — settings / dependencies / main (+ routes/) (MUST)
+
+Applies to **Python** deployable apps under `/apps` (ADR-0022). Other languages are **not
+yet hardened** — do not assume this shape for a future Go/TS/Java app; revisit when one lands.
+
+Every mature Python app (i.e. not an unused scaffold/placeholder) uses the same module layout
+so apps read the same way:
+
+- **`settings.py`** — env → a typed `Settings` (pydantic-settings). Kernel apps compose the
+  `appkit` field-group mixins (`TemporalConnectionSettings` / `WorkerTuningSettings` /
+  `TelemetrySettings`) + their own deltas; standalone apps (e.g. mock-api) keep a small
+  self-contained `Settings`.
+- **`dependencies.py`** — the composition root: the `dependency-injector` `Container` (provider
+  *lifetimes* are this app's policy) plus, for web apps, the FastAPI dependency accessors. Named
+  `dependencies.py` — **not** `container.py` (DI jargon) or `composition.py` (vague). A larger
+  package app (the console) may instead spread this across purpose modules (`db.py`,
+  `order_client.py`) — that's fine; the rule is the *three roles*, not exactly three files.
+- **`main.py`** — entrypoint, lifecycle/lifespan, and (web apps) request middleware. Keep route
+  handlers OUT of `main.py`.
+
+**Route discipline (web apps).** Routes live in a `routes/` package, one module per **base path
+prefix**, and each module's `APIRouter(prefix="…")` declares that base once so endpoints are
+relative — never repeat or mismatch the prefix in individual paths. Group by URL prefix (e.g.
+orders-api: `/orders` public, `/internal/orders` workflow callbacks, `/admin`), not by loose
+"surface". `main.py` includes each router; `/health` may stay top-level.
+
+Contracts that cross apps (paths a caller hardcodes, the data converter, queue/namespace/SA keys)
+are consumed, not re-decided — change a path only by updating the API and its in-repo callers
+together (see ADR-0022 / ADR-0021).
+
 # Live kind testing — bring the platform-console up FIRST (MUST)
 
 The `platform-console` (http://localhost:8086) is the operator's single live window onto a

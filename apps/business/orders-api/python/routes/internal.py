@@ -1,11 +1,12 @@
 """Internal persistence routes — the workflow / activity callback surface.
 
-The orders workflow's activities call these to record state transitions (reservation,
-shipment, payment capture, customer status, failure, finalize) and to idempotently
-ensure the order record exists. Not part of the customer-facing API.
+All paths share the `/internal/orders` base (enforced by the router prefix). The orders
+workflow's activities call these to idempotently ensure the order record exists and to
+record each state transition (customer status, reservation, shipment, payment capture,
+failure, finalize). Not part of the customer-facing API.
 """
 
-from composition import get_db_session
+from dependencies import get_db_session
 from fastapi import APIRouter, Depends, HTTPException
 from orders.db.models import Order
 from orders.shared.models import (
@@ -17,11 +18,11 @@ from orders.shared.models import (
 )
 from sqlalchemy import select
 
-router = APIRouter()
+router = APIRouter(prefix="/internal/orders")
 
 
-@router.post("/internal/orders/ensure")
-async def internal_ensure_order(order_data: dict, session=Depends(get_db_session)):
+@router.post("/ensure")
+async def ensure_order(order_data: dict, session=Depends(get_db_session)):
     """Idempotent order record creation for the workflow."""
     order_id = order_data["order_id"]
     result = await session.execute(select(Order).where(Order.id == order_id))
@@ -45,7 +46,7 @@ async def internal_ensure_order(order_data: dict, session=Depends(get_db_session
     return {"ok": True, "status": "created"}
 
 
-@router.patch("/orders/{order_id}/customer-status")
+@router.patch("/{order_id}/customer-status")
 async def update_customer_status(
     order_id: str, payload: CustomerStatusUpdate, session=Depends(get_db_session)
 ):
@@ -66,7 +67,7 @@ async def update_customer_status(
     return {"ok": True}
 
 
-@router.patch("/internal/orders/{order_id}/inventory-reservation")
+@router.patch("/{order_id}/inventory-reservation")
 async def persist_inventory_reservation(
     order_id: str, payload: InventoryReservationUpdate, session=Depends(get_db_session)
 ):
@@ -79,7 +80,7 @@ async def persist_inventory_reservation(
     return {"ok": True}
 
 
-@router.patch("/internal/orders/{order_id}/shipment")
+@router.patch("/{order_id}/shipment")
 async def persist_shipment(
     order_id: str, payload: ShipmentUpdate, session=Depends(get_db_session)
 ):
@@ -92,7 +93,7 @@ async def persist_shipment(
     return {"ok": True}
 
 
-@router.patch("/internal/orders/{order_id}/payment-capture")
+@router.patch("/{order_id}/payment-capture")
 async def persist_payment_capture(
     order_id: str, payload: PaymentCaptureUpdate, session=Depends(get_db_session)
 ):
@@ -105,7 +106,7 @@ async def persist_payment_capture(
     return {"ok": True}
 
 
-@router.post("/orders/{order_id}/fail")
+@router.post("/{order_id}/fail")
 async def mark_order_failed(
     order_id: str, payload: OrderFailRequest, session=Depends(get_db_session)
 ):
@@ -123,7 +124,7 @@ async def mark_order_failed(
     return {"ok": True}
 
 
-@router.post("/internal/orders/{order_id}/finalize")
+@router.post("/{order_id}/finalize")
 async def finalize_order(order_id: str, session=Depends(get_db_session)):
     result = await session.execute(select(Order).where(Order.id == order_id))
     order = result.scalar_one_or_none()

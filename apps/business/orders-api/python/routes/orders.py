@@ -1,14 +1,15 @@
 """Public order routes — the customer / console surface.
 
-Submit an order (idempotent, cart-version-checked), read it, and cancel it
-(single or batch). Workflow/activity callbacks live in routes/internal.py; the
-destructive demo reset lives in routes/admin.py.
+All paths share the `/orders` base (enforced by the router prefix): create an order
+(idempotent, cart-version-checked), read it, and cancel it (single or batch). Workflow /
+activity persistence callbacks live under `/internal/orders` (routes/internal.py); the
+destructive demo reset lives under `/admin` (routes/admin.py).
 """
 
 import hashlib
 import json
 
-from composition import get_db_session, get_temporal_service
+from dependencies import get_db_session, get_temporal_service
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import Response
 from obslog import get_logger
@@ -21,17 +22,18 @@ from sqlalchemy import select
 
 log = get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(prefix="/orders")
 
 
-@router.post("/submit-order")
-async def submit_order(
+@router.post("")
+async def create_order(
     request: OrderRequest,
     raw_request: Request,
     x_idempotency_key: str = Header(None),
     temporal_service: TemporalService = Depends(get_temporal_service),
     session=Depends(get_db_session),
 ):
+    """Create an order: validate, persist, and start its Temporal workflow."""
     if not x_idempotency_key:
         raise HTTPException(
             status_code=400, detail="X-Idempotency-Key header is required"
@@ -145,7 +147,7 @@ async def submit_order(
     return response_data
 
 
-@router.get("/orders/{order_id}")
+@router.get("/{order_id}")
 async def get_order(order_id: str, session=Depends(get_db_session)):
     result = await session.execute(select(Order).where(Order.id == order_id))
     order = result.scalars().first()
@@ -173,36 +175,7 @@ async def get_order(order_id: str, session=Depends(get_db_session)):
     }
 
 
-@router.post("/orders/{order_id}/cancel")
-async def cancel_order(
-    order_id: str,
-    temporal_service: TemporalService = Depends(get_temporal_service),
-    session=Depends(get_db_session),
-):
-    """Cancel a running workflow."""
-    result = await session.execute(select(Order).where(Order.id == order_id))
-    order = result.scalar_one_or_none()
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-
-    # Only cancel if still in-flight
-    terminal_statuses = {s.value for s in OrderStatus.terminal_statuses()}
-    if order.status in terminal_statuses:
-        return {
-            "requested": False,
-            "reason": "already_terminal",
-            "status": order.status,
-        }
-
-    res = await temporal_service.cancel_order(order.workflow_id)
-    return {
-        "requested": res.get("requested"),
-        "reason": res.get("reason"),
-        "status": order.status,
-    }
-
-
-@router.post("/orders/cancel-batch")
+@router.post("/cancel-batch")
 async def cancel_batch(
     payload: dict,
     temporal_service: TemporalService = Depends(get_temporal_service),
@@ -232,3 +205,32 @@ async def cancel_batch(
             skipped += 1
 
     return {"requested": requested, "skipped": skipped}
+
+
+@router.post("/{order_id}/cancel")
+async def cancel_order(
+    order_id: str,
+    temporal_service: TemporalService = Depends(get_temporal_service),
+    session=Depends(get_db_session),
+):
+    """Cancel a running workflow."""
+    result = await session.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    # Only cancel if still in-flight
+    terminal_statuses = {s.value for s in OrderStatus.terminal_statuses()}
+    if order.status in terminal_statuses:
+        return {
+            "requested": False,
+            "reason": "already_terminal",
+            "status": order.status,
+        }
+
+    res = await temporal_service.cancel_order(order.workflow_id)
+    return {
+        "requested": res.get("requested"),
+        "reason": res.get("reason"),
+        "status": order.status,
+    }

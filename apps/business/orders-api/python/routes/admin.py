@@ -1,19 +1,19 @@
 """Admin / demo-reset route — destructive, gated behind DEMO_RESET_ENABLED."""
 
-from composition import get_db_session, get_temporal_service
+from dependencies import get_db_session, get_temporal_service
 from fastapi import APIRouter, Depends, HTTPException
 from orders.services.temporal import TemporalService
 from settings import settings
 from sqlalchemy import text
 
-router = APIRouter()
+router = APIRouter(prefix="/admin")
 
 # App tables truncated on reset. Listed explicitly (not reflected) so a future
 # table isn't silently wiped without a deliberate edit here.
 _RESET_TABLES = ("orders", "idempotency_keys")
 
 
-@router.post("/admin/reset")
+@router.post("/reset")
 async def admin_reset(
     delete_closed: bool = True,
     local_only: bool = False,

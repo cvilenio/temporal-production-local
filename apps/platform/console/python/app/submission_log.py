@@ -1,7 +1,7 @@
 import asyncio
 from collections import deque
 
-from .config import settings
+from .settings import settings
 
 
 class SubmissionLog:

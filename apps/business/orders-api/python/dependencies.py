@@ -1,4 +1,4 @@
-"""Composition root for the Orders REST API (ADR-0022).
+"""Dependency providers for the Orders REST API — the composition root (ADR-0022).
 
 This app wires only the ports it actually uses: telemetry (a Resource — it owns the
 init/shutdown lifecycle) and the database (a Singleton). The Temporal client is async to

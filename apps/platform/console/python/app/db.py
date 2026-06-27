@@ -5,7 +5,7 @@ from typing import Any
 import asyncpg
 from asyncpg.pool import Pool
 
-from .config import settings
+from .settings import settings
 
 logger = logging.getLogger(__name__)
 
