@@ -10,8 +10,8 @@ dependencies = []
 # source of truth. Worker and API apps are thin definitions on top.
 # `obslog` is the shared structured-logging kernel — apps that don't import the
 # orders kernel (console, mock-api) still share one logging facade via it.
-workers = ["orders"]
-orders-api = ["orders"]
+workers = ["orders", "appkit"]
+orders-api = ["orders", "appkit"]
 codec-server = [
   "fastapi==0.111.0",
   "uvicorn==0.29.0",
@@ -57,11 +57,12 @@ default-groups = ["workers", "orders-api", "codec-server", "platform-console", "
 
 # The Python shared kernels are workspace packages; apps depend on them by name.
 [tool.uv.workspace]
-members = ["libs/orders/python", "libs/logging/python"]
+members = ["libs/orders/python", "libs/logging/python", "libs/appkit/python"]
 
 [tool.uv.sources]
 orders = { workspace = true }
 obslog = { workspace = true }
+appkit = { workspace = true }
 
 # Task runner — Python toolchain ONLY (ruff / pyright / pytest).
 # Boundary rule: if a task shells docker/compose/terraform/kubectl/helm or
@@ -124,6 +125,7 @@ exclude = ["**/.venv", "**/__pycache__", "archive", "**/orders/_pb"]
 executionEnvironments = [
   { root = "libs/orders/python" },
   { root = "libs/logging/python" },
+  { root = "libs/appkit/python" },
   { root = "apps/business/orders-api/python" },
   { root = "apps/temporal/workers/python/workflow" },
   { root = "apps/temporal/workers/python/activity" },
