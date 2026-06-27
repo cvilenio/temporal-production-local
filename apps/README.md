@@ -1,8 +1,11 @@
 # `apps/` — deployment units, grouped by concern
 
-Each app here is a **thin deployment unit**: it imports the shared kernel from `libs/`,
-wires a little configuration, and starts exactly one thing. The interesting code lives in
-`libs/`; these are the entrypoints that ship.
+Each app here is a **deployable assembly**: it imports the domain core and the generic kit
+from `libs/`, wires only the ports it uses, and starts exactly one thing. Per ADR-0022 each
+app owns its composition — a standard `settings.py` (env), `dependencies.py` (the
+composition root), and `main.py` (entrypoint/lifecycle), plus a `routes/` package for web
+apps. The reusable code (domain definitions in `libs/orders`, the composition kit in
+`libs/appkit`) lives in `libs/`; the apps are where it's assembled and shipped.
 
 Apps are grouped one level down by **deployment class** — not by language and not by
 lifecycle. The axis is *who owns it* and *is it required for the workflow to run*:
