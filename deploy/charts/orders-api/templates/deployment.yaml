@@ -26,6 +26,14 @@ spec:
       labels:
         app.kubernetes.io/name: orders-api
         app.kubernetes.io/component: app
+      annotations:
+        # In-cluster Prometheus scrape discovery (ADR-0021). orders-api binds the
+        # Core SDK PrometheusConfig /metrics endpoint on :9000 (appkit/telemetry.py),
+        # distinct from the :8000 HTTP API port; the chart's default kubernetes-pods
+        # job reads these annotations to scrape it.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9000"
+        prometheus.io/path: "/metrics"
     spec:
       serviceAccountName: orders-api
       automountServiceAccountToken: false

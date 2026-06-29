@@ -52,6 +52,20 @@ variable "client_apikey_secret_name" {
   default     = "orders-client-apikey"
 }
 
+# Temporal Cloud OpenMetrics API key for the in-cluster Prometheus scrape (ADR-0021).
+# Minted OUT-OF-BAND with a Metrics Read-Only service account (provider 0.9.2's
+# account_access can't express that role — see deploy/argocd/applications/prometheus.yaml),
+# so it arrives as a tfvar / TF_VAR_cloud_metrics_apikey, never via cloud remote state
+# and never committed (.githooks/pre-commit). Empty is allowed: the Secret is still
+# created (so Prometheus boots and the SDK scrape + remote_write work), the Cloud
+# scrape job just 401s until a real key is supplied.
+variable "cloud_metrics_apikey" {
+  description = "Temporal Cloud Metrics Read-Only API key (Bearer token) for the OpenMetrics scrape. Out-of-band; empty disables only the Cloud scrape."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 # ArgoCD pulls ALL charts from the local OCI registry (deploy/kind/mirror-deps.sh
 # for third-party, just chart-publish for orders-workers) — no GitHub/public-internet
 # dependency for delivery. This is the in-cluster Service address of the registry.
