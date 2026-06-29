@@ -7,39 +7,45 @@
   "title": "Ziggymart — Business & Custom Metrics",
   "tags": ["ziggymart", "temporal", "demo"],
   "schemaVersion": 39,
-  "version": 1,
+  "version": 3,
   "time": { "from": "now-30m", "to": "now" },
   "templating": { "list": [] },
   "panels": [
     {
       "id": 1,
       "type": "timeseries",
-      "title": "Payments captured (rate/s)  — OTLP push business metric",
+      "title": "Payments captured (count/interval)  — OTLP push → ClickHouse",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-logs" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(orders_payments_captured_total[5m]))",
-          "legendFormat": "payments/s"
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-logs" },
+          "editorType": "sql",
+          "rawSql": "SELECT $__timeInterval(TimeUnix) AS time, sum(Value) AS \"payments captured\" FROM default.otel_metrics_sum WHERE $__timeFilter(TimeUnix) AND MetricName = 'orders.payments_captured' GROUP BY time ORDER BY time",
+          "queryType": "timeseries",
+          "format": 1,
+          "legendFormat": "payments captured"
         }
       ]
     },
     {
       "id": 2,
       "type": "timeseries",
-      "title": "Payment amount p95 (cents)  — OTLP push histogram",
+      "title": "Avg payment amount (cents)  — OTLP push histogram → ClickHouse",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-logs" },
       "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(orders_payment_amount_usd_cents_bucket[5m])))",
-          "legendFormat": "p95 amount (cents)"
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse-logs" },
+          "editorType": "sql",
+          "rawSql": "SELECT $__timeInterval(TimeUnix) AS time, sum(Sum) / nullIf(sum(Count), 0) AS \"avg amount (cents)\" FROM default.otel_metrics_histogram WHERE $__timeFilter(TimeUnix) AND MetricName = 'orders.payment_amount' GROUP BY time ORDER BY time",
+          "queryType": "timeseries",
+          "format": 1,
+          "legendFormat": "avg amount (cents)"
         }
       ]
     },
@@ -48,12 +54,12 @@
       "type": "timeseries",
       "title": "Workflow steps completed (rate/s by step)  — custom pull metric",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "prometheus-kind" },
       "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": { "type": "prometheus", "uid": "prometheus-kind" },
           "expr": "sum by (step) (rate(order_workflow_steps_completed[5m]))",
           "legendFormat": "{{step}}"
         }
@@ -64,12 +70,12 @@
       "type": "timeseries",
       "title": "Saga compensations run (rate/s by activity)  — custom pull metric",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "prometheus-kind" },
       "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": { "type": "prometheus", "uid": "prometheus-kind" },
           "expr": "sum by (activity) (rate(order_workflow_compensations_run[5m]))",
           "legendFormat": "{{activity}}"
         }
@@ -80,12 +86,12 @@
       "type": "timeseries",
       "title": "Payment capture call duration p95 (s)  — operational pull histogram",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "prometheus", "uid": "prometheus-kind" },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": { "type": "prometheus", "uid": "prometheus-kind" },
           "expr": "histogram_quantile(0.95, sum by (le) (rate(orders_payment_capture_duration_bucket[5m])))",
           "legendFormat": "p95 capture duration"
         }

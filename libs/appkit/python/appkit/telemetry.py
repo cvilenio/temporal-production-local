@@ -7,19 +7,23 @@ PULL  (Prometheus scrape)   — Temporal SDK + custom metrics via metric_meter()
                               PrometheusConfig binds /metrics on sdk_metrics_port.
                               Scraped by Prometheus inside the lgtm container.
 
-PUSH  (OTLP gRPC to lgtm)  — Traces → Tempo, Business metrics → Prometheus
-                              (via OTel Collector). Use business_meter() in
-                              activities and the API. Workflow code MUST use
+PUSH  (OTLP gRPC)          — Traces → Tempo (lgtm). Business metrics → ClickHouse
+                              via the standalone OTel Collector (ADR-0024), on a
+                              SEPARATE endpoint (metrics_otlp_endpoint) so they do
+                              not land in Tempo's lgtm collector. Use business_meter()
+                              in activities and the API. Workflow code MUST use
                               workflow.metric_meter() instead (replay-safe; rides
-                              the PULL pipeline).
+                              the PULL pipeline). Push metrics use DELTA temporality
+                              — the warehouse-natural shape for ClickHouse.
 
 LOGS                        — Owned by `obslog` (the shared logging kernel), not
                               wired here. Logs always render JSON to stdout (for
                               the Alloy DaemonSet to tail on Kubernetes / Docker
                               Desktop on the host) and, when log_otlp_push is on
-                              (host plane, no node agent), ALSO push OTLP → Loki.
-                              See ADR-0018. init_observability just forwards the
-                              log settings into obslog.init_logging.
+                              (host plane, no node agent), ALSO push OTLP → the
+                              OTel Collector → ClickHouse (ADR-0018/0020).
+                              init_observability just forwards the log settings
+                              into obslog.init_logging.
 """
 
 from __future__ import annotations
@@ -30,13 +34,38 @@ import obslog
 from opentelemetry import metrics, trace
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.metrics import MeterProvider
-from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+from opentelemetry.sdk.metrics import (
+    Counter,
+    Histogram,
+    MeterProvider,
+    ObservableCounter,
+    ObservableGauge,
+    ObservableUpDownCounter,
+    UpDownCounter,
+)
+from opentelemetry.sdk.metrics.export import (
+    AggregationTemporality,
+    PeriodicExportingMetricReader,
+)
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from temporalio.contrib.opentelemetry import TracingInterceptor
 from temporalio.runtime import PrometheusConfig, Runtime, TelemetryConfig
+
+# Delta temporality preference for the OTLP push pipeline (ADR-0024). Delta is the
+# warehouse-natural shape: each export carries the increment for its window, so a
+# SQL sum(Value) over a time range is an exact count in ClickHouse — no Prometheus-
+# style rate() over cumulative series needed. UpDownCounter/Gauge stay cumulative
+# (a delta on a level has no meaning).
+_DELTA_TEMPORALITY = {
+    Counter: AggregationTemporality.DELTA,
+    Histogram: AggregationTemporality.DELTA,
+    ObservableCounter: AggregationTemporality.DELTA,
+    UpDownCounter: AggregationTemporality.CUMULATIVE,
+    ObservableUpDownCounter: AggregationTemporality.CUMULATIVE,
+    ObservableGauge: AggregationTemporality.CUMULATIVE,
+}
 
 
 class Telemetry:
@@ -71,6 +100,7 @@ def init_observability(
     otlp_endpoint: str = "http://localhost:4317",
     sdk_metrics_port: int = 9000,
     *,
+    metrics_otlp_endpoint: str | None = None,
     log_level: str = "INFO",
     log_format: str = "json",
     log_otlp_push: bool = True,
@@ -84,8 +114,10 @@ def init_observability(
     Parameters
     ----------
     service_name:     Shown in Grafana as the service label (set per-process).
-    otlp_endpoint:    OTLP gRPC endpoint for traces, business metrics, and
-                      (when log_otlp_push) logs.
+    otlp_endpoint:    OTLP gRPC endpoint for traces and (when log_otlp_push) logs.
+    metrics_otlp_endpoint: OTLP gRPC endpoint for business (push) metrics. Defaults
+                      to otlp_endpoint when None. Point at the standalone OTel
+                      Collector so business metrics land in ClickHouse (ADR-0024).
     sdk_metrics_port: Port for the Temporal SDK Prometheus pull endpoint.
     log_level/format: Forwarded to obslog (root level; "json"|"console").
     log_otlp_push:    Push logs over OTLP too (host plane). False on Kubernetes,
@@ -103,14 +135,19 @@ def init_observability(
     )
     trace.set_tracer_provider(tracer_provider)
 
-    # ── Business metrics (OTLP push → Prometheus via OTel Collector) ────────
+    # ── Business metrics (OTLP push → ClickHouse via standalone OTel Collector) ─
     # Use business_meter() in activities and the API.
     # Workflow code must use workflow.metric_meter() (replay-safe).
+    # Pushed on metrics_otlp_endpoint (the standalone collector), distinct from the
+    # trace endpoint (lgtm/Tempo), with DELTA temporality for ClickHouse (ADR-0024).
     meter_provider = MeterProvider(
         resource=resource,
         metric_readers=[
             PeriodicExportingMetricReader(
-                OTLPMetricExporter(endpoint=otlp_endpoint),
+                OTLPMetricExporter(
+                    endpoint=metrics_otlp_endpoint or otlp_endpoint,
+                    preferred_temporality=_DELTA_TEMPORALITY,
+                ),
             )
         ],
     )
@@ -131,7 +168,7 @@ def init_observability(
     _activity.logger.activity_info_on_message = False
     _activity.logger.activity_info_on_extra = True
 
-    # ── Logs (obslog: stdout JSON always; OTLP → Loki when log_otlp_push) ────
+    # ── Logs (obslog: stdout JSON always; OTLP → collector→ClickHouse when push) ─
     # obslog owns the root-logger pipeline so that workflow.logger /
     # activity.logger and every stdlib logger render through one schema.
     log_handle = obslog.init_logging(
@@ -189,6 +226,7 @@ def telemetry_resource(
     namespace: str | None,
     instance_id: str | None,
     version: str | None,
+    metrics_otlp_endpoint: str | None = None,
 ) -> Iterator[Telemetry]:
     """Sync generator resource: init → yield → shutdown on teardown.
 
@@ -203,6 +241,7 @@ def telemetry_resource(
         service_name,
         otlp_endpoint,
         int(sdk_metrics_port),
+        metrics_otlp_endpoint=metrics_otlp_endpoint,
         log_level=log_level,
         log_format=log_format,
         log_otlp_push=bool(log_otlp_push),

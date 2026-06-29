@@ -15,11 +15,15 @@ ordersApi:
   # NodePort exposing orders-api to the host (the still-on-host console's
   # ORDERS_SERVICE_URL + the E2E curl). kind maps it to a host port.
   hostNodePort: 30800
-  # OTLP push endpoint (traces + business metrics). The SDK uses the gRPC
-  # exporter, so this MUST be the 4317 port (4318 is OTLP/HTTP — a gRPC client
-  # there fails). lgtm publishes 4317 on the host (docker-compose.yml); reached
-  # via the cluster host gateway. (Logs go stdout→Alloy, not here.)
+  # OTLP push endpoint for TRACES → lgtm/Tempo. gRPC, so MUST be 4317 (4318 is
+  # OTLP/HTTP — a gRPC client there fails). lgtm publishes 4317 on the host
+  # (docker-compose.yml), reached via the cluster host gateway. (Logs go
+  # stdout→Alloy, not here.)
   otelEndpoint: "http://host.docker.internal:4317"
+  # OTLP push endpoint for BUSINESS METRICS → standalone OTel Collector →
+  # ClickHouse (ADR-0024). Distinct from traces so business metrics warehouse in
+  # ClickHouse, not lgtm's bundled Prometheus. gRPC, host-published 4319.
+  metricsOtelEndpoint: "http://host.docker.internal:4319"
 
 # Logging (obslog / ADR-0018). On Kubernetes the Grafana Alloy DaemonSet tails
 # pod stdout, so orders-api logs JSON to stdout only (otlpPush=false).

@@ -27,6 +27,7 @@ class Container(containers.DeclarativeContainer):
         telemetry_resource,
         service_name=config.otel_service_name,
         otlp_endpoint=config.otel_exporter_otlp_endpoint,
+        metrics_otlp_endpoint=config.otel_exporter_otlp_metrics_endpoint,
         sdk_metrics_port=config.sdk_metrics_port,
         log_level=config.log_level,
         log_format=config.log_format,

@@ -70,6 +70,9 @@ spec:
             # --- Observability (best-effort; kind obs not yet wired) ---
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: {{ .Values.ordersApi.otelEndpoint | quote }}
+            # Business metrics push → standalone collector → ClickHouse (ADR-0024).
+            - name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
+              value: {{ .Values.ordersApi.metricsOtelEndpoint | quote }}
             - name: OTEL_SERVICE_NAME
               value: orders-service
             # --- Logging (obslog / ADR-0018) ---
