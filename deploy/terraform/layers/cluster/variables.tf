@@ -53,14 +53,15 @@ variable "client_apikey_secret_name" {
 }
 
 # Temporal Cloud OpenMetrics API key for the in-cluster Prometheus scrape (ADR-0021).
-# Minted OUT-OF-BAND with a Metrics Read-Only service account (provider 0.9.2's
-# account_access can't express that role — see deploy/argocd/applications/prometheus.yaml),
-# so it arrives as a tfvar / TF_VAR_cloud_metrics_apikey, never via cloud remote state
-# and never committed (.githooks/pre-commit). Empty is allowed: the Secret is still
+# FALLBACK source only: the default path is the in-band metricsread SA the cloud layer
+# mints (provider >= 1.x), consumed via remote state (see remote-state.tf /
+# observability.tf). Set this (TF_VAR_cloud_metrics_apikey, never committed —
+# .githooks/pre-commit) only when the key is minted out-of-band via tcld
+# (create_metrics_reader_api_key = false). Empty is allowed: the Secret is still
 # created (so Prometheus boots and the SDK scrape + remote_write work), the Cloud
 # scrape job just 401s until a real key is supplied.
 variable "cloud_metrics_apikey" {
-  description = "Temporal Cloud Metrics Read-Only API key (Bearer token) for the OpenMetrics scrape. Out-of-band; empty disables only the Cloud scrape."
+  description = "Out-of-band fallback for the Cloud Metrics Read-Only API key (Bearer). Normally minted in-band by the cloud layer; set only when create_metrics_reader_api_key = false. Empty disables only the Cloud scrape."
   type        = string
   default     = ""
   sensitive   = true

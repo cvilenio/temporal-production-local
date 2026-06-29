@@ -50,3 +50,14 @@ output "observer_api_key_token" {
   value       = var.create_observer && var.create_observer_api_key ? temporalcloud_apikey.observer[0].token : null
   sensitive   = true
 }
+
+output "metrics_reader_service_account_id" {
+  description = "Metrics Read-Only (metricsread) service account id (null when create_metrics_reader is false)."
+  value       = var.create_metrics_reader ? temporalcloud_service_account.metrics_reader[0].id : null
+}
+
+output "metrics_reader_api_key_token" {
+  description = "Metrics Read-Only API key (Bearer) for the in-cluster Prometheus OpenMetrics scrape (null when not minted in Terraform — then supply out-of-band). SENSITIVE — consumed by the cluster layer's cloud-metrics-apikey Secret."
+  value       = var.create_metrics_reader && var.create_metrics_reader_api_key ? temporalcloud_apikey.metrics_reader[0].token : null
+  sensitive   = true
+}
