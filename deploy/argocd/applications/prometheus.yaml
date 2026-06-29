@@ -87,23 +87,38 @@ spec:
             groups:
               - name: temporal-worker
                 rules:
-                  # slot_utilization is NOT an SDK metric — it is a recording rule
-                  # over the slot gauges the Core SDK already emits (ADR-0021). KEDA's
-                  # Prometheus scaler queries this series (ADR-0023). Grouped by the
-                  # labels the SDK actually attaches (verified against the live scrape:
-                  # the metric carries the `temporal_` prefix, the Temporal namespace as
-                  # `namespace`, plus temporal_io_deployment_name / worker_type /
-                  # task_queue) so per-deployment/queue utilization is preserved rather
-                  # than averaged into one global number. Aggregate the two gauges
-                  # separately before dividing — adding the raw vectors fails to match
-                  # on their differing __name__.
-                  - record: temporal:slot_utilization
+                  # slot_utilization is NOT an SDK metric — it is a recording rule over
+                  # the slot gauges the Core SDK emits (ADR-0021), consumed by KEDA's
+                  # Prometheus scaler (ADR-0023).
+                  #
+                  # Name + shape deliberately track the temporal-worker-controller's
+                  # upstream reference (its prometheus-stack-values.yaml / KEDA + HPA
+                  # examples all query `temporal_slot_utilization`) so those examples
+                  # apply to us verbatim — underscore, not the colon recording-rule
+                  # convention.
+                  #
+                  # Grouped ONLY by version-stable, SDK-native labels verified on the raw
+                  # :9000 endpoint (namespace / worker_type / task_queue). Deliberately
+                  # NOT by temporal_io_deployment_name: that label is a kubernetes-pods
+                  # scrape-relabel artifact (the pod's temporal.io/deployment-name), not
+                  # SDK output, so depending on it would couple the rule to our scrape
+                  # wiring. task_queue maps 1:1 to a WorkerDeployment here, so KEDA's
+                  # ScaledObject selects per deployment by filtering task_queue=…
+                  #
+                  # (Upstream groups by temporal_worker_deployment_name / temporal_namespace,
+                  # which a newer Core SDK emits natively; temporalio 1.28.0 emits the
+                  # older bare `namespace` scheme with no worker-deployment label. Revisit
+                  # the grouping if/when the SDK is bumped.)
+                  #
+                  # Aggregate the two gauges separately before dividing — adding the raw
+                  # vectors fails to match on their differing __name__.
+                  - record: temporal_slot_utilization
                     expr: |
-                      sum by (namespace, temporal_io_deployment_name, worker_type, task_queue) (temporal_worker_task_slots_used)
+                      sum by (namespace, worker_type, task_queue) (temporal_worker_task_slots_used)
                       /
                       clamp_min(
-                        sum by (namespace, temporal_io_deployment_name, worker_type, task_queue) (temporal_worker_task_slots_used)
-                        + sum by (namespace, temporal_io_deployment_name, worker_type, task_queue) (temporal_worker_task_slots_available),
+                        sum by (namespace, worker_type, task_queue) (temporal_worker_task_slots_used)
+                        + sum by (namespace, worker_type, task_queue) (temporal_worker_task_slots_available),
                         1
                       )
   destination:
