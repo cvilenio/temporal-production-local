@@ -38,6 +38,34 @@ variable "observer_api_key_expiry_time" {
   default     = "2027-06-23T00:00:00Z"
 }
 
+# Account-level Metrics Read-Only identity for the in-cluster Prometheus scrape of
+# the Cloud OpenMetrics endpoint (see metrics-reader.tf). metricsread role; requires
+# provider >= 1.x. Default-on like the observer; set create_metrics_reader = false
+# to skip minting it.
+variable "create_metrics_reader" {
+  description = "Mint the account-level Metrics Read-Only service account for the in-cluster Prometheus OpenMetrics scrape (ADR-0021)."
+  type        = bool
+  default     = true
+}
+
+variable "metrics_reader_service_account_name" {
+  description = "Name of the Metrics Read-Only service account."
+  type        = string
+  default     = "metrics-reader"
+}
+
+variable "create_metrics_reader_api_key" {
+  description = "Mint the metrics-reader API key in Terraform (secret enters state, consumed in-band by the cluster layer). Set false to mint out-of-band via tcld."
+  type        = bool
+  default     = true
+}
+
+variable "metrics_reader_api_key_expiry_time" {
+  description = "RFC3339 expiry for the metrics-reader API key (e.g. 2027-06-23T00:00:00Z)."
+  type        = string
+  default     = "2027-06-23T00:00:00Z"
+}
+
 # Cloud-only overlay, keyed by DOMAIN (`<domain>`, e.g. ziggymart) — no environment
 # axis (ADR-0017). The SHARED config (retention, search attributes) lives in
 # config/temporal/namespaces.yaml and is merged in via locals (see namespaces.tf) —

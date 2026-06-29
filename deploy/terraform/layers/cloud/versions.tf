@@ -10,8 +10,15 @@ terraform {
 
   required_providers {
     temporalcloud = {
-      source  = "temporalio/temporalcloud"
-      version = "~> 0.9"
+      source = "temporalio/temporalcloud"
+      # 1.x: the `metricsread` account role landed after v1.0 (a Metrics Read-Only
+      # service account for the OpenMetrics scrape — see metrics-reader.tf). 0.9's
+      # account_access only allowed admin/developer/read; the cloud-namespace module
+      # already validated `metricsread` in anticipation, blocked only by this pin.
+      # v1 is additive on the resources this layer already uses (namespace,
+      # service_account, apikey, search_attribute) — review `terraform plan` before
+      # applying to the live account.
+      version = "~> 1.5"
     }
   }
 }

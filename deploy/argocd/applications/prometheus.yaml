@@ -12,12 +12,11 @@
 # cluster layer from config/dependencies.yaml). The Temporal Cloud API key is NOT
 # in this manifest: the `cloud-metrics-apikey` Secret is created out-of-git by the
 # cluster layer (deploy/terraform/layers/cluster/observability.tf), mounted by file,
-# and the scrape job references the path — never an inline token. The key itself is
-# minted out-of-band with a Metrics Read-Only service account:
-#   tcld service-account create --name ziggymart-metrics-reader --account-role MetricsRead
-#   tcld apikey create --service-account-id <id> --name ziggymart-metrics-reader-key
-# (provider 0.9.2's account_access only allows admin/developer/read, so this role
-# cannot be expressed in Terraform — same out-of-band path as the observer key.)
+# and the scrape job references the path — never an inline token. The key is minted
+# by the cloud layer's Metrics Read-Only (metricsread) service account
+# (deploy/terraform/layers/cloud/metrics-reader.tf, provider >= 1.x) and handed to
+# the cluster layer via remote state. Out-of-band minting (tcld --account-role
+# MetricsRead → TF_VAR_cloud_metrics_apikey) remains a fallback.
 #
 # sync-wave -2: lands with the other base add-ons, before the wave-0 workloads it
 # scrapes start producing metrics.

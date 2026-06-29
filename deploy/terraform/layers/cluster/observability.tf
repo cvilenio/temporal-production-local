@@ -14,12 +14,15 @@ resource "kubernetes_namespace" "observability" {
   }
 }
 
-# Temporal Cloud OpenMetrics bearer token (Metrics Read-Only SA, minted out-of-band
-# via tcld — see deploy/argocd/applications/prometheus.yaml). Key `api-key` matches
-# the Prometheus Application's extraSecretMounts -> credentials_file path. Created
-# unconditionally even when the key is empty: that keeps Prometheus bootable (its
-# extraSecretMount resolves) so the SDK scrape, recording rule, and remote_write all
-# work; only the Cloud scrape job 401s until a real key is supplied.
+# Temporal Cloud OpenMetrics bearer token (Metrics Read-Only SA). Key `api-key`
+# matches the Prometheus Application's extraSecretMounts -> credentials_file path.
+#
+# Source precedence: the in-band token minted by the cloud layer's metricsread SA
+# (remote state — the default path now that the provider is >= 1.x), else the
+# out-of-band var.cloud_metrics_apikey (tcld), else empty. Created unconditionally
+# even when empty: that keeps Prometheus bootable (its extraSecretMount resolves) so
+# the SDK scrape, recording rule, and remote_write all work; only the Cloud scrape
+# job 401s until a real key is supplied.
 resource "kubernetes_secret" "cloud_metrics_apikey" {
   metadata {
     name      = "cloud-metrics-apikey"
@@ -27,6 +30,6 @@ resource "kubernetes_secret" "cloud_metrics_apikey" {
   }
   type = "Opaque"
   data = {
-    "api-key" = var.cloud_metrics_apikey
+    "api-key" = try(coalesce(local.metrics_api_key, var.cloud_metrics_apikey), "")
   }
 }
