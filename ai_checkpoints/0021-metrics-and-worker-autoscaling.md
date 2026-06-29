@@ -1,8 +1,8 @@
 # 0021 — Metrics enablement + worker autoscaling (HPA/KEDA hybrid)
 
-- **Status:** Design landed; one prerequisite bump executed (worker-controller chart 0.26.0 →
-  0.27.0). Two short-term goals scoped and sequenced; ADR-0023 written (Proposed). Metrics +
-  autoscaling implementation not started.
+- **Status:** **Metrics phase shipped and deploy-validated end-to-end** (PRs #11, #13–#16 merged to
+  `main`, applied to the live kind+Cloud stack). Autoscaling (KEDA) not started but unblocked — its
+  scale signal is proven flowing. ADR-0023 still Proposed.
 - **Date:** 2026-06-29
 - **ADRs:** **ADR-0023** (new, Proposed) — worker autoscaling strategy. Builds on ADR-0004 (worker
   versioning controller) and ADR-0005 (connection profiles).
@@ -54,24 +54,67 @@
   per-version floor) in `config/dependencies.yaml`. Deploy-time validation still owed: mirror 0.27.0
   into local OCI + confirm a worker rollout reconciles (CRD schema may differ across the minor).
 - **`slot_utilization` needs NO SDK bump (corrected).** It is a **Prometheus recording rule** over
-  the slot metrics the Core SDK already emits (`worker_task_slots_used`; `worker_task_slots_available`
-  for fixed-size suppliers) — the worker-controller demo defines it this way; the SDK metrics
-  reference lists no `slot_utilization`. Pinned **temporalio 1.28.0** already emits the inputs, so
-  this is a recording rule to author in the metrics phase, not a dependency bump.
+  the slot metrics the Core SDK already emits — the worker-controller demo defines it this way; the
+  SDK metrics reference lists no `slot_utilization`. Pinned **temporalio 1.28.0** already emits the
+  inputs, so this is a recording rule to author in the metrics phase, not a dependency bump.
 - **kind scrape approach decided:** lean **in-cluster Prometheus** (the KEDA Prometheus scaler must
   query it; it also hosts the slot_utilization recording rule). Alloy stays for logs (ADR-0014/0020).
 
+## Done (2026-06-29) — metrics phase, shipped + validated
+
+The topology: **scrape inside kind, persist outside it** — the metrics analog of the Alloy→ClickHouse
+log path. In-cluster Prometheus (short 2h retention) scrapes SDK `:9000` + the Cloud OpenMetrics
+endpoint, evaluates the recording rule KEDA reads, and `remote_write`s everything to a host Prometheus
+(`prometheus-store`, 15d) that Grafana reads. KEDA needs a local query target and logs have no
+in-cluster reader, so the short in-cluster hot buffer is the only divergence from the log path.
+
+- **In-cluster Prometheus** (PR #11): `prometheus-community/prometheus` 29.13.0 pinned in
+  `config/dependencies.yaml`, mirrored to local OCI, ArgoCD Application sync-wave `-2`, secret-free.
+  Lean (no Alertmanager/pushgateway/kube-state/node-exporter). SDK scrape via the chart's default
+  `kubernetes-pods` job + `prometheus.io/scrape|port|path` pod annotations on the worker + orders-api
+  templates. **No NodePort** — KEDA + the rule read it over cluster DNS; Grafana reads the host store.
+- **Host store** (PR #11): docker-compose `prometheus-store` (remote-write receiver, 15d) + a Grafana
+  "Prometheus (kind metrics)" datasource. Distinct from lgtm's bundled Prometheus (the Local-OSS store).
+- **Cloud OpenMetrics scrape:** `metrics.temporal.io` `/v1/metrics`, 30s, `honor_timestamps`,
+  **never `rate()`** the `temporal_cloud_v1_*` series. API key from a **`metricsread`** service account.
+- **Cloud SA now native** (PR #13): bumped the `temporalcloud` provider `~> 0.9 → ~> 1.5` (cloud layer
+  **and** the cloud-namespace module — both re-declare the pin). 0.9.2's `account_access` couldn't
+  express `metricsread`; the module already validated it. `metrics-reader.tf` mints it in-band;
+  cluster layer reads the token via remote state → `cloud-metrics-apikey` Secret (out-of-band `tcld`
+  var remains a fallback). **Plan was additive-only: `2 to add, 0 change, 0 destroy`** — the major
+  provider jump touched zero existing namespaces/SAs.
+- **Chart-version discipline** (PR #14): annotation edits to the orders-workers/orders-api templates
+  did nothing until the Chart.yaml versions were bumped (0.1.6→0.1.7 / 0.1.1→0.1.2) — ArgoCD treats
+  published OCI chart versions as immutable revisions.
+
+### Metric-name / label findings (ground truth for the autoscaling phase)
+
+- **SDK metrics carry the `temporal_` prefix.** The slot gauges are `temporal_worker_task_slots_used`
+  / `temporal_worker_task_slots_available`, NOT the unprefixed names this checkpoint first assumed.
+  This is a **universal, upstream-documented gotcha** (the worker-controller README: "if
+  `temporal_slot_utilization` returns no data, check the metric names on a running pod"), not a
+  local artifact.
+- **Recording-rule output name is `temporal_slot_utilization`** (underscore), matching the
+  worker-controller reference + its KEDA/HPA examples — so those examples apply to us verbatim. (An
+  earlier colon-convention name `temporal:slot_utilization` was our artifact; removed in PR #16.)
+- **Rule groups by version-stable, SDK-native labels** (`namespace`, `worker_type`, `task_queue`),
+  verified on the raw `:9000` endpoint. It deliberately does **not** use `temporal_io_deployment_name`
+  — that is a `kubernetes-pods` scrape-relabel artifact (the pod's `temporal.io/deployment-name`),
+  not SDK output. **KEDA selects per WorkerDeployment by filtering `task_queue`** (1:1 to a deployment).
+- **Our `temporalio 1.28.0` emits the OLDER label scheme:** bare `namespace`, no
+  `temporal_worker_deployment_name` / `temporal_namespace` / `temporal_worker_build_id`. Upstream's
+  reference rule groups by those newer labels. **Full label convergence with upstream needs a Core SDK
+  bump** — its own decision/phase, not required for autoscaling to work.
+
 ## Next
 
-1. **Metrics phase:** stand up in-cluster Prometheus (sync-wave `-2`), scrape worker + orders-api
-   :9000, author the `slot_utilization` recording rule over the emitted slot metrics, add the Cloud
-   OpenMetrics scrape (API-key SA "Metrics Read-Only", 30s, never `rate()`), stand up worker-health
-   signals/alerts (schedule-to-start p99, sync-match, slots-available, sticky-eviction, backlog).
-   Validate at destination, not source.
-2. **Unblock autoscaling:** worker-controller bump done (mirror + deploy-validate when the metrics
-   phase lands); install KEDA as the sole external-metrics provider (not prometheus-adapter).
-3. **Autoscaling phase (after metrics proven):** wire KEDA Prometheus scaler (`minReplicaCount: 1`)
-   on the steady orders queue; build the bursty demo workload + KEDA Temporal scaler (scale-to-zero,
-   composite guard) on its queue; validate scaling actions against the Phase-1 metrics.
+1. **Worker-health signals/alerts** (deferred from the metrics phase): schedule-to-start p99,
+   sync-match rate, slots-available, sticky-eviction, backlog. The scrape + store exist; this is
+   authoring dashboards/alert rules over them. Units are **seconds** (`durations_as_seconds=True`).
+2. **Install KEDA** as the sole external-metrics provider (not prometheus-adapter; they collide on
+   the `external.metrics.k8s.io` APIService). Worker-controller bump (0.27.0) deploy-validated.
+3. **Autoscaling phase:** wire KEDA Prometheus scaler (`minReplicaCount: 1`) on the steady orders
+   queue, querying `temporal_slot_utilization{task_queue="…"}`; build the bursty demo workload + KEDA
+   Temporal scaler (scale-to-zero, composite guard) on its queue; validate scaling actions.
 4. **Promote ADR-0023 to Accepted** once both behaviors are demonstrated; wire a line into
    `docs/ARCHITECTURE.md`.
