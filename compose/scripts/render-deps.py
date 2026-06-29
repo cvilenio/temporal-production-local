@@ -32,6 +32,8 @@ def main() -> None:
         f"ARGOCD_CHART_VERSION={charts['argo-cd']['version']}",
         f"CNPG_VERSION={charts['cloudnative-pg']['version']}",
         f"CNPG_REPO={charts['cloudnative-pg']['repo']}",
+        f"PROMETHEUS_VERSION={charts['prometheus']['version']}",
+        f"PROMETHEUS_REPO={charts['prometheus']['repo']}",
         f"NGINX_IMAGE={spec['images']['nginx']['repository']}:{spec['images']['nginx']['tag']}",
     ]
     OUT.parent.mkdir(parents=True, exist_ok=True)

@@ -30,6 +30,7 @@ DEPS_ENV="config/.generated/deps.env"
 . "$DEPS_ENV"
 CERT_MANAGER_REPO="${CERT_MANAGER_REPO:-https://charts.jetstack.io}"
 CNPG_REPO="${CNPG_REPO:-https://cloudnative-pg.io/charts}"
+PROMETHEUS_REPO="${PROMETHEUS_REPO:-https://prometheus-community.github.io/helm-charts}"
 
 command -v helm >/dev/null 2>&1 || { echo "✖ missing required tool: helm" >&2; exit 1; }
 
@@ -42,6 +43,9 @@ helm pull cert-manager --repo "${CERT_MANAGER_REPO}" --version "${CERT_MANAGER_V
 # cloudnative-pg operator: classic Helm repo (same → explicit copy). Manages the
 # orders-db Cluster; its CRDs ship with the chart (crds.create defaults true).
 helm pull cloudnative-pg --repo "${CNPG_REPO}" --version "${CNPG_VERSION}" -d "$tmp" >/dev/null
+# prometheus: classic Helm repo (same → explicit copy). In-cluster scrape + short-
+# retention TSDB + remote_write egress to the host store (ADR-0021 metrics phase).
+helm pull prometheus --repo "${PROMETHEUS_REPO}" --version "${PROMETHEUS_VERSION}" -d "$tmp" >/dev/null
 # Temporal Worker Controller: upstream OCI charts (CRDs split from the controller).
 helm pull oci://docker.io/temporalio/temporal-worker-controller-crds --version "${WORKER_CONTROLLER_VERSION}" -d "$tmp" >/dev/null
 helm pull oci://docker.io/temporalio/temporal-worker-controller --version "${WORKER_CONTROLLER_VERSION}" -d "$tmp" >/dev/null

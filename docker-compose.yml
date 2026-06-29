@@ -84,6 +84,9 @@ services:
       - ./compose/observability/grafana/provisioning/dashboards/critical.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/critical.yaml:ro
       - ./compose/observability/grafana/dashboards-critical:/var/lib/grafana/dashboards/critical:ro
       - ./compose/observability/grafana/provisioning/datasources/clickhouse.yaml:/otel-lgtm/grafana/conf/provisioning/datasources/clickhouse.yaml:ro
+      # Host metrics store datasource (kind run mode — ADR-0021). The in-cluster
+      # Prometheus remote_writes to prometheus-store; Grafana reads it here.
+      - ./compose/observability/grafana/provisioning/datasources/prometheus.yaml:/otel-lgtm/grafana/conf/provisioning/datasources/prometheus.yaml:ro
       - lgtm-data:/data
     healthcheck:
       test: ["CMD-SHELL", "test -f /tmp/ready"]
@@ -148,6 +151,34 @@ services:
       - "4320:4318"   # OTLP HTTP  (Alloy ships here)
     volumes:
       - ./compose/observability/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    restart: unless-stopped
+
+  # ===========================================================================
+  # OBSERVABILITY — METRICS STORE (Prometheus, kind run mode)
+  # The durable metrics tier for the kind path (ADR-0021): the in-cluster
+  # Prometheus scrapes SDK :9000 + the Temporal Cloud OpenMetrics endpoint and
+  # remote_writes here, where data is persisted (long retention) and read by
+  # Grafana. The metrics analog of ClickHouse in the log path — scrape inside the
+  # cluster, persist OUTSIDE it. Distinct from lgtm's bundled Prometheus, which
+  # stays the Local-OSS compose store. Local workbench data; `down -v` wipes it.
+  # ===========================================================================
+  prometheus-store:
+    image: prom/prometheus:v3.12.0
+    container_name: prometheus-store
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      # Accept remote_write from the in-cluster Prometheus (off by default).
+      - --web.enable-remote-write-receiver
+      - --storage.tsdb.retention.time=15d
+    networks:
+      - temporal-network
+    ports:
+      # Host 9009 → container 9090: remote_write target (host.docker.internal:9009
+      # from kind pods) AND Grafana's "Prometheus (kind metrics)" datasource URL.
+      - "9009:9090"
+    volumes:
+      - ./compose/observability/prometheus-store/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-store-data:/prometheus
     restart: unless-stopped
 
   # NOTE: the app data store (orders-db) and the orders REST API (orders-service)
@@ -382,3 +413,5 @@ volumes:
   lgtm-data:
   # ClickHouse log store (otel_logs). Throwaway workbench data — wiped by `down -v`.
   clickhouse-data:
+  # Host metrics store (kind run mode — ADR-0021). Throwaway workbench data.
+  prometheus-store-data:

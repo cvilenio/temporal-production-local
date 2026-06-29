@@ -1,0 +1,20 @@
+# Host-side Prometheus — the durable metrics STORE for the kind run mode (ADR-0021).
+# This is the metrics analog of ClickHouse in the log path: the in-cluster Prometheus
+# scrapes within kind and remote_writes here, where data is persisted with long
+# retention and read by Grafana. It is a remote-write RECEIVER (enabled via the
+# --web.enable-remote-write-receiver flag in docker-compose.yml), not a scraper of the
+# cluster — kind pod IPs aren't routable from the host, which is exactly why the
+# in-cluster Prometheus ships data out rather than the host pulling it in.
+#
+# Distinct from lgtm's bundled Prometheus (compose/observability/prometheus/prometheus.yaml),
+# which stays the Local-OSS compose run-mode store. This one serves the kind path.
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+scrape_configs:
+  # Self-scrape only — store health. All workload + Cloud series arrive via
+  # remote_write from the in-cluster Prometheus, not by scraping from here.
+  - job_name: prometheus-store
+    static_configs:
+      - targets: ['localhost:9090']
