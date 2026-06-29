@@ -27,6 +27,13 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: {{ .deploymentName }}
+      annotations:
+        # In-cluster Prometheus scrape discovery (ADR-0021). The worker binds the
+        # Core SDK PrometheusConfig /metrics endpoint on :9000 (appkit/telemetry.py);
+        # the chart's default kubernetes-pods job reads these annotations to scrape it.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9000"
+        prometheus.io/path: "/metrics"
     spec:
       # Dedicated per-profile KSA (templates/serviceaccount.yaml), token not
       # mounted — workers reach only the Temporal frontend, never the k8s API.

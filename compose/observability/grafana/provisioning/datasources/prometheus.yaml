@@ -1,0 +1,23 @@
+# Prometheus metrics datasource for Grafana — the host metrics STORE for the kind
+# run mode (ADR-0021). The in-cluster Prometheus scrapes the SDK :9000 endpoints +
+# the Temporal Cloud OpenMetrics endpoint and remote_writes here; Grafana reads it
+# for the SDK, worker-health, and Temporal Cloud panels. Reachable lgtm->prometheus-store
+# over temporal-network.
+#
+# NOT marked default: lgtm auto-provisions its own bundled Prometheus (the Local-OSS
+# compose store) as the default datasource, so this one is named + uid'd explicitly
+# and dashboards target it by uid / a datasource variable. SDK dashboards expecting
+# SECONDS units already match — appkit/telemetry.py sets durations_as_seconds=True.
+apiVersion: 1
+datasources:
+  - name: Prometheus (kind metrics)
+    type: prometheus
+    uid: prometheus-kind
+    access: proxy
+    url: http://prometheus-store:9090
+    editable: true
+    jsonData:
+      httpMethod: POST
+      # Match the in-cluster scrape cadence (Cloud scrape is 30s; SDK pods scrape at
+      # the chart default). Keeps step alignment sane for range queries.
+      timeInterval: 30s

@@ -42,6 +42,15 @@ charts:
     # cert-manager). chart 0.28.3 ships operator appVersion 1.29.1.
     version: "0.28.3"
     repo: https://cloudnative-pg.io/charts # classic Helm repo -> explicit mirror push
+  prometheus:
+    # In-cluster Prometheus (ADR-0021 metrics phase): scrapes SDK :9000 (pod-
+    # annotation discovery) + the Temporal Cloud OpenMetrics endpoint, evaluates
+    # the slot_utilization recording rule KEDA queries (ADR-0023), and remote_writes
+    # to the host metrics store (the "persist outside the cluster" tier, mirroring
+    # the Alloy->ClickHouse log path). Short local retention only. Classic Helm repo
+    # -> explicit mirror push. chart 29.13.0 ships Prometheus appVersion v3.12.0.
+    version: "29.13.0"
+    repo: https://prometheus-community.github.io/helm-charts
 
 images:
   # TLS proxy that fronts the HTTP registry for ArgoCD (registry-proxy.tf).
