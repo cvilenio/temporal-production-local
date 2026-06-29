@@ -68,6 +68,9 @@ services:
       - TEMPORAL_API_KEY=${TEMPORAL_API_KEY:-}
       - DATABASE_URL=postgresql+asyncpg://admin:password@orders-db:5432/orders_db
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://lgtm:4317
+      # Business metrics → standalone collector → ClickHouse (ADR-0024); traces stay
+      # on lgtm/Tempo above. In-network service name (container port 4317).
+      - OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://otel-collector:4317
       - OTEL_SERVICE_NAME=orders-service
       - SDK_METRICS_PORT=9000
     networks:

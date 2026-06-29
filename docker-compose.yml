@@ -67,6 +67,13 @@ services:
       # provisioned via the mount below. Grafana stays the single viz pane; lgtm's
       # bundled Loki is unused (nothing ships to it anymore).
       - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
+      # Air-gap hardening (ADR-0013): disable Grafana's startup plugin PREINSTALL
+      # (grafana-llm-app etc.). On a restart it blocks the HTTP listener trying to
+      # reach grafana.com — which resolves to IPv6-only here with no route, so the
+      # connect hangs and Grafana never binds :3000. Cached plugins in the lgtm-data
+      # volume still load from disk; the ClickHouse plugin (GF_INSTALL_PLUGINS) is
+      # one of them, so nothing functional is lost.
+      - GF_PLUGINS_PREINSTALL_DISABLED=true
     networks:
       - temporal-network
     ports:
@@ -145,10 +152,11 @@ services:
     networks:
       - temporal-network
     ports:
-      # Host 4319/4320 avoid lgtm's 4317/4318; the kind Alloy agent ships to
-      # host.docker.internal:4320.
-      - "4319:4317"   # OTLP gRPC
-      - "4320:4318"   # OTLP HTTP  (Alloy ships here)
+      # Host 4319/4320 avoid lgtm's 4317/4318; the kind Alloy agent ships logs to
+      # host.docker.internal:4320, and apps push business metrics (ADR-0024) to
+      # host.docker.internal:4319.
+      - "4319:4317"   # OTLP gRPC  (business metrics → ClickHouse)
+      - "4320:4318"   # OTLP HTTP  (Alloy ships logs here)
     volumes:
       - ./compose/observability/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
     restart: unless-stopped

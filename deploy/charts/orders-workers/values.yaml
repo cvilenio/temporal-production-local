@@ -41,13 +41,18 @@ startupProbe:
 # (deploy/terraform/kind-config.yaml notes the CoreDNS/host-gateway fallback).
 mockApiUrl: "http://host.docker.internal:8001"
 
-# OTLP push endpoint (traces → Tempo, business metrics → Prometheus-via-collector).
-# gRPC, so it MUST be the 4317 port (4318 is OTLP/HTTP). Now that lgtm publishes
-# 4317 on the host (docker-compose.yml), workers reach the collector via the
-# cluster host gateway. Previously unset → defaulted to localhost:4317 in-pod and
-# spammed "Failed to export metrics to localhost:4317". NOTE: logs do NOT use this
-# (they go stdout→Alloy, LOG_OTLP_PUSH=false); this is traces + business metrics.
+# OTLP push endpoint for TRACES → lgtm/Tempo. gRPC, so it MUST be the 4317 port
+# (4318 is OTLP/HTTP). lgtm publishes 4317 on the host (docker-compose.yml); workers
+# reach it via the cluster host gateway. NOTE: logs do NOT use this (they go
+# stdout→Alloy, LOG_OTLP_PUSH=false). Business metrics go to metricsOtelEndpoint.
 otelEndpoint: "http://host.docker.internal:4317"
+
+# OTLP push endpoint for BUSINESS METRICS → standalone OTel Collector → ClickHouse
+# (ADR-0024). Distinct from traces so business metrics warehouse in ClickHouse, not
+# lgtm's bundled Prometheus. gRPC, host-published 4319. Only the activity worker
+# emits business metrics today (business_meter() in activities/external.py); the
+# workflow worker's business metrics ride the PULL pipeline via metric_meter().
+metricsOtelEndpoint: "http://host.docker.internal:4319"
 
 # Logging (obslog / ADR-0018). On Kubernetes the Grafana Alloy DaemonSet tails
 # pod stdout and ships to the observability backend, so workers log JSON to

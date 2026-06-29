@@ -167,16 +167,32 @@ See ADR-0004 and `deploy/charts/orders-workers`.
 
 ## Observability
 
-Unchanged in model from the current stack (see `OBSERVABILITY.md`), carried onto kind:
+Two stores, split by signal *purpose* — high-fidelity analytical signals warehouse in
+ClickHouse; low-cardinality operational signals + autoscaling live in Prometheus. `appkit`'s
+telemetry bootstrap (`init_observability`) wires the providers and the Temporal `Runtime`;
+each app starts it in its lifecycle.
 
-- **PUSH (OTLP gRPC):** traces → Tempo, logs → Loki, business metrics → Prometheus, via the
-  OpenTelemetry Collector. `appkit`'s telemetry bootstrap (`init_observability`) initializes
-  the providers and the Temporal `Runtime`; each app starts it in its lifecycle.
-- **PULL (Prometheus scrape):** Temporal SDK operational metrics + Temporal server metrics.
-- On kind, the colleague reference (`alexandreroman/temporal-k8s`) supplies a turnkey
-  **backlog-driven worker autoscaler**: PrometheusRule recording rules → prometheus-adapter
-  external metrics → HPA on task-queue depth. Captured in `deploy/charts/observability`.
-- On Cloud, add the Cloud OpenMetrics endpoint as a scrape target.
+- **PUSH (OTLP gRPC):**
+  - **Traces → Tempo** (lgtm), on `:4317`.
+  - **Logs → ClickHouse** (`otel_logs`) via the standalone OTel Collector — Loki retired
+    (ADR-0020). On kind, Alloy tails pod stdout → collector.
+  - **Business metrics → ClickHouse** (`otel_metrics_*`) via the same collector, on a
+    *separate* endpoint (`:4319`) with DELTA temporality (ADR-0024). Emitted with
+    `business_meter()` in activities/API; queried in Grafana via SQL.
+- **PULL (Prometheus scrape):** Temporal SDK operational metrics (`:9000`) + the Temporal
+  Cloud OpenMetrics endpoint. On kind, an in-cluster Prometheus (2h hot) scrapes these,
+  evaluates the `temporal_slot_utilization` recording rule, and `remote_write`s to a durable
+  host **`prometheus-store`** (15d) that Grafana reads (ADR-0021). Workflow/activity custom
+  metrics that must be replay-safe use `*.metric_meter()` and ride this pull path, NOT push.
+- **Autoscaling:** KEDA is the single external-metrics provider (ADR-0023) — a Prometheus
+  scaler on the steady queue (querying the recording rule) and a Temporal scaler with a
+  composite guard for bursty/scale-to-zero queues. Not prometheus-adapter (they collide on
+  the `external.metrics.k8s.io` APIService).
+- **Grafana datasource choice:** Prometheus (`prometheus-kind` → `prometheus-store`) for
+  operational/autoscale/PromQL; **ClickHouse (`clickhouse-logs`)** for business metrics +
+  logs (SQL). One ClickHouse server backs both `otel_logs` and `otel_metrics_*`.
+
+See ADR-0020/0021/0023/0024.
 
 ---
 

@@ -162,15 +162,30 @@ SERVICE_REGISTRY = {
         "subgroup": "Observability",
         "icon_key": "chart",
         "display_name": "Observability (LGTM)",
-        "description": "Grafana, Tempo, Prometheus",
+        # Grafana is the single visualization pane; Tempo is the trace backend; the
+        # bundled Prometheus is the Local-OSS compose store (distinct from the
+        # prometheus-store node, which holds the durable kind metrics tier).
+        "description": "Grafana + Tempo + bundled Prometheus (Local-OSS store)",
         "http_probe": "http://lgtm:3000/api/health",
+    },
+    "prometheus-store": {
+        "group": "Tooling",
+        "subgroup": "Observability",
+        "icon_key": "database",
+        "display_name": "Prometheus (Metrics Store)",
+        # The durable metrics tier: receives remote_write from the in-cluster
+        # Prometheus (15d retention) and is read by Grafana's "Prometheus (kind
+        # metrics)" datasource. The metrics analog of ClickHouse in the log path.
+        "description": "Host metrics store (15d); in-cluster remote_write target, read by Grafana",
+        # /-/healthy returns 200 without auth — a clean liveness signal.
+        "http_probe": "http://prometheus-store:9090/-/healthy",
     },
     "clickhouse": {
         "group": "Tooling",
         "subgroup": "Observability",
         "icon_key": "database",
-        "display_name": "ClickHouse (Logs)",
-        "description": "Log store (OTel otel_logs), read by Grafana",
+        "display_name": "ClickHouse (Logs + Metrics)",
+        "description": "Warehouse: logs (otel_logs) + business metrics (otel_metrics_*), read by Grafana over SQL",
         # /ping returns 200 "Ok." without auth — a clean liveness signal.
         "http_probe": "http://clickhouse:8123/ping",
     },
@@ -179,7 +194,7 @@ SERVICE_REGISTRY = {
         "subgroup": "Observability",
         "icon_key": "network",
         "display_name": "OTel Collector",
-        "description": "OTLP→ClickHouse log ingest gateway",
+        "description": "OTLP→ClickHouse gateway: logs (Alloy) + business metrics (apps)",
         "http_probe": None,
         # No HTTP health endpoint; a TCP connect to the OTLP/HTTP receiver port
         # (in-network container port) confirms the gateway is listening.

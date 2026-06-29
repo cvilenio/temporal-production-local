@@ -49,6 +49,11 @@ class TelemetrySettings(BaseSettings):
     """
 
     otel_exporter_otlp_endpoint: str = "http://localhost:4317"
+    # Optional separate endpoint for OTLP push business metrics (ADR-0024). When
+    # unset, business metrics push to otel_exporter_otlp_endpoint (the trace
+    # endpoint). Set this to the standalone OTel Collector so business metrics land
+    # in ClickHouse while traces stay on lgtm/Tempo.
+    otel_exporter_otlp_metrics_endpoint: str | None = None
     otel_service_name: str = "app"
     # SDK operational metrics (Temporal runtime) bind a Prometheus /metrics pull
     # endpoint on this port inside the container (scraped by Prometheus in lgtm).
