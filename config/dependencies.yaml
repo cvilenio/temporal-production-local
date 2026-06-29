@@ -26,10 +26,12 @@ charts:
     version: v1.20.2
     repo: https://charts.jetstack.io # classic Helm repo -> explicit mirror push
   temporal-worker-controller:
-    version: "0.26.0"
+    # chart 0.27.0 ships appVersion 1.8.0 — the floor for KEDA per-version
+    # metric queries in Worker Resource Templates (ADR-0023).
+    version: "0.27.0"
     oci: oci://docker.io/temporalio/temporal-worker-controller
   temporal-worker-controller-crds:
-    version: "0.26.0"
+    version: "0.27.0"
     oci: oci://docker.io/temporalio/temporal-worker-controller-crds
   argo-cd:
     version: "9.7.0" # bootstrap; installed by the Terraform helm_release
