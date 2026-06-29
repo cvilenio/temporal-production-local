@@ -15,6 +15,10 @@ locals {
   namespace_handle = data.terraform_remote_state.cloud.outputs.namespace_handles[var.cloud_namespace]
   # Dedicated client key for orders-api (null if the cloud layer didn't mint one).
   client_api_key = try(data.terraform_remote_state.cloud.outputs.client_api_key_tokens[var.cloud_namespace], null)
+  # Metrics Read-Only key for the in-cluster Prometheus OpenMetrics scrape (ADR-0021).
+  # null when the cloud layer minted it out-of-band (create_metrics_reader_api_key =
+  # false) — observability.tf then falls back to var.cloud_metrics_apikey.
+  metrics_api_key = try(data.terraform_remote_state.cloud.outputs.metrics_reader_api_key_token, null)
   # For api_key_auth namespaces the cloud `endpoint` output is already the regional
   # gRPC endpoint (e.g. us-east-1.aws.api.temporal.io:7233) that API keys require.
   temporal_address = data.terraform_remote_state.cloud.outputs.endpoints[var.cloud_namespace]
