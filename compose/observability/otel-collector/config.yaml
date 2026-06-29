@@ -1,4 +1,13 @@
-# OpenTelemetry Collector (contrib) — OTLP → ClickHouse log ingest gateway.
+# OpenTelemetry Collector (contrib) — OTLP → ClickHouse ingest gateway (logs + metrics).
+#
+# Two signals, one gateway:
+#   LOGS    (ADR-0020) — Alloy DaemonSet tails pod stdout → OTLP/HTTP here →
+#                        ClickHouse otel_logs.
+#   METRICS (ADR-0024) — apps push business metrics via business_meter() (OTLP gRPC,
+#                        DELTA temporality) here → ClickHouse otel_metrics_* tables.
+#                        Operational/autoscaling metrics do NOT come here — they ride
+#                        the Prometheus pull pipeline (ADR-0021). Traces still go to
+#                        lgtm/Tempo, not this collector.
 #
 # The committed log pipeline (ADR-0020): the kind-side Grafana Alloy DaemonSet
 # tails pod stdout, builds an OTel-native LogRecord (Body=message, level→
@@ -34,6 +43,20 @@ exporters:
     endpoint: tcp://clickhouse:9000?dial_timeout=10s
     database: default
     logs_table_name: otel_logs
+    # Metrics land in the standard otel_metrics_* tables (sum/gauge/histogram/…),
+    # owned by the exporter via create_schema. Business metrics push DELTA
+    # temporality (ADR-0024), so sum(Value) over a window is an exact count.
+    metrics_tables:
+      sum:
+        name: otel_metrics_sum
+      gauge:
+        name: otel_metrics_gauge
+      histogram:
+        name: otel_metrics_histogram
+      exponential_histogram:
+        name: otel_metrics_exponential_histogram
+      summary:
+        name: otel_metrics_summary
     username: default
     # Committed workbench constant — matches docker-compose.yml CLICKHOUSE_PASSWORD.
     password: ziggymart-local-clickhouse
@@ -49,6 +72,10 @@ exporters:
 service:
   pipelines:
     logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [clickhouse]
+    metrics:
       receivers: [otlp]
       processors: [batch]
       exporters: [clickhouse]

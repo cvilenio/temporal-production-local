@@ -28,8 +28,9 @@ def make_external_activities(mock_api: MockApiClient) -> list:
     # business_meter() returns a global OTel Meter; it's safe to call here
     # because activities run outside the workflow sandbox.
     _meter = business_meter()
-    # Counter name has no _total suffix — the OTel Collector's Prometheus
-    # exporter appends it, yielding `orders_payments_captured_total`.
+    # OTLP push → ClickHouse (ADR-0024). The metric name is stored un-mangled in
+    # otel_metrics_sum as `orders.payments_captured` (no dots→underscores, no
+    # `_total` suffix — that mangling was the retired Prometheus-exporter path).
     _payments_captured = _meter.create_counter(
         "orders.payments_captured",
         description="Number of payment captures that succeeded",

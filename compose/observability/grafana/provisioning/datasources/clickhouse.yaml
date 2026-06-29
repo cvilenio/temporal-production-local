@@ -1,14 +1,25 @@
-# ClickHouse logs datasource for Grafana — the committed log store (ADR-0020).
-# Grafana is the single viz pane; ClickHouse is the schema-on-read log store
-# (full fidelity, no field mapping) that replaced Loki. The OTel Collector writes
-# the standard `otel_logs` schema (clickhouseexporter); otelEnabled=true → the
-# plugin reads the OTel columns (Timestamp, Body, SeverityText, TraceId,
-# LogAttributes, ResourceAttributes). Body is already the message (Alloy filelog
-# `move`), so the log view is clean. SQL, not LogQL. Reachable lgtm→clickhouse
-# over temporal-network.
+# ClickHouse datasource for Grafana — the high-fidelity warehouse (ADR-0020/0024).
+# ONE ClickHouse server / `default` database, two signals, both queried in SQL:
+#   • logs            → otel_logs       (Alloy → collector, ADR-0020)
+#   • business metrics → otel_metrics_*  (apps business_meter() push, ADR-0024)
+# So this single datasource backs BOTH the logs dashboards and the business-metrics
+# panels — the `logs:` block below only sets the Logs-builder defaults (otel_logs);
+# raw-SQL panels query any table (e.g. otel_metrics_sum). uid stays `clickhouse-logs`
+# (dashboards reference it by uid; renaming the display name is safe). Use this for
+# business/analytical metrics + logs; use a Prometheus datasource for operational /
+# autoscaling / PromQL metrics. Reachable lgtm→clickhouse over temporal-network.
 apiVersion: 1
-datasources:
+# Drop the pre-rename entry first. This datasource was once named "ClickHouse (logs)"
+# on the SAME uid (clickhouse-logs). Grafana provisioning matches by name, so a rename
+# alone makes it try to INSERT the new name on an already-used uid → "data source with
+# the same uid already exists", which aborts Grafana startup on any volume that still
+# holds the old row. Deleting the old name by uid first makes the rename idempotent;
+# once it's gone this is a harmless no-op.
+deleteDatasources:
   - name: ClickHouse (logs)
+    orgId: 1
+datasources:
+  - name: ClickHouse (logs + metrics)
     type: grafana-clickhouse-datasource
     uid: clickhouse-logs
     access: proxy
