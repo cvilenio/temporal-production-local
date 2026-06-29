@@ -90,16 +90,20 @@ spec:
                   # slot_utilization is NOT an SDK metric — it is a recording rule
                   # over the slot gauges the Core SDK already emits (ADR-0021). KEDA's
                   # Prometheus scaler queries this series (ADR-0023). Grouped by the
-                  # labels the SDK attaches so per-deployment/queue utilization is
-                  # preserved rather than averaged into one global number.
+                  # labels the SDK actually attaches (verified against the live scrape:
+                  # the metric carries the `temporal_` prefix, the Temporal namespace as
+                  # `namespace`, plus temporal_io_deployment_name / worker_type /
+                  # task_queue) so per-deployment/queue utilization is preserved rather
+                  # than averaged into one global number. Aggregate the two gauges
+                  # separately before dividing — adding the raw vectors fails to match
+                  # on their differing __name__.
                   - record: temporal:slot_utilization
                     expr: |
-                      sum by (namespace, service, worker_type, task_queue) (worker_task_slots_used)
+                      sum by (namespace, temporal_io_deployment_name, worker_type, task_queue) (temporal_worker_task_slots_used)
                       /
                       clamp_min(
-                        sum by (namespace, service, worker_type, task_queue) (
-                          worker_task_slots_used + worker_task_slots_available
-                        ),
+                        sum by (namespace, temporal_io_deployment_name, worker_type, task_queue) (temporal_worker_task_slots_used)
+                        + sum by (namespace, temporal_io_deployment_name, worker_type, task_queue) (temporal_worker_task_slots_available),
                         1
                       )
   destination:
