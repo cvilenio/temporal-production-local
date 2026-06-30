@@ -131,6 +131,15 @@ follow along in real time.
 
 See `docs/RUNMODES.md` for the full run-mode matrix.
 
+# MCP servers for agents — ClickHouse, Prometheus, Kubernetes
+
+A project-scoped `.mcp.json` gives agents read-mostly MCP access to the three systems they
+inspect most — the ClickHouse warehouse (`otel_logs` / `otel_metrics_*`), the durable Prometheus
+store, and the kind cluster. All run via `uvx` (no Node/Go), point at the local **kind + Cloud**
+endpoints, and need the stack up (`just up-cloud-kind` → `just platform-up`) to return data.
+Docker/Terraform/Grafana/ArgoCD were deliberately left out as net baggage for this repo. See
+`docs/MCP.md` for the rationale, smoke tests, and how to add more later.
+
 # Live Temporal Cloud testing — keep the footprint minimal (MUST)
 
 Temporal Cloud executions are real, billable, and visible to the account. When an agent runs
