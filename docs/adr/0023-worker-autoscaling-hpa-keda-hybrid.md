@@ -1,7 +1,9 @@
 # ADR-0023: Worker autoscaling — KEDA as single control plane, scaler per workload shape
 
-- **Status:** Proposed
-- **Date:** 2026-06-29
+- **Status:** **Accepted — Phase 1 landed** (steady orders workers, KEDA Prometheus scaler,
+  `minReplicaCount: 1`). The bursty / scale-to-zero (Temporal scaler) archetype remains proposed
+  future work. See "Phase 1 implementation notes" below for what changed against the original design.
+- **Date:** 2026-06-29 (Phase 1 landed 2026-06-30)
 - **Related:** Builds on ADR-0004 (Worker Versioning via the Temporal Worker Controller) — the
   controller owns the per-version `Deployment` an autoscaler attaches to. Depends on the metrics
   enablement phase (worker SDK `/metrics` scrape + Cloud OpenMetrics endpoint) landing first; see
@@ -47,6 +49,13 @@ makes the no-scale-from-zero limitation bite harder for bursty work. The Tempora
 differs per substrate (Cloud OpenMetrics vs self-hosted server metrics).
 
 ## Decision
+
+> **Revised in Phase 1 (see implementation notes).** The "Prometheus scaler for steady" row below was
+> the original proposal; it is **version-blind** (the controller injects per-version identity only into
+> `type: temporal` triggers), and per-version scaling is a hard requirement. Phase 1 therefore uses the
+> **KEDA Temporal scaler for all workloads** (per-version backlog), `minReplicaCount: 1` for now,
+> scale-to-zero deferred. The table is retained for the workload-shape reasoning; the scaler choice
+> narrowed to Temporal-for-everything.
 
 **Run KEDA as the single autoscaling control plane; choose the scaler per workload shape; demo both
 behaviors in-repo on distinct task queues.** Do **not** run prometheus-adapter alongside KEDA
@@ -155,4 +164,50 @@ These gate the autoscaling phase; all are currently unmet:
 4. **Install KEDA as the sole external-metrics provider** via the existing add-on pattern (ArgoCD
    Application YAML in `deploy/argocd/applications/`, version pinned in `config/dependencies.yaml`,
    chart mirrored into the local OCI registry per ADR-0013, sync-wave `-2`). Do **not** also install
-   prometheus-adapter — APIService collision.
+   prometheus-adapter — APIService collision. **Done** — `deploy/argocd/applications/keda.yaml`
+   (chart 2.20.1 / appVersion 2.20.1), pinned under `charts.keda`, mirrored by `mirror-deps.sh`.
+
+## Phase 1 implementation notes (2026-06-30)
+
+What Phase 1 wired, the design deltas found while building it, and one **correction** to an earlier
+draft of these notes (verified against the `temporal-worker-controller` source at appVersion 1.8.0,
+PR #324, the KEDA Temporal scaler docs, and the live cluster):
+
+1. **The attach seam is `WorkerResourceTemplate` (WRT), and it templates a KEDA `ScaledObject`.**
+   The controller renders one copy per running version, injects the versioned Deployment into
+   `scaleTargetRef: {}` (recursive injection — valid for KEDA's `scaleTargetRef` too), and GCs each
+   copy on sunset. `ScaledObject` was added to `workerResourceTemplate.allowedResources` (gates the
+   webhook + drives controller RBAC).
+
+2. **Use the KEDA *Temporal* scaler (`type: temporal`), NOT the Prometheus scaler — that is what
+   makes scaling per-version.** The controller's `appendKEDATriggerMetadata` (appVersion 1.8.0+)
+   injects per-version identity into trigger metadata **only for `type: temporal` triggers**:
+   `workerDeploymentName`, `workerDeploymentBuildId`, `namespace` (opt-in via the empty-string
+   sentinel). It does **not** inject into Prometheus triggers. So each version's ScaledObject reads
+   its **own** backlog via `DescribeWorkerDeploymentVersion` → per-version, canary-/proportional-/
+   N-versions-correct scaling. (A first cut used the Prometheus scaler at `minReplicaCount: 1`; it is
+   version-blind — every version scales on one queue-wide series — and was replaced.)
+
+3. **CORRECTION — per-version metrics do NOT require an SDK bump.** An earlier draft claimed
+   temporalio 1.29 emits only a bare `namespace` scheme so per-version scaling was "blocked until a
+   Core SDK bump." That is wrong: the worker pods carry `temporal.io/build-id` +
+   `temporal.io/deployment-name` (set by the controller), surfaced onto every scraped series as
+   `temporal_io_build_id` / `temporal_io_deployment_name` — confirmed live. And the Temporal scaler
+   path doesn't use SDK metrics for versioning at all; it gets the Build ID injected by the
+   controller. temporalio 1.29 is latest stable (verified) — nothing is pinned behind.
+
+4. **Auth.** The Temporal scaler calls the Temporal frontend, so it needs a `TriggerAuthentication`
+   (`apiKey`) — one shared, namespace-scoped resource pointing at the same `orders-cloud-apikey`
+   Secret the Connection uses (the API key is per-namespace, not per-version). `endpoint` =
+   `connection.hostPort`.
+
+5. **Cost / signal tradeoffs (accepted).** The Temporal scaler makes O(versions × queues) Visibility
+   API calls (the rate-limit ladder in this ADR covers extreme N). Signal today is **per-version
+   backlog** (`targetQueueSize`); a *leading* per-version slot-utilization signal is deferred — the
+   controller doesn't inject into Prometheus triggers and WRT can't template a Build ID into a query
+   string, so a per-version slot trigger isn't expressible yet.
+
+6. **Scale-to-zero deferred (next phase).** `minReplicaCount: 1` for now. The KEDA Temporal scaler
+   supports `minReplicaCount: 0`, but its docs warn backlog activation "fails to account for in-flight
+   tasks" (kedacore/keda#7368 — can zero a worker mid-activity). The safe-to-zero guard wants a
+   per-version slot/poller signal (the deferred item in #5), so scale-to-zero waits for that phase.

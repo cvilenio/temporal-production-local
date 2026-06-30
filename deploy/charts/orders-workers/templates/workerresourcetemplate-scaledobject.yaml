@@ -1,0 +1,96 @@
+# Per-version worker autoscaling (ADR-0023 Phase 1 — KEDA Temporal scaler).
+#
+# The Worker Controller creates one build-ID-suffixed Deployment per running version; a
+# static autoscaler can't name them. A WorkerResourceTemplate (WRT) renders one copy of
+# spec.template PER running version and auto-injects per-version identity. We use the KEDA
+# **Temporal scaler** (`type: temporal`), NOT the Prometheus scaler, because:
+#
+#   - The controller injects per-version identity ONLY into `type: temporal` trigger
+#     metadata (appendKEDATriggerMetadata, appVersion 1.8.0+): workerDeploymentName,
+#     workerDeploymentBuildId, namespace — opt-in via the empty-string ("") sentinel.
+#     A Prometheus trigger gets NO such injection, so it would scale every version on one
+#     shared queue-wide signal (version-blind) — unacceptable for canary / proportional /
+#     N-versions-live scaling where each build_id has its own load.
+#   - The Temporal scaler reads each version's OWN backlog via DescribeWorkerDeploymentVersion,
+#     so each version scales to its actual traffic share. It is also the path that later
+#     unlocks scale-to-zero (minReplicaCount: 0) — not configured yet (see ADR-0023).
+#
+# `scaleTargetRef: {}` is injected recursively with the versioned Deployment. Each ScaledObject
+# is GC'd when its version is sunset. Auth to the Temporal frontend is the shared API key via
+# the TriggerAuthentication below (same secret the Connection uses).
+#
+# Signal today = per-version backlog (targetQueueSize). The leading per-version slot-utilization
+# signal is deferred: the controller does not inject build_id into Prometheus triggers and WRT
+# can't template it into a query string, so a per-version slot trigger isn't expressible yet
+# (revisit with the scale-to-zero safe-guard phase). Gated by .Values.autoscaling.enabled.
+{{- if .Values.autoscaling.enabled }}
+{{- $a := .Values.autoscaling }}
+---
+# One shared TriggerAuthentication for all versions — the Cloud API key is per-namespace, not
+# per-version, so it is a single static resource (not WRT-rendered). KEDA reads the same Secret
+# the WorkerDeployment Connection uses.
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: orders-temporal-apikey
+  labels:
+    app.kubernetes.io/component: autoscaler
+spec:
+  secretTargetRef:
+    - parameter: apiKey
+      name: {{ .Values.connection.apiKeySecret | quote }}
+      key: {{ .Values.connection.apiKeySecretKey | quote }}
+{{- range .Values.workers }}
+{{- $wa := index $a.workers .name }}
+{{- if $wa }}
+---
+apiVersion: temporal.io/v1alpha1
+kind: WorkerResourceTemplate
+metadata:
+  name: {{ .deploymentName }}-autoscaler
+  labels:
+    app.kubernetes.io/name: {{ .deploymentName }}
+    app.kubernetes.io/component: autoscaler
+spec:
+  # New (non-deprecated) field name; present since controller chart 0.26.0.
+  workerDeploymentRef:
+    name: {{ .deploymentName }}
+  template:
+    apiVersion: keda.sh/v1alpha1
+    kind: ScaledObject
+    spec:
+      # {} sentinel: the controller injects the versioned Deployment
+      # ({apiVersion: apps/v1, kind: Deployment, name: <versioned>}) per version.
+      scaleTargetRef: {}
+      minReplicaCount: {{ $wa.minReplicaCount }}   # 1 = always warm (no scale-to-zero yet)
+      maxReplicaCount: {{ $wa.maxReplicaCount }}
+      pollingInterval: {{ $a.pollingInterval }}
+      triggers:
+        # KEDA Temporal scaler — per-version backlog via DescribeWorkerDeploymentVersion.
+        # The "" fields are sentinels the controller fills per running version:
+        #   workerDeploymentName  -> <temporal-ns>/<deployment-name>
+        #   workerDeploymentBuildId -> the version's Build ID
+        #   namespace             -> the Temporal namespace
+        # Do NOT hardcode them — the WRT webhook rejects non-empty values for these.
+        - type: temporal
+          metadata:
+            endpoint: {{ $.Values.connection.hostPort | quote }}
+            namespace: ""
+            workerDeploymentName: ""
+            workerDeploymentBuildId: ""
+            taskQueue: {{ $wa.taskQueue | quote }}
+            queueTypes: {{ $wa.queueTypes | quote }}
+            targetQueueSize: {{ $wa.targetQueueSize | quote }}
+          authenticationRef:
+            name: orders-temporal-apikey
+      advanced:
+        horizontalPodAutoscalerConfig:
+          behavior:
+            # Fast up, slow down — avoid replica flapping.
+            scaleUp:
+              stabilizationWindowSeconds: {{ $a.scaleUpStabilizationSeconds }}
+            scaleDown:
+              stabilizationWindowSeconds: {{ $a.scaleDownStabilizationSeconds }}
+{{- end }}
+{{- end }}
+{{- end }}

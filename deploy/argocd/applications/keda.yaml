@@ -1,0 +1,45 @@
+# KEDA — the single autoscaling / external-metrics control plane (ADR-0023 Phase 1).
+# A ScaledObject makes KEDA generate a managed HPA and serve its external metric, so
+# "running KEDA" already means "running HPA"; KEDA adds the per-version attach + (for
+# the deferred bursty phase) scale-from-zero. The worker-controller's
+# WorkerResourceTemplate renders one ScaledObject per running worker version, each
+# scaling on the in-cluster Prometheus signals (slot_utilization + Cloud backlog).
+#
+# DO NOT also install prometheus-adapter: KEDA and prometheus-adapter both own the
+# cluster-wide external.metrics.k8s.io APIService and cannot coexist (kedacore/keda#470).
+#
+# Secret-free, public chart → delivered the pure-GitOps way (targetRevision injected by
+# the cluster layer from config/dependencies.yaml, keyed by chart name "keda"). The
+# chart bundles the ScaledObject/TriggerAuthentication CRDs.
+#
+# sync-wave -2: KEDA's CRDs + operator must exist BEFORE the worker-controller (wave -1)
+# renders ScaledObjects and before the wave-0 orders workload. ServerSideApply: KEDA's
+# CRDs are large and overflow the client-side kubectl apply annotation limit.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keda
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  project: default
+  source:
+    # Local OCI mirror (deploy/kind/mirror-deps.sh) — no public-internet pull.
+    # targetRevision is injected by the cluster layer from config/dependencies.yaml.
+    repoURL: registry-tls.kube-public.svc:5000/charts
+    chart: keda
+    helm:
+      valuesObject:
+        crds:
+          install: true # install KEDA's CRDs (ScaledObject, TriggerAuthentication, …)
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keda
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
