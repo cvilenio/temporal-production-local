@@ -17,7 +17,7 @@ dependencies = [
     "protobuf>=6.30,<7",
     "pydantic==2.7.1",
     "sqlalchemy[asyncio]>=2.0.30,<3",
-    "temporalio>=1.28,<1.29",
+    "temporalio>=1.29,<1.30",
 ]
 
 [build-system]

@@ -1,6 +1,8 @@
 # Temporal Worker Controller — reconciles Connection/WorkerDeployment CRs into
-# versioned worker Deployments (Build-ID rainbow deploys). Pinned to chart 0.26.0
-# / appVersion 1.7.0. cert-manager is a soft dependency for the webhook: we let
+# versioned worker Deployments (Build-ID rainbow deploys). The chart version is the
+# single source of truth in config/dependencies.yaml (charts.temporal-worker-controller)
+# and is injected as targetRevision by the cluster TF layer — not pinned in this file.
+# cert-manager is a soft dependency for the webhook: we let
 # cert-manager land via its own Application (wave -2) and only have the controller
 # create its Issuer/Certificate (certmanager.enabled), not install cert-manager
 # itself (certmanager.install=false). sync-wave -1: after CRDs + cert-manager,
