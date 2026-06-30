@@ -32,6 +32,19 @@ default:
 render-deps:
     @uv run python compose/scripts/render-deps.py
 
+# Audit: assert every native version pin matches config/dependencies.yaml (the
+# single source of truth, ADR-0025). Offline, stdlib + pyyaml. Tier-1/2 drift fails;
+# Tier-3 (code deps) warns. Wired into `lint` so `just check` catches drift pre-push.
+versions-audit:
+    @uv run python compose/scripts/versions-audit.py
+
+# Report Tier-1 (Temporal) pinned-vs-latest-stable from upstream registries (PyPI,
+# Docker Hub, GitHub releases, Terraform Registry). NETWORK (Resolve tier, ADR-0013)
+# — deliberately NOT in any gate; upstream releasing must never break CI. `--strict`
+# makes it exit non-zero when anything is behind (honors GITHUB_TOKEN if set).
+versions-upstream *ARGS:
+    @uv run python compose/scripts/versions-upstream.py {{ARGS}}
+
 render-oss-bootstrap:
     @uv run python compose/scripts/render-oss-bootstrap.py
 
@@ -62,11 +75,13 @@ proto-breaking:
 proto-check: proto-gen
     git diff --exit-code -- libs/orders/python/orders/_pb
 
-# All static checks: python (poe) + k8s manifests (helm/kubeconform) + proto lint.
+# All static checks: python (poe) + k8s manifests (helm/kubeconform) + proto lint
+# + dependency-version drift (versions-audit vs config/dependencies.yaml).
 lint:
     uv run poe lint
     just lint-manifests
     just proto-lint
+    just versions-audit
 
 # Run tests (python leaf).
 test:

@@ -1,18 +1,77 @@
-# Single source of truth for the kind / local-OCI delivery stack's third-party
-# dependency versions. Same "one spec, no drift" pattern as
-# config/temporal/namespaces.yaml (ADR-0007).
+# Single source of truth for this repo's dependency versions, tiered by audit
+# rigor. Same "one spec, no drift" pattern as config/temporal/namespaces.yaml
+# (ADR-0007). The tiering + the generate-vs-verify split are recorded in ADR-0025.
 #
-# Consumers:
-#   - deploy/kind/{cluster-up,mirror-deps}.sh  — via compose/scripts/render-deps.py
-#     which renders this file to config/.generated/deps.env (git-ignored) that the
-#     scripts source. (`just render-deps`, run automatically by the cluster recipes.)
-#   - deploy/terraform/layers/cluster           — reads this file via yamldecode():
-#     injects each add-on Application's targetRevision (keyed by chart name), and
-#     sets the ArgoCD chart version + the registry-proxy nginx image.
+# Two classes of consumer:
+#
+#   GENERATE — the kind / local-OCI delivery stack reads the lower blocks directly:
+#     - deploy/kind/{cluster-up,mirror-deps}.sh  — via compose/scripts/render-deps.py
+#       which renders this file to config/.generated/deps.env (git-ignored) that the
+#       scripts source. (`just render-deps`, run automatically by the cluster recipes.)
+#     - deploy/terraform/layers/cluster           — reads this file via yamldecode():
+#       injects each add-on Application's targetRevision (keyed by chart name), and
+#       sets the ArgoCD chart version + the registry-proxy nginx image.
+#
+#   VERIFY — versions that physically live in files a manifest can't drive (static
+#     TOML the SDK resolver reads, HCL `required_providers`, buf plugin pins, .env,
+#     hardcoded compose image tags). Those keep their native pin; `just versions-audit`
+#     (compose/scripts/versions-audit.py, wired into `just lint`) asserts each native
+#     pin equals the value recorded here and fails the gate on drift. This is how the
+#     `temporal:` / most of `platform:` blocks below stay authoritative without fragile
+#     codegen into TOML/HCL.
+#
+# To bump a Temporal version: edit the value here, run `just versions-audit` to see
+# which native pin(s) to update to match, update them, re-run until green. To see how
+# far behind upstream latest-stable you are: `just versions-upstream` (Tier-1, network).
 #
 # NOT here: pull-through *routing* (which upstream serves each repo prefix) lives in
-# deploy/kind/zot-config.json; cached image *versions* are not pinned (on-demand,
-# any tag). Compose/Temporal-server versions live in .env (a separate run mode).
+# deploy/kind/zot-config.json; cached image *versions* are not pinned (on-demand, any
+# tag).
+
+# ── Tier 1 — everything Temporal (highest audit rigor) ───────────────────────
+# All VERIFY targets except worker_controller_chart, which is GENERATEd from the
+# canonical entry under charts: below; the value here is a mirror the audit asserts
+# equal (so "bump in one place" stays honest). `cli` has no in-repo consumer yet —
+# it is pinned for the upstream-latest audit and as the documented expected version.
+temporal:
+  python_sdk: ">=1.29,<1.30" # verify: root pyproject (codec-server + platform-console groups) + libs/orders + libs/appkit
+  server: "1.31.1" # verify: .env TEMPORAL_VERSION (compose/oss-server.yml)
+  admin_tools: "1.31.1" # verify: .env TEMPORAL_ADMINTOOLS_VERSION
+  ui: "2.51.1" # verify: .env TEMPORAL_UI_VERSION
+  cli: "v1.7.2" # no in-repo pin (assumed on PATH / bundled in admin-tools); upstream-audit target
+  cloud_tf_provider: "~> 1.5" # verify: terraform layers/cloud + modules/cloud-namespace required_providers
+  proto_plugin: "v33.1" # verify: libs/orders/proto/buf.gen.yaml (protocolbuffers/python + pyi)
+  worker_controller_chart: "0.27.0" # MIRROR of charts.temporal-worker-controller.version (audit asserts ==)
+
+# ── Tier 2 — platform tools (hard-gated like Tier 1) ─────────────────────────
+platform:
+  terraform_min: ">= 1.6" # verify: cluster + cloud versions.tf required_version
+  providers: # verify: cluster/versions.tf required_providers (non-Temporal)
+    kubernetes: "~> 2.38" # hashicorp/kubernetes
+    helm: "~> 2.17" # hashicorp/helm
+    kubectl: "~> 2.1" # alekc/kubectl
+    tls: "~> 4.0" # hashicorp/tls
+  images: # verify: docker-compose.yml hardcoded host-side image tags
+    prometheus: "v3.12.0" # prom/prometheus (prometheus-store)
+    clickhouse: "24.8" # clickhouse/clickhouse-server (committed log store, ADR-0020)
+    otel_collector_contrib: "0.116.1" # otel/opentelemetry-collector-contrib (OTLP→ClickHouse gateway)
+    otel_lgtm: "latest" # grafana/otel-lgtm — intentionally unpinned; audit skips
+  alloy: "1.17.0" # verify: deploy/charts/alloy/{Chart.yaml appVersion, values.yaml image.tag}
+  postgresql: "16" # verify: .env POSTGRESQL_VERSION + compose/host-apptier.yml
+
+# ── Tier 3 — code deps (least rigor; report-only — audit warns, never fails) ──
+# Canonical specs are the orders kernel's (libs/orders/python). Recorded here so the
+# audit can flag drift, but a mismatch is a warning, not a gate failure.
+code:
+  pydantic: "==2.7.1"
+  httpx: ">=0.27.0"
+  sqlalchemy: ">=2.0.30,<3"
+  protobuf: ">=6.30,<7"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GENERATE blocks — UNCHANGED shape/position. render-deps.py and the cluster
+# Terraform layer (yamldecode) depend on `registry:`/`charts:`/`images:` keying.
+# ═══════════════════════════════════════════════════════════════════════════════
 
 registry:
   # The local OCI registry itself (zot) — image tag used by cluster-up.sh.
@@ -27,7 +86,8 @@ charts:
     repo: https://charts.jetstack.io # classic Helm repo -> explicit mirror push
   temporal-worker-controller:
     # chart 0.27.0 ships appVersion 1.8.0 — the floor for KEDA per-version
-    # metric queries in Worker Resource Templates (ADR-0023).
+    # metric queries in Worker Resource Templates (ADR-0023). CANONICAL for the
+    # worker-controller version; temporal.worker_controller_chart mirrors this.
     version: "0.27.0"
     oci: oci://docker.io/temporalio/temporal-worker-controller
   temporal-worker-controller-crds:
