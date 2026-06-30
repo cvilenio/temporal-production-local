@@ -1,8 +1,9 @@
 # Temporal Worker Controller CRDs (Connection, WorkerDeployment — temporal.io/v1alpha1).
 # Installed as a SEPARATE chart from the controller so CRD lifecycle never churns
-# on controller upgrades (the upstream split). Pinned to chart 0.26.0 / appVersion
-# 1.7.0 — the first GA line that supports apiKeySecretRef (never use 1.1.0/1.2.0).
-# OCI Helm chart on Docker Hub.
+# on controller upgrades (the upstream split). The chart version is the single source
+# of truth in config/dependencies.yaml (charts.temporal-worker-controller-crds) and is
+# injected as targetRevision by the cluster TF layer — not pinned in this file. Stay on
+# a GA line that supports apiKeySecretRef (never 1.1.0/1.2.0). OCI Helm chart on Docker Hub.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
