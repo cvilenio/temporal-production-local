@@ -111,6 +111,17 @@ charts:
     # -> explicit mirror push. chart 29.13.0 ships Prometheus appVersion v3.12.0.
     version: "29.13.0"
     repo: https://prometheus-community.github.io/helm-charts
+  keda:
+    # KEDA — the single external-metrics / autoscaling control plane (ADR-0023
+    # Phase 1). Generates a managed HPA per ScaledObject and serves the external
+    # metrics; the worker-controller's WorkerResourceTemplate renders one
+    # ScaledObject per running worker version (slot_utilization + Cloud backlog,
+    # both from in-cluster Prometheus). NOT prometheus-adapter — the two cannot both
+    # own the external.metrics.k8s.io APIService. chart 2.20.1 == appVersion 2.20.1
+    # (bundles the ScaledObject/TriggerAuthentication CRDs). Classic Helm repo ->
+    # explicit mirror push.
+    version: "2.20.1"
+    repo: https://kedacore.github.io/charts
 
 images:
   # TLS proxy that fronts the HTTP registry for ArgoCD (registry-proxy.tf).

@@ -34,6 +34,8 @@ def main() -> None:
         f"CNPG_REPO={charts['cloudnative-pg']['repo']}",
         f"PROMETHEUS_VERSION={charts['prometheus']['version']}",
         f"PROMETHEUS_REPO={charts['prometheus']['repo']}",
+        f"KEDA_VERSION={charts['keda']['version']}",
+        f"KEDA_REPO={charts['keda']['repo']}",
         f"NGINX_IMAGE={spec['images']['nginx']['repository']}:{spec['images']['nginx']['tag']}",
     ]
     OUT.parent.mkdir(parents=True, exist_ok=True)

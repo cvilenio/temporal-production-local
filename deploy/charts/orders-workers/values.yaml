@@ -95,6 +95,45 @@ sunset:
   scaledownDelay: 10m
   deleteDelay: 30m
 
+# Per-version worker autoscaling via KEDA (ADR-0023 Phase 1). Rendered by
+# templates/workerresourcetemplate-scaledobject.yaml as one WorkerResourceTemplate per
+# worker, each embedding a KEDA **Temporal scaler** ScaledObject the controller copies per
+# running version (and per-version-injects its Build ID, so each version scales on its OWN
+# backlog — canary / proportional / N-versions-live all fall out naturally).
+#
+# This block is a SEPARATE top-level key on purpose: the cluster Terraform layer injects
+# the whole `workers:` array (account-bearing image refs), so per-worker autoscaling
+# settings can't live inside it — they'd be dropped on the real deploy path. The template
+# joins this block to each worker by its `name`.
+#
+# minReplicaCount >= 1 here (always warm). Scale-to-zero (minReplicaCount: 0) is a later
+# phase — it needs a safe-to-zero guard against in-flight tasks (ADR-0023); KEDA is live now.
+autoscaling:
+  # Off by default so `helm template` / the host-OSS dev path (no kind, no KEDA) renders
+  # nothing; the kind+Cloud deploy path turns it on (see applications.tf injection).
+  enabled: false
+  pollingInterval: 30 # seconds; KEDA default. O(versions × queues) Visibility API calls.
+  scaleUpStabilizationSeconds: 30 # fast up
+  scaleDownStabilizationSeconds: 120 # slow down (avoid flapping)
+  # The Temporal frontend endpoint + API-key auth come from the shared `connection:` block
+  # (same hostPort + apiKeySecret the WorkerDeployment uses) — see the WRT template.
+  # Per-profile bounds + queue scoping, keyed by worker `name` (matches workers[].name).
+  # queueTypes selects which backlog the scaler reads: "workflow" for the workflow worker,
+  # "activity" for the activity worker. taskQueue must match orders.shared.temporal_ids.TaskQueue.
+  workers:
+    workflow:
+      taskQueue: orders-workflow-task-queue
+      queueTypes: workflow
+      minReplicaCount: 1
+      maxReplicaCount: 6
+      targetQueueSize: "5" # backlog tasks per replica (KEDA Temporal scaler target)
+    activity:
+      taskQueue: orders-activity-task-queue
+      queueTypes: activity
+      minReplicaCount: 1
+      maxReplicaCount: 10
+      targetQueueSize: "5"
+
 # One entry per worker profile (mirrors orders.worker.WORKER_PROFILES and
 # apps/temporal/workers/python/<name>/). Each profile is its own image (the entrypoint is
 # baked at build time via APP_PATH), so each gets its own image tag = version.
