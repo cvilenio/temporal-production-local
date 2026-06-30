@@ -1,6 +1,8 @@
 # ADR-0025: Centralized, tiered dependency version management (Temporal-first)
 
-- **Status:** Accepted
+- **Status:** Accepted — landed via PR #20; mechanism validated by bringing all Tier-1
+  components to latest stable and smoke-testing both Local-OSS and kind+Cloud run modes
+  (see checkpoint 0024).
 - **Date:** 2026-06-30
 - **Related:** Extends the "one spec, no drift" pattern of ADR-0007 (the
   `config/temporal/namespaces.yaml` single source of truth). The upstream-latest checker
