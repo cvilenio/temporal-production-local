@@ -7,6 +7,13 @@
 # create its Issuer/Certificate (certmanager.enabled), not install cert-manager
 # itself (certmanager.install=false). sync-wave -1: after CRDs + cert-manager,
 # before the orders workload (wave 0).
+#
+# workerResourceTemplate.allowedResources gates which kinds a WorkerResourceTemplate
+# may embed AND drives the controller's ClusterRole RBAC for them. We add KEDA's
+# ScaledObject (keda.sh) alongside the default HPA so the orders-workers chart can
+# attach a per-version KEDA ScaledObject through the WRT seam (ADR-0023 Phase 1).
+# The WRT validating webhook additionally runs a SubjectAccessReview on the applying
+# identity (the ArgoCD app-controller SA, cluster-admin here) and the controller SA.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -26,6 +33,14 @@ spec:
         certmanager:
           install: false # cert-manager comes from its own Application
           enabled: true # but DO create the webhook Issuer + Certificate
+        workerResourceTemplate:
+          allowedResources:
+            - kinds: ["HorizontalPodAutoscaler"] # chart default — keep it
+              apiGroups: ["autoscaling"]
+              resources: ["horizontalpodautoscalers"]
+            - kinds: ["ScaledObject"] # KEDA — the autoscaler we actually attach
+              apiGroups: ["keda.sh"]
+              resources: ["scaledobjects"]
   destination:
     server: https://kubernetes.default.svc
     namespace: temporal-system

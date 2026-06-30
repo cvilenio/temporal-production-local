@@ -59,6 +59,11 @@ locals {
               tls               = true
               apiKeySecret      = var.cloud_apikey_secret_name
             }
+            # Turn on per-version KEDA autoscaling (ADR-0023 Phase 1) — this is the
+            # kind+Cloud path that has KEDA + in-cluster Prometheus. Deep-merges over
+            # the chart's autoscaling defaults, so only `enabled` flips; the host/OSS
+            # `helm template` path keeps the chart default (enabled: false).
+            autoscaling = { enabled = true }
             workers = [
               {
                 name           = "workflow"
