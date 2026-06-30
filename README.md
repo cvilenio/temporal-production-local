@@ -324,7 +324,7 @@ deploy/      How it ships: terraform/ (control plane), argocd/ (app-of-apps), ch
 config/      Connection profiles + the shared namespace/dependency specs.
 compose/     Host visibility/console plane for the kind paths, plus a legacy local
              self-hosted Temporal server + app tier (no workers — those run on kind).
-docs/        ARCHITECTURE.md, RUNMODES.md, DEMO_SCRIPT.md, SHIP_PLAN.md, and adr/.
+docs/        ARCHITECTURE.md, RUNMODES.md, MCP.md, DEMO_SCRIPT.md, SHIP_PLAN.md, and adr/.
 ai_checkpoints/  Cross-session work log (read newest-first for current state).
 ```
 
@@ -336,6 +336,8 @@ ai_checkpoints/  Cross-session work log (read newest-first for current state).
   connection profiles, worker versioning, observability model).
 - [`docs/RUNMODES.md`](docs/RUNMODES.md) — every run mode, backend selection, the offline
   contract.
+- [`docs/MCP.md`](docs/MCP.md) — the repo-scoped MCP servers for AI agents (ClickHouse,
+  Prometheus, Kubernetes) and why only those three.
 - [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md) — the guided scenario walk-through.
 - [`docs/SHIP_PLAN.md`](docs/SHIP_PLAN.md) — a sample 30–60 day Cloud rollout plan.
 - [`OBSERVABILITY.md`](OBSERVABILITY.md) — the observability model (historically exercised

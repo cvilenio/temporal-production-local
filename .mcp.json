@@ -1,0 +1,33 @@
+{
+  "mcpServers": {
+    "clickhouse": {
+      "command": "uvx",
+      "args": ["mcp-clickhouse"],
+      "env": {
+        "CLICKHOUSE_HOST": "localhost",
+        "CLICKHOUSE_PORT": "8123",
+        "CLICKHOUSE_USER": "default",
+        "CLICKHOUSE_PASSWORD": "ziggymart-local-clickhouse",
+        "CLICKHOUSE_SECURE": "false"
+      }
+    },
+    "prometheus": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/pab1it0/prometheus-mcp-server",
+        "prometheus-mcp-server"
+      ],
+      "env": {
+        "PROMETHEUS_URL": "http://localhost:9009"
+      }
+    },
+    "kubernetes": {
+      "command": "uvx",
+      "args": ["kubernetes-mcp-server@latest", "--read-only"],
+      "env": {
+        "KUBECONFIG": "${PWD}/.secrets/kube/kind.kubeconfig"
+      }
+    }
+  }
+}
