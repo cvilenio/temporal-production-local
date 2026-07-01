@@ -6,10 +6,13 @@ description: >-
   (workflow, activity, …). Build ID is derived from the pod-template hash, so
   shipping a new version is just a new image tag. See ADR-0004.
 type: application
+# 0.1.11: omit WorkerDeployment .spec.replicas for autoscaled workers so the KEDA
+# ScaledObject/HPA is the sole owner of the per-version Deployment's replica count
+# (ADR-0023 §2). 0.1.10 always set replicas, which fought the HPA and cycled pods.
 # 0.1.10: per-version KEDA autoscaling via the Temporal scaler (WorkerResourceTemplate →
 # ScaledObject type:temporal, controller-injected Build ID; ADR-0023 Phase 1). 0.1.9 used the
 # version-blind Prometheus scaler. Keep in lockstep with cluster TF orders_workers_chart_version.
-version: 0.1.10
+version: 0.1.11
 appVersion: "1.0"
 # Requires the Temporal Worker Controller installed in-cluster (CRDs:
 # temporal.io/v1alpha1). Installed via Terraform/ArgoCD; depends on cert-manager.

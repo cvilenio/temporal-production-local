@@ -16,6 +16,10 @@ venv/
 config/temporal/.generated/
 # Rendered from config/dependencies.yaml by render-deps.py; ephemeral.
 config/.generated/
+# Fetched (pinned + sha256-verified) Headlamp UI plugins; ephemeral artifacts
+# pulled by fetch-headlamp-plugins.py. Keep the dir, ignore its contents.
+compose/deployment/headlamp/plugins/*
+!compose/deployment/headlamp/plugins/.gitkeep
 
 # Terraform (deploy/terraform)
 .terraform/

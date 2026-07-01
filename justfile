@@ -112,7 +112,7 @@ fresh: down up
 
 # Host visibility + console + mock-api for the kind+Cloud path (kind owns the
 # workers AND the app tier). Bring this up FIRST before any live kind testing.
-up-cloud-kind:
+up-cloud-kind: headlamp-plugins
     set -a; . .secrets/keys/cloud.env; set +a; docker compose -f docker-compose.yml up --build
 
 # Stop the Cloud-backed host stack and drop volumes.
@@ -277,10 +277,18 @@ orders-db-reset:
     KUBECONFIG={{kubeconfig}} kubectl -n orders delete pvc -l cnpg.io/cluster=orders-db --ignore-not-found
     echo "Deleted. ArgoCD will re-sync orders-app; CNPG bootstraps a fresh orders-db."
 
+# Fetch the pinned, sha256-verified Headlamp UI plugins (config/dependencies.yaml
+# `headlamp.plugins`) into the bind-mounted compose/deployment/headlamp/plugins/.
+# Idempotent + offline once fetched — `up-cloud-kind` runs it first so the KEDA
+# explorer is present on boot. Bump a version/sha in the manifest to re-fetch.
+headlamp-plugins:
+    @uv run python compose/scripts/fetch-headlamp-plugins.py
+
 # Force Headlamp to re-read the kubeconfig now. Headlamp already WATCHES it and
 # auto-loads the cluster within ~10s, so this is only an immediate-refresh shortcut.
+# (Also reloads UI plugins — run after `just headlamp-plugins` pulls a new one.)
 headlamp-reload:
-    @docker restart headlamp >/dev/null && echo "headlamp restarted — kubeconfig reloaded"
+    @docker restart headlamp >/dev/null && echo "headlamp restarted — kubeconfig + plugins reloaded"
 
 # Probe that the platform-console is up. Required before ANY live kind testing so
 # the operator can follow along in real time — see AGENTS.md / docs/RUNMODES.md.
