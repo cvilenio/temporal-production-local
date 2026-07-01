@@ -17,7 +17,17 @@ spec:
     connectionRef:
       name: orders                      # -> Connection above
     temporalNamespace: {{ $.Values.connection.temporalNamespace | quote }}
+  # Replica ownership (ADR-0023 §2). When this worker is autoscaled, its
+  # WorkerResourceTemplate renders a KEDA ScaledObject/HPA that owns the
+  # per-version Deployment's .spec.replicas. Setting replicas here too makes the
+  # controller re-assert a fixed count, fighting the HPA over the same field —
+  # pods cycle (spawned by the controller, killed by the HPA mid-startup). So
+  # omit replicas for autoscaled workers and let the HPA be sole owner (the CRD
+  # field is optional). `.replicas` remains the count for the non-autoscaled
+  # path (host-OSS dev: no KEDA, controller owns replicas).
+  {{- if not (and $.Values.autoscaling.enabled (hasKey $.Values.autoscaling.workers .name)) }}
   replicas: {{ .replicas }}
+  {{- end }}
   rollout:
     strategy: {{ $.Values.rollout.strategy }}
   sunset:
