@@ -37,9 +37,9 @@
   "panels": [
     {
       "type": "text",
-      "title": "Flow 2 \u2014 Workflow Progress",
+      "title": "Flow 2 — Workflow Progress",
       "gridPos": {
-        "h": 6,
+        "h": 7,
         "w": 24,
         "x": 0,
         "y": 0
@@ -47,18 +47,18 @@
       "id": 1,
       "options": {
         "mode": "markdown",
-        "content": "\nFrontend operations for **workers polling** for work (`Poll*`) and **completing** it (`Respond*`).\nThis is the server side of worker activity \u2014 pair it with the **Worker Tuning** dashboard for the\nSDK/worker view (slots, sticky cache, schedule-to-start).\n\n> **Caveat:** OSS `service_latency` for `Respond*` **includes** the time the worker is responsible\n> for, so treat the latency below as worker-inclusive.\n"
+        "content": "\nFrontend operations for **workers polling** for work (`Poll*`) and **completing** it (`Respond*`).\nThis is the server side of worker activity — pair it with the **Worker Fleet & KEDA Scaling**\ndashboard for the SDK/worker view (slots, sticky cache, schedule-to-start).\n\n**Works on Cloud AND self-hosted OSS** — each panel carries an OSS target (`service_requests`/\n`service_latency`, rate-based) and a Cloud target (`temporal_cloud_v1_*`, precomputed rate/\npercentile); whichever backend you're running populates the panel.\n\n> **Caveat:** OSS `service_latency` for `Respond*` **includes** the time the worker is responsible\n> for, so treat the latency below as worker-inclusive. The persistence panel for this flow moved to\n> **Temporal Self-Hosted Internals — Server Health** (self-hosted only, permanently).\n"
       }
     },
     {
       "type": "row",
-      "title": "Progress \u2014 Respond*",
+      "title": "Progress — Respond*",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 6
+        "y": 7
       },
       "id": 2,
       "panels": []
@@ -66,16 +66,16 @@
     {
       "type": "timeseries",
       "title": "Respond* RPS by Operation",
-      "description": "",
+      "description": "OSS: service_requests (rate). Cloud: temporal_cloud_v1_service_request_count (precomputed rate, no rate()).",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 7
+        "y": 8
       },
       "id": 3,
       "fieldConfig": {
@@ -104,9 +104,18 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
           "expr": "sum by (operation) (rate(service_requests{operation=~\"RespondWorkflowTaskCompleted|RespondActivityTaskCompleted|RespondWorkflowTaskFailed|RespondActivityTaskFailed|RespondActivityTaskCanceled\"}[$rate]))",
+          "legendFormat": "{{operation}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum by (operation) (temporal_cloud_v1_service_request_count{operation=~\"RespondWorkflowTaskCompleted|RespondActivityTaskCompleted|RespondWorkflowTaskFailed|RespondActivityTaskFailed|RespondActivityTaskCanceled\"})",
           "legendFormat": "{{operation}}"
         }
       ]
@@ -114,16 +123,16 @@
     {
       "type": "timeseries",
       "title": "Respond* Errors by Operation",
-      "description": "",
+      "description": "OSS: service_errors (rate). Cloud: temporal_cloud_v1_service_error_count (precomputed rate, no rate()).",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 7
+        "y": 8
       },
       "id": 4,
       "fieldConfig": {
@@ -152,9 +161,18 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
           "expr": "sum by (operation) (rate(service_errors{operation=~\"RespondWorkflowTaskCompleted|RespondActivityTaskCompleted|RespondWorkflowTaskFailed|RespondActivityTaskFailed|RespondActivityTaskCanceled\"}[$rate]) OR on() vector(0))",
+          "legendFormat": "{{operation}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum by (operation) (temporal_cloud_v1_service_error_count{operation=~\"RespondWorkflowTaskCompleted|RespondActivityTaskCompleted|RespondWorkflowTaskFailed|RespondActivityTaskFailed|RespondActivityTaskCanceled\"})",
           "legendFormat": "{{operation}}"
         }
       ]
@@ -162,16 +180,16 @@
     {
       "type": "timeseries",
       "title": "Respond* Latency p99 by Operation (incl. worker time)",
-      "description": "",
+      "description": "OSS: histogram_quantile over service_latency_bucket. Cloud: temporal_cloud_v1_service_latency_p99 (already a percentile).",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 15
+        "y": 16
       },
       "id": 5,
       "fieldConfig": {
@@ -200,9 +218,18 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
           "expr": "histogram_quantile(0.99, sum by (operation, le) (rate(service_latency_bucket{operation=~\"RespondWorkflowTaskCompleted|RespondActivityTaskCompleted|RespondWorkflowTaskFailed|RespondActivityTaskFailed|RespondActivityTaskCanceled\"}[$rate])))",
+          "legendFormat": "{{operation}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "max by (operation) (temporal_cloud_v1_service_latency_p99{operation=~\"RespondWorkflowTaskCompleted|RespondActivityTaskCompleted|RespondWorkflowTaskFailed|RespondActivityTaskFailed|RespondActivityTaskCanceled\"})",
           "legendFormat": "{{operation}}"
         }
       ]
@@ -215,7 +242,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 24
       },
       "id": 6,
       "panels": []
@@ -223,16 +250,16 @@
     {
       "type": "timeseries",
       "title": "Poll* RPS by Operation",
-      "description": "",
+      "description": "OSS: service_requests (rate). Cloud: temporal_cloud_v1_service_request_count (precomputed rate, no rate()).",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 24
+        "y": 25
       },
       "id": 7,
       "fieldConfig": {
@@ -261,9 +288,18 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
           "expr": "sum by (operation) (rate(service_requests{operation=~\"PollWorkflowTaskQueue|PollActivityTaskQueue\"}[$rate]))",
+          "legendFormat": "{{operation}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum by (operation) (temporal_cloud_v1_service_request_count{operation=~\"PollWorkflowTaskQueue|PollActivityTaskQueue\"})",
           "legendFormat": "{{operation}}"
         }
       ]
@@ -271,16 +307,16 @@
     {
       "type": "timeseries",
       "title": "Poll* Latency p99 by Operation",
-      "description": "Long-poll latency is expected to be high (sticky to long-poll timeout) when idle.",
+      "description": "Long-poll latency is expected to be high (sticky to long-poll timeout) when idle. OSS: histogram_quantile over service_latency_bucket. Cloud: temporal_cloud_v1_service_latency_p99.",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 24
+        "y": 25
       },
       "id": 8,
       "fieldConfig": {
@@ -309,70 +345,18 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
           "expr": "histogram_quantile(0.99, sum by (operation, le) (rate(service_latency_bucket{operation=~\"PollWorkflowTaskQueue|PollActivityTaskQueue\"}[$rate])))",
           "legendFormat": "{{operation}}"
-        }
-      ]
-    },
-    {
-      "type": "row",
-      "title": "Persistence (progress)",
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 32
-      },
-      "id": 9,
-      "panels": []
-    },
-    {
-      "type": "timeseries",
-      "title": "Persistence Latency p99 by Operation",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 33
-      },
-      "id": 10,
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "showPoints": "never"
-          }
         },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
         {
-          "refId": "A",
+          "refId": "B",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
-          "expr": "histogram_quantile(0.99, sum by (operation, le) (rate(persistence_latency_bucket[$rate])))",
+          "expr": "max by (operation) (temporal_cloud_v1_service_latency_p99{operation=~\"PollWorkflowTaskQueue|PollActivityTaskQueue\"})",
           "legendFormat": "{{operation}}"
         }
       ]
@@ -392,8 +376,8 @@
         "type": "datasource",
         "query": "prometheus",
         "current": {
-          "text": "default",
-          "value": "default"
+          "text": "Prometheus (kind metrics)",
+          "value": "prometheus-kind"
         },
         "hide": 0,
         "refresh": 1,
@@ -451,8 +435,8 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Temporal Critical Flows \u2014 Workflow Progress",
+  "title": "Temporal Critical Flows — Workflow Progress",
   "uid": "temporal-flow-workflow-progress",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }
