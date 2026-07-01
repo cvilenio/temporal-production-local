@@ -100,7 +100,7 @@ ci: check build-images push-images
 # --- Local OSS app stack (compose orchestration — cross-language) -------------
 
 # Local OSS server + app tier (no workers — those run on kind).
-up: render-oss-bootstrap
+up: render-oss-bootstrap grafana-plugins
     set -a; . config/local-oss.env; set +a; docker compose -f docker-compose.yml -f compose/host-apptier.yml -f compose/oss-server.yml up --build
 
 # Stop the local-OSS stack and drop volumes (also sweeps a stray default-project + the shared net).
@@ -112,7 +112,7 @@ fresh: down up
 
 # Host visibility + console + mock-api for the kind+Cloud path (kind owns the
 # workers AND the app tier). Bring this up FIRST before any live kind testing.
-up-cloud-kind: headlamp-plugins
+up-cloud-kind: headlamp-plugins grafana-plugins
     set -a; . .secrets/keys/cloud.env; set +a; docker compose -f docker-compose.yml up --build
 
 # Stop the Cloud-backed host stack and drop volumes.
@@ -289,6 +289,16 @@ headlamp-plugins:
 # (Also reloads UI plugins — run after `just headlamp-plugins` pulls a new one.)
 headlamp-reload:
     @docker restart headlamp >/dev/null && echo "headlamp restarted — kubeconfig + plugins reloaded"
+
+# Fetch the pinned, sha256-verified Grafana plugins (config/dependencies.yaml
+# `grafana.plugins`) into the bind-mounted compose/deployment/grafana/plugins/.
+# GF_INSTALL_PLUGINS is a no-op on the otel-lgtm image and GF_PLUGINS_PREINSTALL
+# hangs on boot (air-gap, ADR-0013) — this is the offline substitute. Idempotent
+# once fetched — `up` and `up-cloud-kind` run it first so the ClickHouse
+# datasource plugin is present on boot. Bump a version/sha in the manifest to
+# re-fetch, then `docker restart lgtm` to load it.
+grafana-plugins:
+    @uv run python compose/scripts/fetch-grafana-plugins.py
 
 # Probe that the platform-console is up. Required before ANY live kind testing so
 # the operator can follow along in real time — see AGENTS.md / docs/RUNMODES.md.

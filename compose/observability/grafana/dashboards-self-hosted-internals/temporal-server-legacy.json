@@ -12,13 +12,28 @@
       }
     ]
   },
-  "description": "Temporal Server Metrics",
+  "description": "Community Temporal Server dashboard (imported). Self-hosted only, permanently — Temporal Cloud manages the server process and does not expose these internals to customers on any topology. For the request-path metrics that also work on Cloud, see the Temporal Critical Flows folder; for the newer curated internals views, see the other dashboards in this folder.",
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
   "id": 36,
   "iteration": 1642302431371,
-  "links": [],
+  "links": [
+    {
+      "asDropdown": true,
+      "title": "Self-Hosted Internals",
+      "tags": [
+        "temporal-self-hosted-internals"
+      ],
+      "type": "dashboards",
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false,
+      "tooltip": "",
+      "url": ""
+    }
+  ],
   "panels": [
     {
       "collapsed": false,
@@ -3471,7 +3486,10 @@
   "refresh": false,
   "schemaVersion": 30,
   "style": "dark",
-  "tags": [],
+  "tags": [
+    "temporal-self-hosted-internals",
+    "temporal"
+  ],
   "templating": {
     "list": [
       {
@@ -3625,7 +3643,7 @@
     ]
   },
   "timezone": "",
-  "title": "Temporal Server Metrics",
+  "title": "Temporal Self-Hosted Internals — Server Metrics (community, legacy)",
   "uid": "FxWwuPinz",
-  "version": 3
+  "version": 4
 }

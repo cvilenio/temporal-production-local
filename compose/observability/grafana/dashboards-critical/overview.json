@@ -37,7 +37,7 @@
   "panels": [
     {
       "type": "text",
-      "title": "Temporal Critical Flows \u2014 Overview",
+      "title": "Temporal Critical Flows — Overview",
       "gridPos": {
         "h": 11,
         "w": 24,
@@ -47,12 +47,12 @@
       "id": 1,
       "options": {
         "mode": "markdown",
-        "content": "\n**Critical-path monitoring for self-hosted / OSS Temporal.**\nA compact view of the operations that most directly affect application health.\n\nThis stack watches three critical flows:\n\n1. **Starting / Signaling** \u2014 `StartWorkflowExecution`, `SignalWorkflowExecution` (client API creating/modifying workflow state). Target a tight latency budget here.\n2. **Workflow Progress** \u2014 workers polling (`PollWorkflowTaskQueue`, `PollActivityTaskQueue`) and completing work (`Respond*`).\n3. **Task Processing** \u2014 Temporal's engine processing background tasks (`TransferActive`, `TimerActive`) to generate work for pollers.\n\nUse the **Critical Flows** dropdown (top-left) to drill into each flow + Worker Tuning.\n\n> **Notes:** No alerting is wired locally (`ALERTS` panel omitted). This demo runs **Postgres**, so the storage layer collapses to the persistence API (no separate storage-driver panels). Server metrics use **bare names** (no `temporal_` prefix).\n"
+        "content": "\n**Critical-path monitoring — works on Temporal Cloud AND self-hosted OSS, same panels.**\nA compact view of the operations that most directly affect application health.\n\nThis stack watches three critical flows:\n\n1. **Starting / Signaling** — `StartWorkflowExecution`, `SignalWorkflowExecution` (client API creating/modifying workflow state). Target a tight latency budget here.\n2. **Workflow Progress** — workers polling (`PollWorkflowTaskQueue`, `PollActivityTaskQueue`) and completing work (`Respond*`).\n\nUse the **Critical Flows** dropdown (top-left) to drill into each flow + Worker Tuning.\n\n> **How the backend-agnostic panels work:** each RPS/error/latency panel below carries two query\n> targets — one against the OSS metric (raw counter, `rate()`'d) and one against the Cloud\n> `temporal_cloud_v1_*` equivalent (already a precomputed rate, never `rate()`'d). Whichever\n> backend you're actually running populates the panel; the other target just returns no data.\n> No manual datasource switching needed — both metric families land in the same `prometheus-kind`\n> store already (in-cluster Prometheus scrapes SDK pods + the Temporal Cloud OpenMetrics endpoint\n> and remote_writes both here).\n>\n> **What can't be unified:** persistence, internal task processing, shard, and process-level\n> metrics are below the customer-facing API boundary — Temporal Cloud is a managed control plane\n> and never exposes them, on any topology. Those live in the **Temporal Self-Hosted Internals**\n> folder instead of pretending they'd populate here.\n"
       }
     },
     {
       "type": "row",
-      "title": "Frontend \u2014 Critical Operations",
+      "title": "Frontend — Critical Operations",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -66,10 +66,10 @@
     {
       "type": "timeseries",
       "title": "Critical Frontend RPS by Operation",
-      "description": "",
+      "description": "OSS: service_requests (rate). Cloud: temporal_cloud_v1_service_request_count (precomputed rate, no rate()).",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
@@ -104,9 +104,18 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
           "expr": "sum by (operation) (rate(service_requests{operation=~\"StartWorkflowExecution|SignalWorkflowExecution|SignalWithStartWorkflowExecution|RespondWorkflowTaskCompleted|RespondActivityTaskCompleted|PollWorkflowTaskQueue|PollActivityTaskQueue\"}[$rate]))",
+          "legendFormat": "{{operation}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum by (operation) (temporal_cloud_v1_service_request_count{operation=~\"StartWorkflowExecution|SignalWorkflowExecution|SignalWithStartWorkflowExecution|RespondWorkflowTaskCompleted|RespondActivityTaskCompleted|PollWorkflowTaskQueue|PollActivityTaskQueue\"})",
           "legendFormat": "{{operation}}"
         }
       ]
@@ -114,10 +123,10 @@
     {
       "type": "timeseries",
       "title": "Critical Frontend Errors by Operation",
-      "description": "",
+      "description": "OSS: service_errors (rate). Cloud: temporal_cloud_v1_service_error_count (precomputed rate, no rate()).",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
@@ -152,9 +161,18 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
           "expr": "sum by (operation) (rate(service_errors{operation=~\"StartWorkflowExecution|SignalWorkflowExecution|SignalWithStartWorkflowExecution|RespondWorkflowTaskCompleted|RespondActivityTaskCompleted|PollWorkflowTaskQueue|PollActivityTaskQueue\"}[$rate]) OR on() vector(0))",
+          "legendFormat": "{{operation}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum by (operation) (temporal_cloud_v1_service_error_count{operation=~\"StartWorkflowExecution|SignalWorkflowExecution|SignalWithStartWorkflowExecution|RespondWorkflowTaskCompleted|RespondActivityTaskCompleted|PollWorkflowTaskQueue|PollActivityTaskQueue\"})",
           "legendFormat": "{{operation}}"
         }
       ]
@@ -162,10 +180,10 @@
     {
       "type": "timeseries",
       "title": "Critical Frontend Latency p99 by Operation",
-      "description": "Latency thresholds: yellow 200ms, red 1s.",
+      "description": "Latency thresholds: yellow 200ms, red 1s. OSS: histogram_quantile over service_latency_bucket. Cloud: temporal_cloud_v1_service_latency_p99 (already a percentile — combined across any extra dimensions with max, not sum).",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
@@ -220,118 +238,18 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
           "expr": "histogram_quantile(0.99, sum by (operation, le) (rate(service_latency_bucket{operation=~\"StartWorkflowExecution|SignalWorkflowExecution|SignalWithStartWorkflowExecution|RespondWorkflowTaskCompleted|RespondActivityTaskCompleted|PollWorkflowTaskQueue|PollActivityTaskQueue\"}[$rate])))",
           "legendFormat": "{{operation}}"
-        }
-      ]
-    },
-    {
-      "type": "row",
-      "title": "Engine \u2014 Task Processing & Persistence",
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 28
-      },
-      "id": 6,
-      "panels": []
-    },
-    {
-      "type": "timeseries",
-      "title": "History Task Processing Latency p99 by Task Type",
-      "description": "metric: task_latency_bucket (history engine). Verify name on your build.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 29
-      },
-      "id": 7,
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "showPoints": "never"
-          }
         },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
         {
-          "refId": "A",
+          "refId": "B",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
-          "expr": "histogram_quantile(0.99, sum by (operation, le) (rate(task_latency_bucket{operation=~\"TransferActive.*|TimerActive.*\"}[$rate])))",
-          "legendFormat": "{{operation}}"
-        }
-      ]
-    },
-    {
-      "type": "timeseries",
-      "title": "Persistence Latency p99 by Operation",
-      "description": "Deepest storage layer OSS exposes on Postgres — the persistence API layer.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 29
-      },
-      "id": 8,
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "showPoints": "never"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "histogram_quantile(0.99, sum by (operation, le) (rate(persistence_latency_bucket[$rate])))",
+          "expr": "max by (operation) (temporal_cloud_v1_service_latency_p99{operation=~\"StartWorkflowExecution|SignalWorkflowExecution|SignalWithStartWorkflowExecution|RespondWorkflowTaskCompleted|RespondActivityTaskCompleted|PollWorkflowTaskQueue|PollActivityTaskQueue\"})",
           "legendFormat": "{{operation}}"
         }
       ]
@@ -344,26 +262,26 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 37
+        "y": 28
       },
-      "id": 9,
+      "id": 6,
       "panels": []
     },
     {
       "type": "stat",
       "title": "Service Availability % (frontend)",
-      "description": "",
+      "description": "OSS: 100 - errors/requests, rate-based. Cloud: same formula against precomputed v1 counters.",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
-        "h": 6,
+        "h": 8,
         "w": 8,
         "x": 0,
-        "y": 38
+        "y": 29
       },
-      "id": 10,
+      "id": 7,
       "fieldConfig": {
         "defaults": {
           "unit": "percent"
@@ -386,124 +304,37 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
           "expr": "100 - (sum(rate(service_errors[$rate]) OR on() vector(0)) / sum(rate(service_requests[$rate])) * 100)",
-          "legendFormat": "availability"
-        }
-      ]
-    },
-    {
-      "type": "timeseries",
-      "title": "Goroutines by Service",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 38
-      },
-      "id": 11,
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "showPoints": "never"
-          }
+          "legendFormat": "availability (OSS)"
         },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
         {
-          "refId": "A",
+          "refId": "B",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
-          "expr": "sum by (temporal_service_type) (num_goroutines)",
-          "legendFormat": "{{temporal_service_type}}"
-        }
-      ]
-    },
-    {
-      "type": "timeseries",
-      "title": "Restarts by Service",
-      "description": "Cumulative restart count per service role.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 38
-      },
-      "id": 12,
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "showPoints": "never"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum by (temporal_service_type) (restarts)",
-          "legendFormat": "{{temporal_service_type}}"
+          "expr": "100 - ((sum(temporal_cloud_v1_service_error_count) OR on() vector(0)) / sum(temporal_cloud_v1_service_request_count) * 100)",
+          "legendFormat": "availability (Cloud)"
         }
       ]
     },
     {
       "type": "timeseries",
       "title": "Instances Up by Job",
-      "description": "temporal-server + temporal-sdk scrape targets.",
+      "description": "temporal-server + temporal-sdk + temporal-cloud scrape targets — this already works identically on either backend.",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 46
+        "w": 16,
+        "x": 8,
+        "y": 29
       },
-      "id": 13,
+      "id": 8,
       "fieldConfig": {
         "defaults": {
           "unit": "short",
@@ -530,7 +361,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
           "expr": "sum by (job) (up)",
           "legendFormat": "{{job}}"
@@ -552,8 +383,8 @@
         "type": "datasource",
         "query": "prometheus",
         "current": {
-          "text": "default",
-          "value": "default"
+          "text": "Prometheus (kind metrics)",
+          "value": "prometheus-kind"
         },
         "hide": 0,
         "refresh": 1,
@@ -611,8 +442,8 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Temporal Critical Flows \u2014 Overview",
+  "title": "Temporal Critical Flows — Overview",
   "uid": "temporal-critical-overview",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

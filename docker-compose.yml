@@ -62,17 +62,23 @@ services:
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
       - GF_AUTH_DISABLE_LOGIN_FORM=false
       - GF_SECURITY_ALLOW_EMBEDDING=true
-      # Logs read from ClickHouse (the committed log store — ADR-0020). Installs
-      # the ClickHouse datasource plugin at boot; the datasource itself is
-      # provisioned via the mount below. Grafana stays the single viz pane; lgtm's
-      # bundled Loki is unused (nothing ships to it anymore).
-      - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
-      # Air-gap hardening (ADR-0013): disable Grafana's startup plugin PREINSTALL
-      # (grafana-llm-app etc.). On a restart it blocks the HTTP listener trying to
-      # reach grafana.com — which resolves to IPv6-only here with no route, so the
-      # connect hangs and Grafana never binds :3000. Cached plugins in the lgtm-data
-      # volume still load from disk; the ClickHouse plugin (GF_INSTALL_PLUGINS) is
-      # one of them, so nothing functional is lost.
+      # Logs read from ClickHouse (the committed log store — ADR-0020); the
+      # datasource itself is provisioned via the mount below. Grafana stays the
+      # single viz pane; lgtm's bundled Loki is unused (nothing ships to it
+      # anymore).
+      #
+      # NOTE: GF_INSTALL_PLUGINS does nothing on this image — otel-lgtm's
+      # run-grafana.sh execs `bin/grafana server` directly, it never runs the
+      # grafana-cli install step the official grafana/grafana image's entrypoint
+      # does for that env var. The ClickHouse plugin is fetched ahead of time
+      # instead (see the volume mount below + `just grafana-plugins`).
+      # Air-gap hardening (ADR-0013): disable Grafana's own startup plugin
+      # PREINSTALL (grafana-llm-app etc.). On a restart it blocks the HTTP
+      # listener trying to reach grafana.com — which resolves to IPv6-only here
+      # with no route, so the connect hangs and Grafana never binds :3000. This
+      # is also why the ClickHouse plugin isn't fetched via GF_PLUGINS_PREINSTALL:
+      # same hang, so it's pre-fetched to disk instead (sha256-verified, offline
+      # after the first fetch) rather than pulled at boot.
       - GF_PLUGINS_PREINSTALL_DISABLED=true
     networks:
       - temporal-network
@@ -90,10 +96,22 @@ services:
       - ./compose/observability/grafana/dashboards:/var/lib/grafana/dashboards/ziggymart:ro
       - ./compose/observability/grafana/provisioning/dashboards/critical.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/critical.yaml:ro
       - ./compose/observability/grafana/dashboards-critical:/var/lib/grafana/dashboards/critical:ro
+      # Self-hosted-only server internals (persistence/task-processing/shard/
+      # goroutines) that Temporal Cloud, being a managed control plane, never
+      # exposes to customers — kept in their own folder instead of pretending
+      # they'd populate on a Cloud backend.
+      - ./compose/observability/grafana/provisioning/dashboards/self-hosted-internals.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/self-hosted-internals.yaml:ro
+      - ./compose/observability/grafana/dashboards-self-hosted-internals:/var/lib/grafana/dashboards/self-hosted-internals:ro
       - ./compose/observability/grafana/provisioning/datasources/clickhouse.yaml:/otel-lgtm/grafana/conf/provisioning/datasources/clickhouse.yaml:ro
       # Host metrics store datasource (kind run mode — ADR-0021). The in-cluster
       # Prometheus remote_writes to prometheus-store; Grafana reads it here.
       - ./compose/observability/grafana/provisioning/datasources/prometheus.yaml:/otel-lgtm/grafana/conf/provisioning/datasources/prometheus.yaml:ro
+      # ClickHouse datasource plugin, pre-fetched + sha256-verified by
+      # `just grafana-plugins` (compose/scripts/fetch-grafana-plugins.py) into
+      # this git-ignored dir — see the NOTE above on why GF_INSTALL_PLUGINS
+      # doesn't work on this image. Grafana just scans GF_PATHS_PLUGINS
+      # (/data/grafana/plugins) at boot, no network needed.
+      - ./compose/deployment/grafana/plugins:/data/grafana/plugins:ro
       - lgtm-data:/data
     healthcheck:
       test: ["CMD-SHELL", "test -f /tmp/ready"]

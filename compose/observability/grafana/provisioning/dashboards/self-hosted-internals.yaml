@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: self-hosted-internals
+    folder: Temporal Self-Hosted Internals
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards/self-hosted-internals

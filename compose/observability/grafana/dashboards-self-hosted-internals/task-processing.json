@@ -21,9 +21,9 @@
   "links": [
     {
       "asDropdown": true,
-      "title": "Critical Flows",
+      "title": "Self-Hosted Internals",
       "tags": [
-        "temporal-critical-flows"
+        "temporal-self-hosted-internals"
       ],
       "type": "dashboards",
       "icon": "external link",
@@ -37,7 +37,7 @@
   "panels": [
     {
       "type": "text",
-      "title": "Flow 3 \u2014 Asynchronous Task Processing",
+      "title": "Task Processing \u2014 Self-Hosted Only",
       "gridPos": {
         "h": 6,
         "w": 24,
@@ -47,7 +47,7 @@
       "id": 1,
       "options": {
         "mode": "markdown",
-        "content": "\nTemporal's **internal engine** processing background tasks (`TransferActive`, `TimerActive`) that\ngenerate work for polling workers. Watch **TransferActive vs TimerActive independently** \u2014 a\nbacklog in either stalls workflow progress even when the frontend looks healthy.\n\nUses OSS `ShardInfo` lock latency + `HistoryCacheGetOrCreate` cache latency.\n"
+        "content": "\nTemporal's **internal engine** processing background tasks (`TransferActive`, `TimerActive`) that\ngenerate work for polling workers. Watch **TransferActive vs TimerActive independently** \u2014 a\nbacklog in either stalls workflow progress even when the frontend looks healthy.\n\nUses OSS `ShardInfo` lock latency + `HistoryCacheGetOrCreate` cache latency.\n\n> **Self-hosted only \u2014 permanently.** These are internals below the customer-facing API\n> boundary (history engine task processing, shard locks, mutable-state cache). Temporal Cloud\n> is a managed control plane and does not expose them to customers, on any topology \u2014 unlike\n> the worker-side backlog gap (see **Temporal Critical Flows \u2014 Worker Fleet & KEDA Scaling**),\n> this one never closes. For the metrics that DO work on both Cloud and self-hosted, see the\n> **Temporal Critical Flows** folder instead.\n"
       }
     },
     {
@@ -69,7 +69,7 @@
       "description": "metric: task_requests. Verify name on your build.",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
@@ -104,7 +104,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
           "expr": "sum by (operation) (rate(task_requests{operation=~\"TransferActive.*|TimerActive.*\"}[$rate]))",
           "legendFormat": "{{operation}}"
@@ -117,7 +117,7 @@
       "description": "",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
@@ -152,7 +152,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
           "expr": "histogram_quantile(0.99, sum by (operation, le) (rate(task_latency_bucket{operation=~\"TransferActive.*|TimerActive.*\"}[$rate])))",
           "legendFormat": "p99 {{operation}}"
@@ -165,7 +165,7 @@
       "description": "p50 alongside p99, per task type.",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
@@ -200,7 +200,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
           "expr": "histogram_quantile(0.50, sum by (operation, le) (rate(task_latency_bucket{operation=~\"TransferActive.*|TimerActive.*\"}[$rate])))",
           "legendFormat": "p50 {{operation}}"
@@ -226,7 +226,7 @@
       "description": "metric: lock_latency_bucket. Shard contention indicator.",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
@@ -261,7 +261,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
           "expr": "histogram_quantile(0.99, sum by (le) (rate(lock_latency_bucket{operation=\"ShardInfo\"}[$rate])))",
           "legendFormat": "p99"
@@ -274,7 +274,7 @@
       "description": "metric: cache_latency_bucket. Mutable-state cache pressure.",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
@@ -309,7 +309,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
           "expr": "histogram_quantile(0.99, sum by (le) (rate(cache_latency_bucket{operation=\"HistoryCacheGetOrCreate\"}[$rate])))",
           "legendFormat": "p99"
@@ -335,7 +335,7 @@
       "description": "",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
@@ -370,7 +370,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
           "expr": "histogram_quantile(0.99, sum by (operation, le) (rate(persistence_latency_bucket[$rate])))",
           "legendFormat": "{{operation}}"
@@ -382,7 +382,7 @@
   "schemaVersion": 39,
   "style": "dark",
   "tags": [
-    "temporal-critical-flows",
+    "temporal-self-hosted-internals",
     "temporal"
   ],
   "templating": {
@@ -392,8 +392,8 @@
         "type": "datasource",
         "query": "prometheus",
         "current": {
-          "text": "default",
-          "value": "default"
+          "text": "Prometheus (kind metrics)",
+          "value": "prometheus-kind"
         },
         "hide": 0,
         "refresh": 1,
@@ -451,8 +451,8 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Temporal Critical Flows \u2014 Task Processing",
-  "uid": "temporal-flow-task-processing",
+  "title": "Temporal Self-Hosted Internals \u2014 Task Processing",
+  "uid": "temporal-internals-task-processing",
   "version": 1,
   "weekStart": ""
 }
