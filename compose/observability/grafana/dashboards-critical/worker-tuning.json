@@ -37,9 +37,9 @@
   "panels": [
     {
       "type": "text",
-      "title": "Worker Tuning \u2014 SDK Metrics",
+      "title": "Worker Fleet & KEDA Scaling",
       "gridPos": {
-        "h": 8,
+        "h": 9,
         "w": 24,
         "x": 0,
         "y": 0
@@ -47,44 +47,64 @@
       "id": 1,
       "options": {
         "mode": "markdown",
-        "content": "\nThe worker side of **Flow 2 (Workflow Progress)**. The other dashboards are server-side; these\nSDK metrics live in the worker process and are the levers for worker tuning.\n\nMetrics are **`temporal_`-prefixed** and pulled from the worker `/metrics` endpoints. The Python SDK\nexposes **counters without `_total`** (e.g. `temporal_workflow_task_queue_poll_succeed`). Latency\nhistograms are bare **`*_latency_bucket`** with values **in seconds** \u2014 sdk-core's `unit_suffix` is off\nby default, so `durations_as_seconds=True` sets the value unit, not the name (a Tally Go/Java worker\nwould instead expose `*_latency_seconds_bucket`). Complements the existing **Temporal SDK** dashboard (which\ncovers workflow/activity execution latency & throughput).\n\n> Several metric names below depend on SDK/build (`temporal_worker_task_slots_available`,\n> `temporal_sticky_cache_*`, `temporal_num_pollers`). Blank panels mean the metric isn't emitted.\n> Prometheus isn't published to the host \u2014 confirm names via Grafana's datasource proxy:\n> `POST localhost:3000/api/datasources/proxy/uid/prometheus/api/v1/query`.\n"
+        "content": "\nThe worker side of **Flow 2 (Workflow Progress)** — the levers for worker tuning and the read on whether\nKEDA's scaling decisions are keeping up with load. Read it top to bottom like an incident:\n\n1. **Saturation** — is workflow/activity **schedule-to-start latency** rising? That's the canary: tasks are\n   sitting in the queue because workers can't drain fast enough (the textbook \"added pods → latency dropped\"\n   signature). Corroborate with backlog and slot utilization — backlog resets to zero on an idle queue, never\n   trust it alone.\n2. **Utilization** — *why* did latency move? Slots at zero = real capacity problem (add workers). Slots free but\n   latency high = a config/poller problem, not capacity (don't add pods). Sync match / poll success dropping =\n   pollers can't keep up with delivery.\n3. **KEDA Alignment** — did the fleet actually react? Running replica count by worker version, next to the\n   Saturation row above (same time range) — eyeball whether a KEDA scale-up event lines up with backlog/latency\n   coming back down.\n\n> **Unit trap:** these are **Core SDK (Python)** metrics. Core-based SDKs (TypeScript/Python/.NET) default to\n> **milliseconds**, Go/Java use **seconds** — but this repo's `appkit/telemetry.py` sets\n> `durations_as_seconds=True`, so every latency panel below is in **seconds** despite being a Python worker.\n> A 200ms p99 alert threshold is `0.2` here, not `200`. Don't \"fix\" the axis back to ms.\n>\n> Counters have **no `_total` suffix** in the Python SDK (e.g. `temporal_workflow_task_queue_poll_succeed`).\n>\n> **Cloud-only panels** (Sync Match Rate, Poll Success Rate by Task Type, Approximate Backlog Count) read\n> `temporal_cloud_v1_*` from the Temporal Cloud OpenMetrics scrape. They render \"No data\" on a self-hosted OSS\n> backend — that's expected, not broken. They can also show briefly blank on an idle queue since these are\n> delta metrics only emitted when there's poll/backlog activity in that scrape window.\n>\n> **KEDA's own per-version backlog read** (`DescribeWorkerDeploymentVersion`, what the Temporal scaler actually\n> acts on) is not exported to Prometheus today — there's no `keda_scaler_metrics_value` series being scraped.\n> For the live ScaledObject/HPA status (Active/Paused, current metric value) use **Headlamp's KEDA plugin**\n> instead; this dashboard covers the time-correlated history Headlamp doesn't.\n"
       }
     },
     {
       "type": "row",
-      "title": "Slots & Pollers",
+      "title": "Saturation — the Tier-1 canary + why",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 8
+        "y": 9
       },
       "id": 2,
       "panels": []
     },
     {
       "type": "timeseries",
-      "title": "Task Slots Available by Worker Type",
-      "description": "Slots near 0 = worker saturated; raise max_concurrent_*_task slots. metric: temporal_worker_task_slots_available",
+      "title": "Workflow Task Schedule-to-Start p99",
+      "description": "The single best worker-saturation canary. Rising = not enough workflow-task-queue capacity for the load. metric: temporal_workflow_task_schedule_to_start_latency (seconds — durations_as_seconds=True)",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 6,
         "x": 0,
-        "y": 9
+        "y": 10
       },
       "id": 3,
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "unit": "s",
           "custom": {
             "drawStyle": "line",
             "fillOpacity": 10,
-            "showPoints": "never"
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.1
+              },
+              {
+                "color": "red",
+                "value": 0.2
+              }
+            ]
           }
         },
         "overrides": []
@@ -104,28 +124,96 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
-          "expr": "avg by (worker_type) (temporal_worker_task_slots_available)",
-          "legendFormat": "{{worker_type}}"
+          "expr": "histogram_quantile(0.99, sum by (le, task_queue) (rate(temporal_workflow_task_schedule_to_start_latency_bucket[$rate])))",
+          "legendFormat": "{{task_queue}}"
         }
       ]
     },
     {
       "type": "timeseries",
-      "title": "Pollers by Type",
-      "description": "metric: temporal_num_pollers",
+      "title": "Activity Schedule-to-Start p99",
+      "description": "Same canary, separate task queue/pool. Rising = not enough activity-task-queue capacity for the load. metric: temporal_activity_schedule_to_start_latency (seconds)",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 9
+        "w": 6,
+        "x": 6,
+        "y": 10
       },
       "id": 4,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.1
+              },
+              {
+                "color": "red",
+                "value": 0.2
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, task_queue) (rate(temporal_activity_schedule_to_start_latency_bucket[$rate])))",
+          "legendFormat": "{{task_queue}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Approximate Backlog Count (Cloud)",
+      "description": "Tasks waiting per task queue, server-side. Gotcha: resets to zero on an idle queue and can overcount — never trust alone, confirm against schedule-to-start latency. Cloud-only metric (temporal_cloud_v1_approximate_backlog_count).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 10
+      },
+      "id": 5,
       "fieldConfig": {
         "defaults": {
           "unit": "short",
@@ -152,10 +240,427 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
-          "expr": "sum by (poller_type) (temporal_num_pollers)",
-          "legendFormat": "{{poller_type}}"
+          "expr": "sum by (temporal_task_queue, task_type) (temporal_cloud_v1_approximate_backlog_count{temporal_task_queue=~\"orders-.*\"})",
+          "legendFormat": "{{temporal_task_queue}} ({{task_type}})"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Slot Utilization by Task Queue",
+      "description": "temporal_slot_utilization recording rule (ADR-0021/0023) — slots used / (used + available). This is what KEDA's Prometheus-based signal would key off; the Temporal scaler used today reads backlog directly from Cloud instead (see KEDA Alignment row). High + rising alongside latency = a real capacity problem, not a config one.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 10
+      },
+      "id": 6,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.7
+              },
+              {
+                "color": "red",
+                "value": 0.9
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "temporal_slot_utilization",
+          "legendFormat": "{{task_queue}} ({{worker_type}})"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Utilization — why latency moved",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "id": 7,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Task Slots Available by Worker Type",
+      "description": "Slots at zero = workers maxed, a real capacity problem (add workers). Slots free but latency high = config issue, NOT capacity — don't add pods. metric: temporal_worker_task_slots_available",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 19
+      },
+      "id": 8,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "avg by (worker_type) (temporal_worker_task_slots_available)",
+          "legendFormat": "{{worker_type}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Poll Success Rate — Workflow (SDK)",
+      "description": "succeed / (succeed + empty). Drop = pollers can't keep up with delivery. Target: >90% (alert), >95% (healthy). metric: temporal_workflow_task_queue_poll_succeed / _poll_empty (no _total suffix)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 19
+      },
+      "id": 9,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.9
+              },
+              {
+                "color": "green",
+                "value": 0.95
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(rate(temporal_workflow_task_queue_poll_succeed[$rate])) / (sum(rate(temporal_workflow_task_queue_poll_succeed[$rate])) + sum(rate(temporal_workflow_task_queue_poll_empty[$rate])))",
+          "legendFormat": "poll success rate"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Poll Success Rate by Task Type (Cloud)",
+      "description": "poll_success_count / (poll_success_count + poll_timeout_count), server-side — covers both Workflow and Activity pollers (Core SDK has no activity-side success counter). Target: >90% (alert), >95% (healthy). Cloud-only metric.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 19
+      },
+      "id": 10,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.9
+              },
+              {
+                "color": "green",
+                "value": 0.95
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum by (task_type) (temporal_cloud_v1_poll_success_count{temporal_task_queue=~\"orders-.*\"}) / (sum by (task_type) (temporal_cloud_v1_poll_success_count{temporal_task_queue=~\"orders-.*\"}) + sum by (task_type) (temporal_cloud_v1_poll_timeout_count{temporal_task_queue=~\"orders-.*\"}))",
+          "legendFormat": "{{task_type}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Sync Match Rate by Task Type (Cloud)",
+      "description": "poll_success_sync_count / poll_success_count — tasks delivered straight to a waiting poller vs hitting the queue. Drop = pollers can't keep up. Target: >95% (alert), >99% (healthy). Cloud-only metric.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 19
+      },
+      "id": 11,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.95
+              },
+              {
+                "color": "green",
+                "value": 0.99
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum by (task_type) (temporal_cloud_v1_poll_success_sync_count{temporal_task_queue=~\"orders-.*\"}) / sum by (task_type) (temporal_cloud_v1_poll_success_count{temporal_task_queue=~\"orders-.*\"})",
+          "legendFormat": "{{task_type}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "KEDA Alignment — did the fleet react",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 27
+      },
+      "id": 12,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Worker Replicas Running by Version",
+      "description": "count(up{job=\"kubernetes-pods\"}) faceted by deployment/build_id — running worker replicas per version, the resulting action from KEDA's per-version backlog trigger (targetQueueSize, ADR-0023). Read next to the Saturation row above (same time range): did a scale-up follow rising backlog/latency, and did it bring latency back down? KEDA's own per-version backlog read isn't exported to Prometheus today — for live ScaledObject/HPA status use Headlamp's KEDA plugin.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "id": 13,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "lineInterpolation": "stepAfter"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "count by (temporal_io_deployment_name, temporal_io_build_id) (up{job=\"kubernetes-pods\", temporal_io_deployment_name=~\"orders-workflow|orders-activity\"})",
+          "legendFormat": "{{temporal_io_deployment_name}} ({{temporal_io_build_id}})"
         }
       ]
     },
@@ -167,9 +672,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 17
+        "y": 36
       },
-      "id": 5,
+      "id": 14,
       "panels": []
     },
     {
@@ -178,15 +683,15 @@
       "description": "High miss rate = workflows replaying from history (cache evictions). metric: temporal_sticky_cache_hit/_miss (no _total)",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 18
+        "y": 37
       },
-      "id": 6,
+      "id": 15,
       "fieldConfig": {
         "defaults": {
           "unit": "ops",
@@ -213,7 +718,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
           "expr": "sum(rate(temporal_sticky_cache_hit[$rate]))",
           "legendFormat": "hit/s"
@@ -222,7 +727,7 @@
           "refId": "B",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
           "expr": "sum(rate(temporal_sticky_cache_miss[$rate]))",
           "legendFormat": "miss/s"
@@ -235,15 +740,15 @@
       "description": "metric: temporal_sticky_cache_size",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 18
+        "y": 37
       },
-      "id": 7,
+      "id": 16,
       "fieldConfig": {
         "defaults": {
           "unit": "short",
@@ -270,7 +775,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
           "expr": "sum(temporal_sticky_cache_size)",
           "legendFormat": "cached workflows"
@@ -279,59 +784,39 @@
     },
     {
       "type": "row",
-      "title": "Schedule-to-Start (backlog pressure)",
+      "title": "Poll Detail (raw rates)",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 26
+        "y": 45
       },
-      "id": 8,
+      "id": 17,
       "panels": []
     },
     {
       "type": "timeseries",
-      "title": "Workflow Task Schedule-to-Start p99",
-      "description": "Rising = not enough workflow-task slots/pollers for the load.",
+      "title": "Pollers by Type",
+      "description": "metric: temporal_num_pollers",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
-        "y": 27
+        "y": 46
       },
-      "id": 9,
+      "id": 18,
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
+          "unit": "short",
           "custom": {
             "drawStyle": "line",
             "fillOpacity": 10,
-            "showPoints": "never",
-            "thresholdsStyle": {
-              "mode": "line"
-            }
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 0.1
-              },
-              {
-                "color": "red",
-                "value": 1
-              }
-            ]
+            "showPoints": "never"
           }
         },
         "overrides": []
@@ -351,109 +836,28 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, task_queue) (rate(temporal_workflow_task_schedule_to_start_latency_bucket[$rate])))",
-          "legendFormat": "{{task_queue}}"
+          "expr": "sum by (poller_type) (temporal_num_pollers)",
+          "legendFormat": "{{poller_type}}"
         }
       ]
-    },
-    {
-      "type": "timeseries",
-      "title": "Activity Schedule-to-Start p99",
-      "description": "Rising = not enough activity-task slots/pollers for the load.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 27
-      },
-      "id": 10,
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "showPoints": "never",
-            "thresholdsStyle": {
-              "mode": "line"
-            }
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 0.1
-              },
-              {
-                "color": "red",
-                "value": 1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le, task_queue) (rate(temporal_activity_schedule_to_start_latency_bucket[$rate])))",
-          "legendFormat": "{{task_queue}}"
-        }
-      ]
-    },
-    {
-      "type": "row",
-      "title": "Poll Efficiency",
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 35
-      },
-      "id": 11,
-      "panels": []
     },
     {
       "type": "timeseries",
       "title": "Workflow Poll: Success vs Empty",
-      "description": "Mostly-empty polls = over-provisioned pollers (fine); zero success under load = a problem.",
+      "description": "Mostly-empty polls = over-provisioned pollers (fine); zero success under load = a problem. Raw decomposition behind the Poll Success Rate panel above.",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 36
+        "w": 8,
+        "x": 8,
+        "y": 46
       },
-      "id": 12,
+      "id": 19,
       "fieldConfig": {
         "defaults": {
           "unit": "ops",
@@ -480,7 +884,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
           "expr": "sum(rate(temporal_workflow_task_queue_poll_succeed[$rate]))",
           "legendFormat": "succeed/s"
@@ -489,7 +893,7 @@
           "refId": "B",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
           "expr": "sum(rate(temporal_workflow_task_queue_poll_empty[$rate]))",
           "legendFormat": "empty/s"
@@ -502,15 +906,15 @@
       "description": "metric: temporal_activity_poll_no_task",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 36
+        "w": 8,
+        "x": 16,
+        "y": 46
       },
-      "id": 13,
+      "id": 20,
       "fieldConfig": {
         "defaults": {
           "unit": "ops",
@@ -537,7 +941,7 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "prometheus-kind"
           },
           "expr": "sum(rate(temporal_activity_poll_no_task[$rate]))",
           "legendFormat": "no-task/s"
@@ -559,8 +963,8 @@
         "type": "datasource",
         "query": "prometheus",
         "current": {
-          "text": "default",
-          "value": "default"
+          "text": "Prometheus (kind metrics)",
+          "value": "prometheus-kind"
         },
         "hide": 0,
         "refresh": 1,
@@ -618,8 +1022,8 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Temporal Critical Flows \u2014 Worker Tuning",
+  "title": "Temporal Critical Flows — Worker Fleet & KEDA Scaling",
   "uid": "temporal-worker-tuning",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

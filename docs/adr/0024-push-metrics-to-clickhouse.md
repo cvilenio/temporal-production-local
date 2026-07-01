@@ -138,9 +138,39 @@ keeping:
   `deleteDatasources:` entry for the old name (see `datasources/clickhouse.yaml`).
 - **Air-gap: disable Grafana plugin preinstall.** `GF_PLUGINS_PREINSTALL_DISABLED=true` on
   lgtm — otherwise a restart blocks the HTTP listener trying to reach grafana.com
-  (IPv6-only, no route here). Cached plugins still load from the lgtm-data volume (ADR-0013).
-- **Dashboard datasource is substrate-specific for pull metrics.** On kind, pull metrics live
-  in `prometheus-store` (`uid=prometheus-kind`), not lgtm's bundled Prometheus (`uid=prometheus`,
-  which only scrapes in compose mode). Business (ClickHouse) panels are substrate-agnostic.
+  (IPv6-only, no route here).
+- **CORRECTION (2026-07-01, checkpoint 0026): `GF_INSTALL_PLUGINS` never worked on this
+  image, and nothing was ever cached.** The line above originally claimed the ClickHouse
+  plugin was installed via `GF_INSTALL_PLUGINS` and survived restarts from the `lgtm-data`
+  volume. Both halves were wrong: `grafana/otel-lgtm`'s `run-grafana.sh` execs
+  `bin/grafana server` directly — it never runs the `grafana-cli plugins install` step the
+  official `grafana/grafana` image's entrypoint uses for that env var, so it was a silent
+  no-op from the start; the ClickHouse datasource had been failing with
+  `plugin.notRegistered` the whole time. Fixed by pre-fetching the plugin the same way as
+  the Headlamp UI plugins (sha256-verified, `config/dependencies.yaml` `grafana.plugins`,
+  `compose/scripts/fetch-grafana-plugins.py`, `just grafana-plugins`) into a bind-mounted
+  `compose/deployment/grafana/plugins/` → `GF_PATHS_PLUGINS`. Two more gotchas surfaced
+  fetching it as a **zip** (unlike the Headlamp plugins, which are tarballs):
+  Grafana's plugin-signature check hashes every file under the plugin dir against its
+  signed `MANIFEST.txt`, so the fetch script's own version-stamp file must live *outside*
+  the plugin dir (a sibling `.{name}.version`), not inside it — one stray file makes the
+  whole plugin look "modified" and unloadable. And `zipfile.extractall` (unlike `tarfile`)
+  does not restore Unix permissions, so the plugin's backend binaries (`gpx_clickhouse_*`)
+  lost their executable bit and failed with `permission denied` on load — the fetch script
+  now chmods each entry from its zip `external_attr` after extracting.
+- **CORRECTION (2026-07-01, checkpoint 0026): the substrate-specific datasource note above
+  described the *correct* target, but the dashboards didn't follow it.** All five
+  `dashboards-critical/*.json` panels were hardcoded to `uid=prometheus` (lgtm's bundled,
+  compose-only instance) instead of `uid=prometheus-kind` — on kind+Cloud this meant every
+  panel silently rendered "No Data," not because pull metrics were unwired but because the
+  dashboards pointed at the wrong store. Fixed by repointing all five to `prometheus-kind`
+  and, further, making the Critical Flows dashboards backend-agnostic: RPS/error/latency/
+  availability panels now carry two query targets each — one against the OSS metric
+  (`service_requests` etc., `rate()`'d) and one against its `temporal_cloud_v1_*`
+  equivalent (already a precomputed rate/percentile) — so whichever backend is live
+  populates the panel with no manual switching. What can't be unified this way (persistence,
+  internal task processing, shard, process metrics — below the customer-facing API boundary
+  Temporal Cloud never exposes) moved to a new **Temporal Self-Hosted Internals** Grafana
+  folder instead of pretending it would populate on Cloud. See checkpoint 0026.
 </content>
 </invoke>

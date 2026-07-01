@@ -21,6 +21,11 @@ config/.generated/
 compose/deployment/headlamp/plugins/*
 !compose/deployment/headlamp/plugins/.gitkeep
 
+# Fetched (pinned + sha256-verified) Grafana plugins; ephemeral artifacts
+# pulled by fetch-grafana-plugins.py. Keep the dir, ignore its contents.
+compose/deployment/grafana/plugins/*
+!compose/deployment/grafana/plugins/.gitkeep
+
 # Terraform (deploy/terraform)
 .terraform/
 *.tfstate

@@ -21,9 +21,9 @@
   "links": [
     {
       "asDropdown": true,
-      "title": "Critical Flows",
+      "title": "Self-Hosted Internals",
       "tags": [
-        "temporal-critical-flows"
+        "temporal-self-hosted-internals"
       ],
       "type": "dashboards",
       "icon": "external link",
@@ -37,7 +37,7 @@
   "panels": [
     {
       "type": "text",
-      "title": "Flow 1 — Starting & Signaling Workflows",
+      "title": "Server Health — Self-Hosted Only",
       "gridPos": {
         "h": 6,
         "w": 24,
@@ -47,12 +47,12 @@
       "id": 1,
       "options": {
         "mode": "markdown",
-        "content": "\nClient API calls that **create or modify** workflow state. The hot path: a caller is blocked\nwaiting for the response, so these surface in alerts fast. Suggested thresholds: **p99 200ms** (yellow), 1s (red).\n\n**Works on Cloud AND self-hosted OSS** — each panel carries an OSS target (`service_requests`,\nrate-based) and a Cloud target (`temporal_cloud_v1_service_request_count`, precomputed rate);\nwhichever backend you're running populates the panel. Errors shown by operation (neither backend\nexposes a finer `error_type` label here). Persistence panels for this flow moved to\n**Temporal Self-Hosted Internals — Server Health** (self-hosted only, permanently).\n"
+        "content": "\nStorage layer + server process health. **Self-hosted only, permanently** — Temporal Cloud manages\npersistence and the server process itself, and does not expose either to customers on any\ntopology. Consolidated here from what used to be three near-identical \"Persistence Latency\"\npanels duplicated across the Critical Flows dashboards (Overview, Flow 1, Flow 2) — one copy,\nsince the query doesn't change per flow.\n\nFor the request-path metrics that DO work on both Cloud and self-hosted (RPS/errors/latency by\noperation, availability), see the **Temporal Critical Flows** folder instead.\n"
       }
     },
     {
       "type": "row",
-      "title": "Frontend",
+      "title": "Persistence",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -65,8 +65,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Start / Signal RPS by Operation",
-      "description": "OSS: service_requests (rate). Cloud: temporal_cloud_v1_service_request_count (precomputed rate, no rate()).",
+      "title": "Persistence RPS by Operation",
+      "description": "On Postgres the storage hot-path collapses to the persistence API layer.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus-kind"
@@ -106,24 +106,15 @@
             "type": "prometheus",
             "uid": "prometheus-kind"
           },
-          "expr": "sum by (operation) (rate(service_requests{operation=~\"StartWorkflowExecution|SignalWorkflowExecution|SignalWithStartWorkflowExecution\"}[$rate]))",
-          "legendFormat": "{{operation}}"
-        },
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus-kind"
-          },
-          "expr": "sum by (operation) (temporal_cloud_v1_service_request_count{operation=~\"StartWorkflowExecution|SignalWorkflowExecution|SignalWithStartWorkflowExecution\"})",
+          "expr": "sum by (operation) (rate(persistence_requests{operation=~\"CreateWorkflowExecution|UpdateWorkflowExecution|CreateWorkflowExecutionTasks|.*\"}[$rate]))",
           "legendFormat": "{{operation}}"
         }
       ]
     },
     {
       "type": "timeseries",
-      "title": "Start / Signal Errors by Operation",
-      "description": "OSS: service_errors (rate). Cloud: temporal_cloud_v1_service_error_count (precomputed rate, no rate()).",
+      "title": "Persistence Latency p99 by Operation",
+      "description": "On Postgres the storage hot-path collapses to the persistence API layer.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus-kind"
@@ -137,7 +128,7 @@
       "id": 4,
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps",
+          "unit": "s",
           "custom": {
             "drawStyle": "line",
             "fillOpacity": 10,
@@ -163,62 +154,46 @@
             "type": "prometheus",
             "uid": "prometheus-kind"
           },
-          "expr": "sum by (operation) (rate(service_errors{operation=~\"StartWorkflowExecution|SignalWorkflowExecution|SignalWithStartWorkflowExecution\"}[$rate]) OR on() vector(0))",
-          "legendFormat": "{{operation}}"
-        },
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus-kind"
-          },
-          "expr": "sum by (operation) (temporal_cloud_v1_service_error_count{operation=~\"StartWorkflowExecution|SignalWorkflowExecution|SignalWithStartWorkflowExecution\"})",
+          "expr": "histogram_quantile(0.99, sum by (operation, le) (rate(persistence_latency_bucket[$rate])))",
           "legendFormat": "{{operation}}"
         }
       ]
     },
     {
+      "type": "row",
+      "title": "Process Health",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
+      "id": 5,
+      "panels": []
+    },
+    {
       "type": "timeseries",
-      "title": "Start / Signal Latency p99 by Operation",
-      "description": "OSS: histogram_quantile over service_latency_bucket. Cloud: temporal_cloud_v1_service_latency_p99 (already a percentile).",
+      "title": "Goroutines by Service",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus-kind"
       },
       "gridPos": {
         "h": 8,
-        "w": 24,
+        "w": 12,
         "x": 0,
-        "y": 15
+        "y": 16
       },
-      "id": 5,
+      "id": 6,
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
+          "unit": "short",
           "custom": {
             "drawStyle": "line",
             "fillOpacity": 10,
-            "showPoints": "never",
-            "thresholdsStyle": {
-              "mode": "line"
-            }
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 0.2
-              },
-              {
-                "color": "red",
-                "value": 1
-              }
-            ]
+            "showPoints": "never"
           }
         },
         "overrides": []
@@ -240,17 +215,56 @@
             "type": "prometheus",
             "uid": "prometheus-kind"
           },
-          "expr": "histogram_quantile(0.99, sum by (operation, le) (rate(service_latency_bucket{operation=~\"StartWorkflowExecution|SignalWorkflowExecution|SignalWithStartWorkflowExecution\"}[$rate])))",
-          "legendFormat": "{{operation}}"
+          "expr": "sum by (temporal_service_type) (num_goroutines)",
+          "legendFormat": "{{temporal_service_type}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Restarts by Service",
+      "description": "Cumulative restart count per service role.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "id": 7,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
         },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
         {
-          "refId": "B",
+          "refId": "A",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus-kind"
           },
-          "expr": "max by (operation) (temporal_cloud_v1_service_latency_p99{operation=~\"StartWorkflowExecution|SignalWorkflowExecution|SignalWithStartWorkflowExecution\"})",
-          "legendFormat": "{{operation}}"
+          "expr": "sum by (temporal_service_type) (restarts)",
+          "legendFormat": "{{temporal_service_type}}"
         }
       ]
     }
@@ -259,7 +273,7 @@
   "schemaVersion": 39,
   "style": "dark",
   "tags": [
-    "temporal-critical-flows",
+    "temporal-self-hosted-internals",
     "temporal"
   ],
   "templating": {
@@ -328,8 +342,8 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Temporal Critical Flows — Starting & Signaling",
-  "uid": "temporal-flow-start-signal",
-  "version": 2,
+  "title": "Temporal Self-Hosted Internals — Server Health",
+  "uid": "temporal-internals-server-health",
+  "version": 1,
   "weekStart": ""
 }

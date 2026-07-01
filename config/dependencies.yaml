@@ -149,3 +149,29 @@ headlamp:
       sha256: "979996aa0d0efdbc852baf6977e178c955264e346fea2c82df94b2d58ef57501"
       # {repo}/releases/download/{name}-{version}/headlamp-k8s-{name}-{version}.tar.gz
       url: "https://github.com/headlamp-k8s/plugins/releases/download/keda-0.1.2/headlamp-k8s-keda-0.1.2.tar.gz"
+
+# grafana/otel-lgtm runs `bin/grafana server` directly (run-grafana.sh) — it does NOT
+# run the classic grafana-cli entrypoint that the official grafana/grafana image uses
+# for GF_INSTALL_PLUGINS, so that env var is silently a no-op on this image. Its own
+# GF_PLUGINS_PREINSTALL mechanism reaches grafana.com at boot, which is exactly the
+# air-gap hang GF_PLUGINS_PREINSTALL_DISABLED=true (docker-compose.yml) exists to avoid.
+# So plugins are pinned + fetched the same way as headlamp above:
+# compose/scripts/fetch-grafana-plugins.py reads this block, downloads each release
+# zip, verifies the sha256, and extracts it into the git-ignored
+# compose/deployment/grafana/plugins/<id>/ dir the lgtm container bind-mounts at
+# GF_PATHS_PLUGINS (/data/grafana/plugins) — a directory scan, no network at boot.
+# No second pin to drift, so versions-audit needs no row here. To bump: change
+# version + sha256 here, run `just grafana-plugins`.
+grafana:
+  plugins:
+    # ClickHouse datasource — backs the committed log store (ADR-0020) + the
+    # business-metrics panels (ADR-0024). Grafana Labs-signed backend plugin.
+    # Keyed by the plugin id itself (not a short name): the release zip's
+    # top-level dir already is "grafana-clickhouse-datasource", and Grafana's
+    # own plugin id must match for the datasource type to resolve.
+    grafana-clickhouse-datasource:
+      version: "4.18.0"
+      sha256: "5bd2a9697e710eb8386f751f9cf8db4f92bbd98866b90aa399a6fc69ef0f543b"
+      # Stable, versioned GCS asset behind grafana.com's redirecting download API
+      # (https://grafana.com/api/plugins/grafana-clickhouse-datasource/versions/{version}/download).
+      url: "https://storage.googleapis.com/grafana-plugins-catalog/grafana-clickhouse-datasource/release/4.18.0/grafana-clickhouse-datasource-4.18.0.zip"
