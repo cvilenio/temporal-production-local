@@ -374,6 +374,13 @@ services:
   # and auto-loads the cluster within ~10s of it appearing — so bringing up kind
   # after this container needs no restart. (`just headlamp-reload` only forces an
   # immediate refresh.)
+  #
+  # UI plugins (e.g. the KEDA explorer) load from /headlamp/plugins, one subdir
+  # per plugin. `just headlamp-plugins` (run by `up-cloud-kind`) fetches the
+  # pinned, sha256-verified tarballs from config/dependencies.yaml into the
+  # bind-mounted dir below; loaded on (re)start, so `just headlamp-reload` after
+  # a fresh fetch. Mount is read-only and does not shadow the image's official
+  # plugins, which live separately under /headlamp/static-plugins.
   headlamp:
     image: ghcr.io/headlamp-k8s/headlamp:latest
     container_name: headlamp
@@ -381,6 +388,7 @@ services:
       - KUBECONFIG=/kube/kind.incontainer.kubeconfig
     volumes:
       - ./.secrets/kube:/kube:ro
+      - ./compose/deployment/headlamp/plugins:/headlamp/plugins:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

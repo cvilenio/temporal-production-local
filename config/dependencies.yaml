@@ -129,3 +129,23 @@ images:
   nginx:
     repository: localhost:5001/library/nginx
     tag: "1.27-alpine"
+
+# ── Host-plane visibility tooling ────────────────────────────────────────────
+# Headlamp itself runs as a Compose container pinned to :latest (a host-plane,
+# non-prod observer like otel_lgtm — deliberately unpinned, audit skips). Its
+# UI plugins ARE pinned: compose/scripts/fetch-headlamp-plugins.py reads this
+# block directly (GENERATE-class consumer, like render-deps.py), downloads each
+# release tarball, verifies the sha256, and extracts it into the git-ignored
+# compose/deployment/headlamp/plugins/<name>/ dir the headlamp container bind-
+# mounts at /headlamp/plugins. No second pin to drift, so versions-audit needs
+# no row here. To bump: change version + sha256 here, run `just headlamp-plugins`.
+headlamp:
+  plugins:
+    # KEDA plugin — UI for the ScaledObjects/TriggerAuthentications the worker-
+    # controller renders per worker version (ADR-0023). Surfaces them in the same
+    # Headlamp window the operator already watches the kind cluster through.
+    keda:
+      version: "0.1.2"
+      sha256: "979996aa0d0efdbc852baf6977e178c955264e346fea2c82df94b2d58ef57501"
+      # {repo}/releases/download/{name}-{version}/headlamp-k8s-{name}-{version}.tar.gz
+      url: "https://github.com/headlamp-k8s/plugins/releases/download/keda-0.1.2/headlamp-k8s-keda-0.1.2.tar.gz"
