@@ -75,7 +75,7 @@ vision above:
 | Local OCI delivery + offline-resumable cluster (zot, stop/start) | ✅ working |
 | Retail order workflow (saga, signals, idempotent vs. write-then-verify retries) | ✅ working |
 | App tier (orders API, mock API, console) on kind | ✅ working — orders-api + orders-db (CNPG) on kind; console + mock-api on the host plane |
-| **Observability / metrics on kind** | 🚧 **not wired / unproven** — SDK/server metrics were only ever exercised on the legacy Compose-OSS path (which no longer runs workers); treat kind metrics as not yet working |
+| **Observability / metrics on kind** | ✅ working — in-cluster Prometheus scrapes SDK/server pods + the Temporal Cloud OpenMetrics endpoint into `prometheus-kind`; backend-agnostic Grafana dashboards (Critical Flows, Worker Fleet & KEDA, Durable Execution Value) verified live against real Cloud data |
 | Self-hosted Temporal **server** on kind (the OSS backend) | 🚧 planned — not wired (workers already run on kind against Cloud) |
 | Polyglot workers (Go / TypeScript / Java) | 🚧 planned — Python only today; the layout is polyglot-ready |
 | Encryption codec + codec server (client-side decode, per-user access) | 🧱 scaffold only — placeholder codec; replace with real AEAD before any sensitive use (ADR-0006) |
@@ -250,8 +250,8 @@ From the **Demo Console**, open the Orders page, select **"Happy Path"**, and cl
 **Trigger scenarios**. The order is orchestrated by the kind workers against your Cloud
 namespace; watch it complete in the console and inspect its history in the Cloud UI.
 
-> Metrics/observability (Grafana) were only ever exercised on the legacy Compose-OSS path
-> (which no longer runs workers) and are **not** yet proven on kind — see the status table.
+> Metrics/observability (Grafana) are wired and live-verified on kind — see the
+> **Temporal Critical Flows** folder at `http://localhost:3000` and the status table.
 
 ### Going offline (planes, demos with no network)
 
@@ -340,8 +340,8 @@ ai_checkpoints/  Cross-session work log (read newest-first for current state).
   Prometheus, Kubernetes) and why only those three.
 - [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md) — the guided scenario walk-through.
 - [`docs/SHIP_PLAN.md`](docs/SHIP_PLAN.md) — a sample 30–60 day Cloud rollout plan.
-- [`OBSERVABILITY.md`](OBSERVABILITY.md) — the observability model (historically exercised
-  on the legacy Compose-OSS path; not yet proven on kind — see the status table).
+- [`OBSERVABILITY.md`](OBSERVABILITY.md) — the observability model, wired and live-verified
+  on kind (Cloud OpenMetrics + SDK/server scrape into `prometheus-kind`).
 - [`docs/adr/`](docs/adr/) — numbered decision records (the *why* behind each choice).
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — commit conventions and contribution flow.
 

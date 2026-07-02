@@ -1,12 +1,13 @@
 # Observability
 
-> **Status (read first).** This model and its SDK/server scrape targets were exercised on the
-> **legacy Compose-OSS path with Compose-run workers**. That path no longer runs workers —
-> workers run on **kind** now (Worker Deployment), and metrics on kind are **not yet wired/
-> proven** (see the README status table). The worker scrape targets below
-> (`orders-*-worker:9000`) and the `temporal:9091` server target describe the historical
-> Compose-OSS topology; wiring the equivalent on kind (pod-scrape + the Cloud OpenMetrics
-> endpoint) is the open follow-up.
+> **Status (read first).** Metrics on kind are wired and live-verified: the in-cluster
+> Prometheus (`prometheus-kind`) scrapes both **worker SDK pods** (Worker Deployment) and the
+> **Temporal Cloud OpenMetrics endpoint** (`metrics.temporal.io`), and the **Temporal Critical
+> Flows** Grafana folder (backend-agnostic Critical Flows/Worker Fleet/Durable Execution Value
+> dashboards) is confirmed rendering real data — see `ai_checkpoints/0026` and `0027`. The
+> worker scrape targets below (`orders-*-worker:9000`) and the `temporal:9091` server target
+> describe the **historical, no-longer-running legacy Compose-OSS topology** — kept for
+> reference on that path, not the current kind + Cloud one.
 
 The stack uses `grafana/otel-lgtm` — a single container bundling OpenTelemetry Collector, Prometheus,
 Tempo, Loki, and Grafana with all datasources pre-wired.  Just run `docker compose up` and open Grafana.
@@ -247,6 +248,7 @@ Files: `compose/observability/grafana/dashboards-critical/`, provisioned via `cr
 | **Workflow Progress** | Flow 2 — `Respond*` and `Poll*` RPS/errors/latency; progress persistence. |
 | **Task Processing** | Flow 3 — TransferActive vs TimerActive **split** (p50 + p99 + tasks/sec); ShardInfo lock + history-cache latency; task persistence. |
 | **Worker Tuning** | Worker SDK levers: task slots available, sticky-cache hit/miss/size, pollers, schedule-to-start p99, poll success vs empty. |
+| **Durable Execution Value** | Cloud only. Workflow/Activity success rates (account + per-namespace), Activity Result outcomes, retries-absorbed-by-Temporal derivation (`activity_task_fail_count` − `activity_fail_count`) with an approximate "success rate without retries" and "9's gained" story, and Workflow runtime (schedule-to-close) by type. |
 
 ### OSS + Postgres scope
 

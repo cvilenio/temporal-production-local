@@ -73,7 +73,7 @@ fi
 # never specific internal names, so this file stays safe to publish.
 # ---------------------------------------------------------------------------
 if command -v claude >/dev/null 2>&1; then
-  model="${SENSITIVE_CHECK_MODEL:-claude-sonnet-4-6}"
+  model="${SENSITIVE_CHECK_MODEL:-claude-sonnet-5}"
   read -r -d '' prompt <<'PROMPT' || true
 You are a pre-commit secret/sensitivity gate for a PUBLIC open-source repository maintained by
 an employee of a software company. The input on stdin is the ADDED lines of a staged git diff.
