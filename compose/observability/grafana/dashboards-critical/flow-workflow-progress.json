@@ -47,7 +47,7 @@
       "id": 1,
       "options": {
         "mode": "markdown",
-        "content": "\nFrontend operations for **workers polling** for work (`Poll*`) and **completing** it (`Respond*`).\nThis is the server side of worker activity — pair it with the **Worker Fleet & KEDA Scaling**\ndashboard for the SDK/worker view (slots, sticky cache, schedule-to-start).\n\n**Works on Cloud AND self-hosted OSS** — each panel carries an OSS target (`service_requests`/\n`service_latency`, rate-based) and a Cloud target (`temporal_cloud_v1_*`, precomputed rate/\npercentile); whichever backend you're running populates the panel.\n\n> **Caveat:** OSS `service_latency` for `Respond*` **includes** the time the worker is responsible\n> for, so treat the latency below as worker-inclusive. The persistence panel for this flow moved to\n> **Temporal Self-Hosted Internals — Server Health** (self-hosted only, permanently).\n"
+        "content": "\nFrontend operations for **workers polling** for work (`Poll*`) and **completing** it (`Respond*`).\nThis is the server side of worker activity — pair it with the **Worker Fleet & KEDA Scaling**\ndashboard for the SDK/worker view (slots, sticky cache, schedule-to-start).\n\n**Works on Cloud AND self-hosted OSS** — each panel carries an OSS target (`service_requests`/\n`service_latency`, rate-based) and a Cloud target (`temporal_cloud_v1_*`, precomputed rate/\npercentile); whichever backend you're running populates the panel.\n\n> **Caveat:** OSS `service_latency` for `Respond*` **includes** the time the worker is responsible\n> for, so treat the latency below as worker-inclusive. The persistence panel for this flow moved to\n> **Temporal Self-Hosted Internals — Server Health** (self-hosted only, permanently).\n\n**Workflow Outcomes & Health (bottom row): Cloud only.** Success/failed/timeout/terminate/\ncontinued-as-new rates, open workflow count, resource-exhausted errors, and cross-region\nreplication lag — none of these have an OSS target wired here. Limited to what's documented in\nthe public `temporal_cloud_v1_*` OpenMetrics catalog — every field here is something this account\ncan already query itself.\n"
       }
     },
     {
@@ -360,6 +360,277 @@
           "legendFormat": "{{operation}}"
         }
       ]
+    },
+    {
+      "type": "row",
+      "title": "Workflow Outcomes & Health (Cloud)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 33
+      },
+      "id": 9,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Workflow Outcomes by Result",
+      "description": "Cloud only — no OSS target wired (self-hosted tracks completion via a different metric family). temporal_cloud_v1_workflow_{success,failed,timeout,terminate,continued_as_new}_count, already precomputed rates.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 34
+      },
+      "id": 10,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_workflow_success_count) OR on() vector(0)",
+          "legendFormat": "success"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_workflow_failed_count) OR on() vector(0)",
+          "legendFormat": "failed"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_workflow_timeout_count) OR on() vector(0)",
+          "legendFormat": "timeout"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_workflow_terminate_count) OR on() vector(0)",
+          "legendFormat": "terminated"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_workflow_continued_as_new_count) OR on() vector(0)",
+          "legendFormat": "continued-as-new"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Open Workflows",
+      "description": "Cloud only. temporal_cloud_v1_namespace_open_workflows — current count, not a rate.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 34
+      },
+      "id": 11,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_namespace_open_workflows)",
+          "legendFormat": "open workflows"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Resource Exhausted Errors",
+      "description": "Cloud only. temporal_cloud_v1_resource_exhausted_error_count — Cloud-side ResourceExhausted throttling, separate from Namespace-limit throttling. Per Temporal docs, persistent non-zero values are unexpected and worth investigating.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 42
+      },
+      "id": 12,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.001
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_resource_exhausted_error_count) OR on() vector(0)",
+          "legendFormat": "resource exhausted/sec"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Cross-Region Replication Lag",
+      "description": "Cloud only, multi-region Namespaces only — empty on single-region Namespaces (expected, not broken). temporal_cloud_v1_replication_lag_p50/p95/p99, already percentiles.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 42
+      },
+      "id": 13,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "max(temporal_cloud_v1_replication_lag_p50)",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "max(temporal_cloud_v1_replication_lag_p95)",
+          "legendFormat": "p95"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "max(temporal_cloud_v1_replication_lag_p99)",
+          "legendFormat": "p99"
+        }
+      ]
     }
   ],
   "refresh": "30s",
@@ -437,6 +708,6 @@
   "timezone": "",
   "title": "Temporal Critical Flows — Workflow Progress",
   "uid": "temporal-flow-workflow-progress",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }
