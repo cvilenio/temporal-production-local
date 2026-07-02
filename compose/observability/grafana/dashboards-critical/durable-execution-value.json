@@ -1,0 +1,721 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "liveNow": false,
+  "links": [
+    {
+      "asDropdown": true,
+      "title": "Critical Flows",
+      "tags": [
+        "temporal-critical-flows"
+      ],
+      "type": "dashboards",
+      "icon": "external link",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "tooltip": "",
+      "url": ""
+    }
+  ],
+  "panels": [
+    {
+      "type": "text",
+      "title": "Durable Execution Value — Cloud only",
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "mode": "markdown",
+        "content": "\nAnswers three business-level questions with only the customer-visible `temporal_cloud_v1_*`\nOpenMetrics — no internal-analytics-sourced data:\n\n1. **Are my business processes succeeding?** Workflow and Activity success rates, globally and\n   per-namespace.\n2. **Is Temporal helping where it otherwise couldn't?** Activity retries absorbed — attempts that\n   failed but were retried and eventually succeeded — compared against successful workflows.\n3. **How long are my business processes taking?** Workflow schedule-to-close latency by workflow type.\n\n> **Derivation — Activity retries absorbed.** `temporal_cloud_v1_activity_fail_count` counts only\n> *final* Activity failures (all retries exhausted); `temporal_cloud_v1_activity_task_fail_count`\n> counts *every failed attempt*, including ones later retried into a success. The difference between\n> the two is exactly \"attempts that failed but Temporal retried through\" — retries absorbed.\n>\n> **Caveat — the \"success rate without retries\" and \"9's gained\" panels are approximations, not\n> exact.** They model each absorbed retry as if it would have caused one additional Workflow\n> failure, which isn't precisely true (a Workflow can have many Activities/retries, or recover via\n> other paths). Treat them as a rough, directionally-correct story, the same caveat Temporal's own\n> team gives when walking through this analysis internally.\n>\n> **What this can't measure.** None of this captures the value of Workflow-level crash protection —\n> Temporal recovering a Workflow after a Worker/process crash, as opposed to a single Activity\n> failing while the process stays up. That's a materially bigger reliability story with no\n> corresponding OpenMetrics counter today (Workflow Task retries reflect Sticky-cache evictions too,\n> not just crashes, so they're not a clean proxy either).\n"
+      }
+    },
+    {
+      "type": "row",
+      "title": "Are My Business Processes Succeeding? — Workflow Completion / Activity Result",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 11
+      },
+      "id": 2,
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Workflow Success Rate % (Account-wide)",
+      "description": "success / (success + failed + timeout + terminated) * 100. No data until this Namespace has completed Workflow traffic.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 12
+      },
+      "id": 3,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 4,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 99
+              },
+              {
+                "color": "green",
+                "value": 99.9
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_workflow_success_count) / (sum(temporal_cloud_v1_workflow_success_count) + sum(temporal_cloud_v1_workflow_failed_count) + sum(temporal_cloud_v1_workflow_timeout_count) + sum(temporal_cloud_v1_workflow_terminate_count)) * 100",
+          "legendFormat": "workflow success rate"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Activity Success Rate % (Account-wide)",
+      "description": "success / (success + fail) * 100, per Temporal's documented formula. Target >95%. No data until Activities have executed recently.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 12
+      },
+      "id": 4,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 95
+              },
+              {
+                "color": "green",
+                "value": 99
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_activity_success_count) / (sum(temporal_cloud_v1_activity_success_count) + sum(temporal_cloud_v1_activity_fail_count)) * 100",
+          "legendFormat": "activity success rate"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Workflow Success Rate % by Namespace (per use case)",
+      "description": "Same formula as the account-wide stat, faceted by temporal_namespace — the per-namespace/use-case view (e.g. orders). Single-namespace stacks will show one line.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "id": 5,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum by (temporal_namespace) (temporal_cloud_v1_workflow_success_count) / (sum by (temporal_namespace) (temporal_cloud_v1_workflow_success_count) + sum by (temporal_namespace) (temporal_cloud_v1_workflow_failed_count) + sum by (temporal_namespace) (temporal_cloud_v1_workflow_timeout_count) + sum by (temporal_namespace) (temporal_cloud_v1_workflow_terminate_count)) * 100",
+          "legendFormat": "{{temporal_namespace}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Activity Result — Outcomes",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "id": 6,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Activity Outcomes by Result",
+      "description": "temporal_cloud_v1_activity_{success,fail,timeout,cancel,terminate}_count — the Activity Result topic's shape, from OpenMetrics.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 21
+      },
+      "id": 7,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_activity_success_count) OR on() vector(0)",
+          "legendFormat": "success"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_activity_fail_count) OR on() vector(0)",
+          "legendFormat": "fail (final, retries exhausted)"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_activity_timeout_count) OR on() vector(0)",
+          "legendFormat": "timeout"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_activity_cancel_count) OR on() vector(0)",
+          "legendFormat": "cancel"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_activity_terminate_count) OR on() vector(0)",
+          "legendFormat": "terminate (standalone only)"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Is Temporal Helping Where It Otherwise Couldn't? — Durable Execution Value",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 29
+      },
+      "id": 8,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Activity Failures: Per-Attempt vs Final",
+      "description": "temporal_cloud_v1_activity_task_fail_count (every failed attempt) vs temporal_cloud_v1_activity_fail_count (only after retries exhausted). The gap between these two lines is retries absorbed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 30
+      },
+      "id": 9,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_activity_task_fail_count) OR on() vector(0)",
+          "legendFormat": "per-attempt failures (all retries)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_activity_fail_count) OR on() vector(0)",
+          "legendFormat": "final failures (retries exhausted)"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Activity Retries Absorbed by Temporal",
+      "description": "clamp_min(activity_task_fail_count - activity_fail_count, 0) — attempts that failed but were retried into a success.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 30
+      },
+      "id": 10,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "clamp_min(sum(temporal_cloud_v1_activity_task_fail_count) - sum(temporal_cloud_v1_activity_fail_count), 0) OR on() vector(0)",
+          "legendFormat": "retries absorbed/sec"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Retries Absorbed per Successful Workflow",
+      "description": "Ratio, not percent: retries absorbed / successful workflows. No data until Workflows have completed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 38
+      },
+      "id": 11,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 4
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "clamp_min(sum(temporal_cloud_v1_activity_task_fail_count) - sum(temporal_cloud_v1_activity_fail_count), 0) / sum(temporal_cloud_v1_workflow_success_count)",
+          "legendFormat": "retries absorbed per success"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Approx. Workflow Success Rate WITHOUT Activity Retries",
+      "description": "APPROXIMATION — see caveat at top of dashboard. Models each absorbed retry as an additional Workflow failure: success / (success + failed + timeout + terminated + retries_absorbed) * 100.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 38
+      },
+      "id": 12,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 4,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 99
+              },
+              {
+                "color": "green",
+                "value": 99.9
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_workflow_success_count) / (sum(temporal_cloud_v1_workflow_success_count) + sum(temporal_cloud_v1_workflow_failed_count) + sum(temporal_cloud_v1_workflow_timeout_count) + sum(temporal_cloud_v1_workflow_terminate_count) + clamp_min(sum(temporal_cloud_v1_activity_task_fail_count) - sum(temporal_cloud_v1_activity_fail_count), 0)) * 100",
+          "legendFormat": "approx. success rate without retries"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Approx. 9's Gained From Activity Retries",
+      "description": "APPROXIMATION. -log10(1 - actual_rate) minus -log10(1 - without_retries_rate) — the \"five 9's\" framing from Temporal's own durable-execution-value analysis, derived the same approximate way.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 38
+      },
+      "id": 13,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "(-log10(clamp(1 - (sum(temporal_cloud_v1_workflow_success_count) / (sum(temporal_cloud_v1_workflow_success_count) + sum(temporal_cloud_v1_workflow_failed_count) + sum(temporal_cloud_v1_workflow_timeout_count) + sum(temporal_cloud_v1_workflow_terminate_count))), 1e-12, 0.999999999))) - (-log10(clamp(1 - (sum(temporal_cloud_v1_workflow_success_count) / (sum(temporal_cloud_v1_workflow_success_count) + sum(temporal_cloud_v1_workflow_failed_count) + sum(temporal_cloud_v1_workflow_timeout_count) + sum(temporal_cloud_v1_workflow_terminate_count) + clamp_min(sum(temporal_cloud_v1_activity_task_fail_count) - sum(temporal_cloud_v1_activity_fail_count), 0))), 1e-12, 0.999999999)))",
+          "legendFormat": "9's gained"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "How Long Are My Business Processes Taking?",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 46
+      },
+      "id": 14,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Workflow Runtime (Schedule-to-Close Latency) by Workflow Type",
+      "description": "temporal_cloud_v1_workflow_schedule_to_close_latency_p50/p95/p99 — overall Workflow runtime from schedule to close, faceted by workflow type. Already percentiles; combined across any extra dimensions with max, not sum.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 47
+      },
+      "id": 15,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "max by (temporal_workflow_type) (temporal_cloud_v1_workflow_schedule_to_close_latency_p50)",
+          "legendFormat": "{{temporal_workflow_type}} p50"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "max by (temporal_workflow_type) (temporal_cloud_v1_workflow_schedule_to_close_latency_p95)",
+          "legendFormat": "{{temporal_workflow_type}} p95"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "max by (temporal_workflow_type) (temporal_cloud_v1_workflow_schedule_to_close_latency_p99)",
+          "legendFormat": "{{temporal_workflow_type}} p99"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": [
+    "temporal-critical-flows",
+    "temporal"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "text": "Prometheus (kind metrics)",
+          "value": "prometheus-kind"
+        },
+        "hide": 0,
+        "refresh": 1,
+        "regex": "",
+        "options": [],
+        "includeAll": false,
+        "multi": false
+      }
+    ]
+  },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Temporal Critical Flows — Durable Execution Value",
+  "uid": "temporal-durable-execution-value",
+  "version": 1,
+  "weekStart": ""
+}

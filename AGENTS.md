@@ -129,6 +129,23 @@ follow along in real time.
 - **Off-path agents:** if you mutate the cluster outside those recipes (e.g. raw `kubectl`,
   `terraform apply` on the cluster layer), run `just preflight` yourself first.
 
+**Waiting for `up-cloud-kind` / `platform-up` to actually be ready.** These recipes shell out
+to `docker compose`, `kind`, and Terraform steps that can buffer or go quiet for long stretches
+— tailing their stdout (or a backgrounded task's `.output` file) is not a reliable readiness
+signal; it can sit empty for minutes while work is genuinely happening, and "still running"
+looks identical to "stuck." Don't poll a quiet log and don't guess from elapsed time. Instead:
+
+- If the tool call auto-backgrounds the command, wait for its own completion notification
+  (or `TaskOutput` with `block: true`) rather than repeatedly `tail`-ing the output file —
+  that only tells you what's printed so far, not whether the recipe is done.
+- Once it returns (or if you want an earlier signal it's *usably* up), validate against the
+  same health signals a human would trust, not the command's exit alone:
+  `curl :8086/healthz` (console), `curl :3000/api/health` (Grafana), `docker ps` for
+  `Up ... (healthy)` on the containers you need, and `kubectl get pods -A` for zero
+  non-Running/Completed pods on kind.
+- Prefer `just preflight` where it exists (console gate) over hand-rolled checks — it's the
+  same probe `platform-up` already trusts.
+
 See `docs/RUNMODES.md` for the full run-mode matrix.
 
 # MCP servers for agents — ClickHouse, Prometheus, Kubernetes

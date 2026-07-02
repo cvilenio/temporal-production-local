@@ -47,7 +47,7 @@
       "id": 1,
       "options": {
         "mode": "markdown",
-        "content": "\n**Critical-path monitoring — works on Temporal Cloud AND self-hosted OSS, same panels.**\nA compact view of the operations that most directly affect application health.\n\nThis stack watches three critical flows:\n\n1. **Starting / Signaling** — `StartWorkflowExecution`, `SignalWorkflowExecution` (client API creating/modifying workflow state). Target a tight latency budget here.\n2. **Workflow Progress** — workers polling (`PollWorkflowTaskQueue`, `PollActivityTaskQueue`) and completing work (`Respond*`).\n\nUse the **Critical Flows** dropdown (top-left) to drill into each flow + Worker Tuning.\n\n> **How the backend-agnostic panels work:** each RPS/error/latency panel below carries two query\n> targets — one against the OSS metric (raw counter, `rate()`'d) and one against the Cloud\n> `temporal_cloud_v1_*` equivalent (already a precomputed rate, never `rate()`'d). Whichever\n> backend you're actually running populates the panel; the other target just returns no data.\n> No manual datasource switching needed — both metric families land in the same `prometheus-kind`\n> store already (in-cluster Prometheus scrapes SDK pods + the Temporal Cloud OpenMetrics endpoint\n> and remote_writes both here).\n>\n> **What can't be unified:** persistence, internal task processing, shard, and process-level\n> metrics are below the customer-facing API boundary — Temporal Cloud is a managed control plane\n> and never exposes them, on any topology. Those live in the **Temporal Self-Hosted Internals**\n> folder instead of pretending they'd populate here.\n"
+        "content": "\n**Critical-path monitoring — works on Temporal Cloud AND self-hosted OSS, same panels.**\nA compact view of the operations that most directly affect application health.\n\nThis stack watches three critical flows:\n\n1. **Starting / Signaling** — `StartWorkflowExecution`, `SignalWorkflowExecution` (client API creating/modifying workflow state). Target a tight latency budget here.\n2. **Workflow Progress** — workers polling (`PollWorkflowTaskQueue`, `PollActivityTaskQueue`) and completing work (`Respond*`).\n\nUse the **Critical Flows** dropdown (top-left) to drill into each flow + Worker Tuning.\n\n> **How the backend-agnostic panels work:** each RPS/error/latency panel below carries two query\n> targets — one against the OSS metric (raw counter, `rate()`'d) and one against the Cloud\n> `temporal_cloud_v1_*` equivalent (already a precomputed rate, never `rate()`'d). Whichever\n> backend you're actually running populates the panel; the other target just returns no data.\n> No manual datasource switching needed — both metric families land in the same `prometheus-kind`\n> store already (in-cluster Prometheus scrapes SDK pods + the Temporal Cloud OpenMetrics endpoint\n> and remote_writes both here).\n>\n> **What can't be unified:** persistence, internal task processing, shard, and process-level\n> metrics are below the customer-facing API boundary — Temporal Cloud is a managed control plane\n> and never exposes them, on any topology. Those live in the **Temporal Self-Hosted Internals**\n> folder instead of pretending they'd populate here.\n\n**Cloud Capacity section (bottom of this dashboard):** Cloud-only — Actions/APS/RPS/OPS and\nTRUs are a Temporal Cloud billing concept with no OSS equivalent. Mirrors the panels the\nofficial [temporal-mixin](https://github.com/grafana/jsonnet-libs/tree/master/temporal-mixin)\nadded for provisioned-capacity utilization, adapted for this single-namespace stack (no\n`$temporal_namespace` template var). The \"Provisioned TRUs\" stat doubles as an on-demand/\nprovisioned detector: it stays at 0 unless a Namespace is switched to provisioned capacity.\n"
       }
     },
     {
@@ -367,6 +367,373 @@
           "legendFormat": "{{job}}"
         }
       ]
+    },
+    {
+      "type": "row",
+      "title": "Cloud Capacity — APS / RPS / OPS vs Limit",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 37
+      },
+      "id": 9,
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Provisioned TRUs (0 = On-Demand)",
+      "description": "Cloud only — no OSS equivalent (TRUs/capacity mode are a Temporal Cloud billing concept). Detects provisioned capacity by comparing action_limit to what it would be under on-demand (action_on_demand_envelope_limit) — the two diverge only when a Namespace is provisioned. Zero across the account means every Namespace is on-demand.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 38
+      },
+      "id": 10,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "blue",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "(sum(last_over_time(temporal_cloud_v1_action_limit[1h]) != last_over_time(temporal_cloud_v1_action_on_demand_envelope_limit[1h])) OR on() vector(0)) / 500",
+          "legendFormat": "TRUs provisioned"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "APS: Actions vs Limit",
+      "description": "Cloud only. temporal_cloud_v1_total_action_count (is_background=false, the billable portion) vs temporal_cloud_v1_action_limit.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 9,
+        "x": 6,
+        "y": 38
+      },
+      "id": 11,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_total_action_count{is_background=\"false\"})",
+          "legendFormat": "APS (used)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_action_limit)",
+          "legendFormat": "APS (limit)"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "APS Utilization %",
+      "description": "Alerting guidance per Temporal docs: alert at 50% of the limit for latency-sensitive workloads, 90% for latency-insensitive ones.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 9,
+        "x": 15,
+        "y": 38
+      },
+      "id": 12,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_total_action_count{is_background=\"false\"}) / sum(temporal_cloud_v1_action_limit) * 100",
+          "legendFormat": "APS utilization"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "RPS: Service Requests vs Limit",
+      "description": "Cloud only. temporal_cloud_v1_service_request_count vs temporal_cloud_v1_service_request_limit.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 46
+      },
+      "id": 13,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_service_request_count)",
+          "legendFormat": "RPS (used)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_service_request_limit)",
+          "legendFormat": "RPS (limit)"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "OPS: Operations vs Limit",
+      "description": "Cloud only. temporal_cloud_v1_operations_count vs temporal_cloud_v1_operations_limit.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 46
+      },
+      "id": 14,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_operations_count)",
+          "legendFormat": "OPS (used)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_operations_limit)",
+          "legendFormat": "OPS (limit)"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Action Throttling",
+      "description": "Cloud only. temporal_cloud_v1_total_action_throttled_count — persistent non-zero values mean the Namespace is being rate-limited; Workflows can fail if throttling outlasts the SDK's retry budget.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-kind"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 54
+      },
+      "id": 15,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.001
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-kind"
+          },
+          "expr": "sum(temporal_cloud_v1_total_action_throttled_count) OR on() vector(0)",
+          "legendFormat": "actions throttled/sec"
+        }
+      ]
     }
   ],
   "refresh": "30s",
@@ -444,6 +811,6 @@
   "timezone": "",
   "title": "Temporal Critical Flows — Overview",
   "uid": "temporal-critical-overview",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }
