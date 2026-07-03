@@ -1,11 +1,11 @@
 # In-cluster Prometheus — the metrics-phase scrape + rule + remote_write engine
 # (ADR-0021). It scrapes the SDK :9000 endpoints (pod-annotation discovery, the
 # chart's default kubernetes-pods job) and the Temporal Cloud OpenMetrics endpoint,
-# evaluates the slot_utilization recording rule that KEDA's Prometheus scaler
-# queries (ADR-0023), and remote_writes everything to the HOST metrics store — the
-# "persist outside the cluster" tier, mirroring the Alloy->ClickHouse log path
-# (ADR-0020). Local retention is a short hot buffer only; durability lives on the
-# host. No NodePort: KEDA + the recording rules read it over cluster DNS, and
+# evaluates the slot_utilization recording rule (worker-saturation signal for
+# dashboards/alerting; ADR-0023), and remote_writes everything to the HOST metrics
+# store — the "persist outside the cluster" tier, mirroring the Alloy->ClickHouse log
+# path (ADR-0020). Local retention is a short hot buffer only; durability lives on the
+# host. No NodePort: the recording rules + dashboards read it over cluster DNS, and
 # Grafana reads the host store, so nothing off-cluster talks to this instance.
 #
 # Secret-free, so it rides the committed-addon glob (targetRevision injected by the
@@ -88,14 +88,14 @@ spec:
               - name: temporal-worker
                 rules:
                   # slot_utilization is NOT an SDK metric — it is a recording rule over
-                  # the slot gauges the Core SDK emits (ADR-0021), consumed by KEDA's
-                  # Prometheus scaler (ADR-0023).
+                  # the slot gauges the Core SDK emits (ADR-0021). Kept as a
+                  # worker-saturation signal for dashboards/alerting (and a candidate
+                  # fast, local leading signal for the custom autoscaler; ADR-0023).
                   #
                   # Name + shape deliberately track the temporal-worker-controller's
-                  # upstream reference (its prometheus-stack-values.yaml / KEDA + HPA
-                  # examples all query `temporal_slot_utilization`) so those examples
-                  # apply to us verbatim — underscore, not the colon recording-rule
-                  # convention.
+                  # upstream reference (its prometheus-stack-values.yaml HPA examples
+                  # all query `temporal_slot_utilization`) so those examples apply to us
+                  # verbatim — underscore, not the colon recording-rule convention.
                   #
                   # Grouped by the version-stable, SDK-native labels (namespace /
                   # worker_type / task_queue) on purpose — NOT by build_id. This rule is
@@ -103,15 +103,14 @@ spec:
                   # and grouping by the scrape-relabel labels (temporal_io_build_id /
                   # temporal_io_deployment_name) would couple it to our scrape wiring.
                   #
-                  # NOTE (corrected): per-version identity IS available today — the worker
-                  # pods carry temporal.io/build-id + temporal.io/deployment-name (set by
-                  # the Worker Controller), surfaced onto every series by the kubernetes-pods
-                  # scrape as temporal_io_build_id / temporal_io_deployment_name. So a
-                  # per-version slot_utilization rule needs NO SDK bump (temporalio 1.29 is
-                  # latest stable). It is simply not needed for per-version SCALING: that runs
-                  # on the KEDA Temporal scaler (DescribeWorkerDeploymentVersion, per Build ID
-                  # injected by the controller), which does not consume this rule at all
-                  # (ADR-0023). task_queue still maps 1:1 to a WorkerDeployment here.
+                  # NOTE: per-version identity IS available today — the worker pods carry
+                  # temporal.io/build-id + temporal.io/deployment-name (set by the Worker
+                  # Controller), surfaced onto every series by the kubernetes-pods scrape as
+                  # temporal_io_build_id / temporal_io_deployment_name. So a per-version
+                  # slot_utilization rule needs NO SDK bump. Per-version SCALING runs in the
+                  # custom temporal-worker-autoscaler (DescribeWorkerDeploymentVersion per
+                  # Build ID), which does not consume this rule today (ADR-0023). task_queue
+                  # still maps 1:1 to a WorkerDeployment here.
                   #
                   # Aggregate the two gauges separately before dividing — adding the raw
                   # vectors fails to match on their differing __name__.

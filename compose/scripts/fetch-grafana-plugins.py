@@ -54,7 +54,9 @@ def safe_extract(zf: zipfile.ZipFile, dest: Path) -> None:
     for member in zf.infolist():
         target = (dest / member.filename).resolve()
         if not str(target).startswith(str(dest)):
-            sys.exit(f"FAIL: zip entry {member.filename!r} escapes extraction dir — refusing to extract.")
+            sys.exit(
+                f"FAIL: zip entry {member.filename!r} escapes extraction dir — refusing to extract."
+            )
     zf.extractall(dest)
     # Unlike tarfile, zipfile.extractall does NOT restore Unix permissions — the
     # backend plugin binaries (gpx_clickhouse_*) need their executable bit back
@@ -78,7 +80,11 @@ def fetch_one(name: str, spec: dict) -> bool:
     # makes the whole plugin look "modified" and Grafana refuses to load it.
     stamp = PLUGINS_DIR / f".{name}.version"
 
-    if stamp.exists() and stamp.read_text().strip() == version and any(dest.rglob("plugin.json")):
+    if (
+        stamp.exists()
+        and stamp.read_text().strip() == version
+        and any(dest.rglob("plugin.json"))
+    ):
         print(f"  [skip ] {name} {version} already present")
         return False
 
@@ -100,7 +106,9 @@ def fetch_one(name: str, spec: dict) -> bool:
         with zipfile.ZipFile(zip_path) as zf:
             safe_extract(zf, PLUGINS_DIR)
     stamp.write_text(version + "\n")
-    print(f"  [ok   ] {name} {version} verified + extracted to {dest.relative_to(REPO_ROOT)}")
+    print(
+        f"  [ok   ] {name} {version} verified + extracted to {dest.relative_to(REPO_ROOT)}"
+    )
     return True
 
 
@@ -114,7 +122,9 @@ def _rmtree(path: Path) -> None:
 
 
 def main() -> None:
-    plugins = (yaml.safe_load(MANIFEST.read_text()).get("grafana") or {}).get("plugins") or {}
+    plugins = (yaml.safe_load(MANIFEST.read_text()).get("grafana") or {}).get(
+        "plugins"
+    ) or {}
     if not plugins:
         print("No grafana.plugins pinned in config/dependencies.yaml — nothing to do.")
         return
@@ -122,7 +132,9 @@ def main() -> None:
     print(f"Grafana plugins -> {PLUGINS_DIR.relative_to(REPO_ROOT)}/")
     changed = sum(fetch_one(name, spec) for name, spec in sorted(plugins.items()))
     if changed:
-        print(f"\n{changed} plugin(s) updated. Restart lgtm to load them: `docker restart lgtm`.")
+        print(
+            f"\n{changed} plugin(s) updated. Restart lgtm to load them: `docker restart lgtm`."
+        )
     else:
         print("\nAll plugins already at pinned versions.")
 
