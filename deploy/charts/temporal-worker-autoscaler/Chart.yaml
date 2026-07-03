@@ -17,5 +17,8 @@ type: application
 # the worker-controller can GC them without a replica fight — Current, Ramping, and
 # still-Draining versions all keep autoscaling (proportional scaling across versions
 # running side by side, e.g. canary / gradual migration).
-version: 0.1.2
-appVersion: "0.1.2"
+# 0.1.3: add prometheus.io/scrape pod annotations so the kind Prometheus scrapes the
+# controller's metrics (feeds the Platform Internals autoscaler dashboard). Template
+# change only — image unchanged.
+version: 0.1.3
+appVersion: "0.1.3"

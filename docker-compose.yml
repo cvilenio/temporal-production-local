@@ -102,6 +102,11 @@ services:
       # they'd populate on a Cloud backend.
       - ./compose/observability/grafana/provisioning/dashboards/self-hosted-internals.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/self-hosted-internals.yaml:ro
       - ./compose/observability/grafana/dashboards-self-hosted-internals:/var/lib/grafana/dashboards/self-hosted-internals:ro
+      # Platform-internal components we run ourselves (the custom temporal-worker-
+      # autoscaler): its own single-pane-of-glass folder, distinct from Temporal's
+      # own critical-flows / server-internals.
+      - ./compose/observability/grafana/provisioning/dashboards/platform.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/platform.yaml:ro
+      - ./compose/observability/grafana/dashboards-platform:/var/lib/grafana/dashboards/platform:ro
       - ./compose/observability/grafana/provisioning/datasources/clickhouse.yaml:/otel-lgtm/grafana/conf/provisioning/datasources/clickhouse.yaml:ro
       # Host metrics store datasource (kind run mode — ADR-0021). The in-cluster
       # Prometheus remote_writes to prometheus-store; Grafana reads it here.
