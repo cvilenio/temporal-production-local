@@ -91,7 +91,7 @@ variable "orders_workers_chart_version" {
 variable "autoscaler_chart_version" {
   description = "Published version of the temporal-worker-autoscaler OCI chart (matches Chart.yaml / just chart-publish)."
   type        = string
-  default     = "0.1.2"
+  default     = "0.1.3"
 }
 
 variable "autoscaler_image_tag" {

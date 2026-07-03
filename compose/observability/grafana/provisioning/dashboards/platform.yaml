@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: platform-internals
+    folder: Platform Internals
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards/platform

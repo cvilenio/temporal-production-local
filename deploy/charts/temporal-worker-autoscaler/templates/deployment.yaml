@@ -16,6 +16,13 @@ spec:
       labels:
         app.kubernetes.io/name: temporal-worker-autoscaler
         app.kubernetes.io/component: autoscaler
+      annotations:
+        # Scraped by the kind Prometheus `kubernetes-pods` job (honors these
+        # annotations). The controller-runtime metrics server binds plaintext
+        # HTTP on :8080 (METRICS_ADDR), so path/port are the plain endpoint.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
     spec:
       serviceAccountName: {{ .Values.serviceAccount.name }}
       securityContext:
