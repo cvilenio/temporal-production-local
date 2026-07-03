@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-02
 **Status:** **Landed + verified live** (kind + Cloud) — see "Live validation results" below.
-KEDA fully removed. Not yet committed/PR'd.
+KEDA fully removed. Merged to `main` via PR #26 (chart 0.1.2).
 **Supersedes:** the KEDA autoscaling seam from checkpoint 0025 / ADR-0023 Phase 1.
 
 ## Why
@@ -149,18 +149,34 @@ could never delete them, so 6 live versions persisted and kept getting polled on
 Worker-Deployment-Read limit → **ResourceExhausted stayed elevated**. Both reported symptoms,
 one root cause.
 
-**Fix (chart 0.1.0 → 0.1.1, new image):**
-- The reconciler now reads the Worker Controller's `WorkerDeployment` CR
-  (`temporal.io/v1alpha1`, in-cluster — no extra Cloud call) and manages **only** the
-  active versions (`currentVersion` + `targetVersion`/`rampingVersion`). Draining versions
-  are skipped entirely (not floored, not polled) so the worker-controller scales them to 0
-  and deletes them. Also cuts Cloud polling from all-versions → active-only.
-  Fallback: if the CR is absent (no Worker Controller), manage every version as before.
+**Fix (chart 0.1.0 → 0.1.1 → 0.1.2, new image):**
+- The reconciler reads the Worker Controller's `WorkerDeployment` CR
+  (`temporal.io/v1alpha1`, in-cluster — no extra Cloud call) and skips **only fully-Drained**
+  versions (`status=Drained` / `eligibleForDeletion`) — the ones the worker-controller drives
+  to 0 and deletes. **Current, Ramping, AND still-Draining versions are all managed**, each
+  scaled on its own backlog. This is the key correctness point: *draining ≠ drained* — a
+  Draining version has no new workflows routed to it, but its already-started **pinned**
+  workflows keep generating tasks, so it has real backlog and must keep scaling (critical for
+  proportional scaling across side-by-side versions during a canary / rainbow rollout).
+  Fallback: if the CR is absent (no Worker Controller), manage every version.
+  (0.1.1 first shipped the too-blunt "manage only current + ramping", which skipped Draining
+  too and would have lost scaling on old versions still doing pinned work — corrected in 0.1.2
+  after review.)
 - New RBAC: `temporal.io/workerdeployments` get/list/watch (marker + chart ClusterRole +
   `config/rbac/role.yaml`).
 - Chart `pollInterval` default 3s → **15s** (the code default was already 15s, but the chart
   env override forced 3s onto the running pod — that was why the deployed controller still
   polled every 3s).
+
+**Routing vs scaling (Temporal best practice, confirmed via docs):** traffic routing across
+versions is *server-side* — the Worker Deployment `RoutingConfig` (one Current + one Ramping +
+a ramp % [0,100]); it is two-way at any instant, not an arbitrary N-way weighted split. True
+rainbow (>2 live versions) comes from **pinned workflows** draining on old versions, not from
+an N-way splitter. The temporal-worker-controller owns routing declaratively (`rollout:
+Progressive` steps); this autoscaler must NOT do routing — it only reacts to the per-version
+backlog that routing + pinned load produce. The two planes compose through the per-version
+backlog signal (Temporal added per-version labels on `approximate_backlog_count` for exactly
+this build-id-aware scaling).
 
 **Verified live (kind + Cloud):** new pod runs `pollInterval:15`; thrash gone (all worker
 pods Running, zero create/kill churn); `WorkerAutoscaler` status corrected to CURRENT=1
