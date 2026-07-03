@@ -11,18 +11,66 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
+	"strings"
+	"time"
 
 	deploymentpb "go.temporal.io/api/deployment/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
 	temporalclient "go.temporal.io/sdk/client"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // ErrRateLimited signals the Cloud Worker-Deployment-Read API throttled us; the
 // caller should keep the current replica count and try again next cycle (not a
 // hard failure). This is the constraint that bounds backlog freshness.
 var ErrRateLimited = errors.New("temporal worker-deployment read rate limited")
+
+// ErrTransient signals a benign, self-healing transport hiccup — Temporal Cloud's
+// edge recycles long-lived gRPC connections by max-connection-age (~5min), so a
+// call in flight at the recycle moment surfaces EOF/Unavailable before gRPC
+// transparently reconnects. It is NOT load- or demand-related; the next cycle
+// succeeds. Like ErrRateLimited, the caller holds the current replica count and
+// logs quietly instead of treating it as a hard error. (The high-level SDK hides
+// this for workflows/activities, but we call the raw WorkflowService gRPC for
+// backlog stats, so we own the classification — see the SDK's own WARN-and-retry
+// on the worker's poll loop.)
+var ErrTransient = errors.New("temporal connection recycled (transient)")
+
+// isTransient reports whether err is a recoverable transport teardown (connection
+// recycled/reset) rather than a real failure. gRPC auto-reconnects; we just skip
+// this tick. Matches the typed SDK error, the retryable gRPC codes, and the raw
+// io.EOF that a mid-flight read of a closing connection produces.
+func isTransient(err error) bool {
+	if err == nil {
+		return false
+	}
+	var unavail *serviceerror.Unavailable
+	if errors.As(err, &unavail) {
+		return true
+	}
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+	switch status.Code(err) {
+	case codes.Unavailable, codes.Canceled, codes.DeadlineExceeded:
+		return true
+	}
+	// Fallback: the transport-teardown phrasing surfaces inconsistently across
+	// grpc-go versions (sometimes codes.Unknown wrapping the raw message), so
+	// match the observed strings directly. "error reading from server: EOF" is
+	// the exact form seen against Temporal Cloud's edge on connection recycle.
+	msg := err.Error()
+	for _, s := range []string{"EOF", "connection reset", "connection closed", "broken pipe", "transport is closing"} {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	return false
+}
 
 // Client is the Temporal Cloud accessor for backlog reads.
 type Client struct {
@@ -37,9 +85,17 @@ func Dial(hostPort, namespace, apiKey string, useTLS bool) (*Client, error) {
 	if apiKey != "" {
 		opts.Credentials = temporalclient.NewAPIKeyStaticCredentials(apiKey)
 	}
+	// Explicit gRPC keepalive: ping every 30s (SDK default) with pings permitted
+	// even when no RPC is in flight, so an idle connection is detected and cycled
+	// proactively rather than discovered dead mid-call. This trims stale-connection
+	// EOFs; it does NOT eliminate them, because Cloud's edge also recycles by
+	// max-connection-age (~5min) regardless of keepalive — those residual EOFs are
+	// handled as ErrTransient by the caller.
+	conn := temporalclient.ConnectionOptions{KeepAliveTime: 30 * time.Second, KeepAliveTimeout: 15 * time.Second}
 	if useTLS {
-		opts.ConnectionOptions = temporalclient.ConnectionOptions{TLS: &tls.Config{}}
+		conn.TLS = &tls.Config{}
 	}
+	opts.ConnectionOptions = conn
 	c, err := temporalclient.NewLazyClient(opts)
 	if err != nil {
 		return nil, err
@@ -78,6 +134,9 @@ func (c *Client) VersionBacklog(ctx context.Context, deploymentName, buildID, ta
 		var rl *serviceerror.ResourceExhausted
 		if errors.As(err, &rl) {
 			return 0, ErrRateLimited
+		}
+		if isTransient(err) {
+			return 0, ErrTransient
 		}
 		return 0, err
 	}
