@@ -37,7 +37,7 @@
   "panels": [
     {
       "type": "text",
-      "title": "Worker Fleet & KEDA Scaling",
+      "title": "Worker Fleet & Scaling",
       "gridPos": {
         "h": 9,
         "w": 24,
@@ -47,7 +47,7 @@
       "id": 1,
       "options": {
         "mode": "markdown",
-        "content": "\nThe worker side of **Flow 2 (Workflow Progress)** — the levers for worker tuning and the read on whether\nKEDA's scaling decisions are keeping up with load. Read it top to bottom like an incident:\n\n1. **Saturation** — is workflow/activity **schedule-to-start latency** rising? That's the canary: tasks are\n   sitting in the queue because workers can't drain fast enough (the textbook \"added pods → latency dropped\"\n   signature). Corroborate with backlog and slot utilization — backlog resets to zero on an idle queue, never\n   trust it alone.\n2. **Utilization** — *why* did latency move? Slots at zero = real capacity problem (add workers). Slots free but\n   latency high = a config/poller problem, not capacity (don't add pods). Sync match / poll success dropping =\n   pollers can't keep up with delivery.\n3. **KEDA Alignment** — did the fleet actually react? Running replica count by worker version, next to the\n   Saturation row above (same time range) — eyeball whether a KEDA scale-up event lines up with backlog/latency\n   coming back down.\n\n> **Unit trap:** these are **Core SDK (Python)** metrics. Core-based SDKs (TypeScript/Python/.NET) default to\n> **milliseconds**, Go/Java use **seconds** — but this repo's `appkit/telemetry.py` sets\n> `durations_as_seconds=True`, so every latency panel below is in **seconds** despite being a Python worker.\n> A 200ms p99 alert threshold is `0.2` here, not `200`. Don't \"fix\" the axis back to ms.\n>\n> Counters have **no `_total` suffix** in the Python SDK (e.g. `temporal_workflow_task_queue_poll_succeed`).\n>\n> **Cloud-only panels** (Sync Match Rate, Poll Success Rate by Task Type, Approximate Backlog Count) read\n> `temporal_cloud_v1_*` from the Temporal Cloud OpenMetrics scrape. They render \"No data\" on a self-hosted OSS\n> backend — that's expected, not broken. They can also show briefly blank on an idle queue since these are\n> delta metrics only emitted when there's poll/backlog activity in that scrape window.\n>\n> **KEDA's own per-version backlog read** (`DescribeWorkerDeploymentVersion`, what the Temporal scaler actually\n> acts on) is not exported to Prometheus today — there's no `keda_scaler_metrics_value` series being scraped.\n> For the live ScaledObject/HPA status (Active/Paused, current metric value) use **Headlamp's KEDA plugin**\n> instead; this dashboard covers the time-correlated history Headlamp doesn't.\n"
+        "content": "\nThe worker side of **Flow 2 (Workflow Progress)** — the levers for worker tuning and the read on whether\nthe custom worker-autoscaler's scaling decisions are keeping up with load. Read it top to bottom like an incident:\n\n1. **Saturation** — is workflow/activity **schedule-to-start latency** rising? That's the canary: tasks are\n   sitting in the queue because workers can't drain fast enough (the textbook \"added pods → latency dropped\"\n   signature). Corroborate with backlog and slot utilization — backlog resets to zero on an idle queue, never\n   trust it alone.\n2. **Utilization** — *why* did latency move? Slots at zero = real capacity problem (add workers). Slots free but\n   latency high = a config/poller problem, not capacity (don't add pods). Sync match / poll success dropping =\n   pollers can't keep up with delivery.\n3. **Scaling Alignment** — did the fleet actually react? Running replica count by worker version, next to the\n   Saturation row above (same time range) — eyeball whether a scale-up event lines up with backlog/latency\n   coming back down.\n\n> **Unit trap:** these are **Core SDK (Python)** metrics. Core-based SDKs (TypeScript/Python/.NET) default to\n> **milliseconds**, Go/Java use **seconds** — but this repo's `appkit/telemetry.py` sets\n> `durations_as_seconds=True`, so every latency panel below is in **seconds** despite being a Python worker.\n> A 200ms p99 alert threshold is `0.2` here, not `200`. Don't \"fix\" the axis back to ms.\n>\n> Counters have **no `_total` suffix** in the Python SDK (e.g. `temporal_workflow_task_queue_poll_succeed`).\n>\n> **Cloud-only panels** (Sync Match Rate, Poll Success Rate by Task Type, Approximate Backlog Count) read\n> `temporal_cloud_v1_*` from the Temporal Cloud OpenMetrics scrape. They render \"No data\" on a self-hosted OSS\n> backend — that's expected, not broken. They can also show briefly blank on an idle queue since these are\n> delta metrics only emitted when there's poll/backlog activity in that scrape window.\n>\n> **Per-version backlog** (`DescribeWorkerDeploymentVersion`, what the custom worker-autoscaler acts on)\n> is now exported to Prometheus by the autoscaler itself. For the scaling decision it drives from that\n> backlog — desired vs current replicas, Cloud rate-safety, and the controller's internals — see the\n> **Platform Internals → Temporal Worker Autoscaler** dashboard. This board stays the worker-tuning /\n> fleet-reaction lens; that one is the autoscaler-decision lens.\n"
       }
     },
     {
@@ -250,7 +250,7 @@
     {
       "type": "timeseries",
       "title": "Slot Utilization by Task Queue",
-      "description": "temporal_slot_utilization recording rule (ADR-0021/0023) — slots used / (used + available). This is what KEDA's Prometheus-based signal would key off; the Temporal scaler used today reads backlog directly from Cloud instead (see KEDA Alignment row). High + rising alongside latency = a real capacity problem, not a config one.",
+      "description": "temporal_slot_utilization recording rule (ADR-0021/0023) — slots used / (used + available). This is the worker-tuning signal for right-sizing; the custom worker-autoscaler scales on task-queue backlog read from Cloud instead (see the Scaling Alignment row, and the Platform Internals → Temporal Worker Autoscaler dashboard). High + rising alongside latency = a real capacity problem, not a config one.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus-kind"
@@ -604,7 +604,7 @@
     },
     {
       "type": "row",
-      "title": "KEDA Alignment — did the fleet react",
+      "title": "Scaling Alignment — did the fleet react",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -618,7 +618,7 @@
     {
       "type": "timeseries",
       "title": "Worker Replicas Running by Version",
-      "description": "count(up{job=\"kubernetes-pods\"}) faceted by deployment/build_id — running worker replicas per version, the resulting action from KEDA's per-version backlog trigger (targetQueueSize, ADR-0023). Read next to the Saturation row above (same time range): did a scale-up follow rising backlog/latency, and did it bring latency back down? KEDA's own per-version backlog read isn't exported to Prometheus today — for live ScaledObject/HPA status use Headlamp's KEDA plugin.",
+      "description": "count(up{job=\"kubernetes-pods\"}) faceted by deployment/build_id — running worker replicas per version, the resulting action from the custom worker-autoscaler's per-version backlog scaling (targetBacklogPerReplica, ADR-0023). Read next to the Saturation row above (same time range): did a scale-up follow rising backlog/latency, and did it bring latency back down? For the autoscaler's own backlog signal and scaling-decision detail, see the Platform Internals → Temporal Worker Autoscaler dashboard.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus-kind"
@@ -1022,7 +1022,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Temporal Critical Flows — Worker Fleet & KEDA Scaling",
+  "title": "Temporal Critical Flows — Worker Fleet & Scaling",
   "uid": "temporal-worker-tuning",
   "version": 2,
   "weekStart": ""
