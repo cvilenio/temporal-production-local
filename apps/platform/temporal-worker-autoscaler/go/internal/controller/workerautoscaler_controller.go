@@ -145,13 +145,22 @@ func (r *WorkerAutoscalerReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		}
 		backlog, err := r.Temporal.VersionBacklog(ctx, depName, buildID, wa.Spec.TaskQueue, queueType)
 		if err != nil {
-			// Rate-limit is soft: the Cloud describe API bounds our freshness. Keep
-			// the current count and retry next cycle — log quietly, don't error-spam.
-			if errors.Is(err, temporalpkg.ErrRateLimited) {
+			// Two soft cases: both keep the current count, retry next cycle, and log
+			// quietly (no stacktrace, not flagged as a reconcile error) because they
+			// self-heal and are not caused by workflow demand:
+			//   - ErrRateLimited: the Cloud describe API bounds our freshness.
+			//   - ErrTransient: Cloud recycled a long-lived gRPC connection (EOF /
+			//     Unavailable); gRPC reconnects and the next tick succeeds.
+			switch {
+			case errors.Is(err, temporalpkg.ErrRateLimited):
 				metrics.CloudCalls.WithLabelValues("rate_limited").Inc()
 				l.V(1).Info("backlog read rate-limited; holding replicas",
 					"deployment", depName, "buildID", buildID)
-			} else {
+			case errors.Is(err, temporalpkg.ErrTransient):
+				metrics.CloudCalls.WithLabelValues("transient").Inc()
+				l.V(1).Info("backlog read hit a recycled connection; holding replicas",
+					"deployment", depName, "buildID", buildID)
+			default:
 				metrics.CloudCalls.WithLabelValues("error").Inc()
 				metrics.ReconcileErrors.WithLabelValues(wa.Spec.DeploymentName).Inc()
 				l.Error(err, "reading backlog", "deployment", depName, "buildID", buildID)
