@@ -148,6 +148,33 @@ looks identical to "stuck." Don't poll a quiet log and don't guess from elapsed 
 
 See `docs/RUNMODES.md` for the full run-mode matrix.
 
+# Chart + redeploy discipline — bump the version, publish before apply (MUST)
+
+ArgoCD pulls every chart from the local OCI registry (ADR-0011) and caches by
+`name:version`. This makes the version the delivery contract, and it bites in three ways
+an agent editing a chart will hit. All three were live-verified during the worker-autoscaler
+work.
+
+- **Bump the chart version on ANY template change.** Edit anything under a chart's
+  `templates/` (or `values.yaml`) → bump `Chart.yaml` `version`/`appVersion` **and** the
+  matching `*_chart_version` default in `deploy/terraform/layers/cluster/variables.tf`. If you
+  don't, ArgoCD serves the cached old chart: the Application shows **Synced/Healthy** while your
+  new resources silently never render — the most confusing failure mode in this repo. See
+  [`docs/adr/0011-local-oci-delivery.md`](docs/adr/0011-local-oci-delivery.md).
+- **Publish the chart as its own step BEFORE `terraform apply` — never chain them.** Running
+  `just chart-publish && terraform apply` in one shell means a denied/failed apply (e.g. the
+  auto-mode classifier gating a protected IaC change) blocks the *whole* command, so the publish
+  never runs either → ArgoCD then fails "OCI chart … `<version>` not found." Publish first,
+  confirm it landed, then apply.
+- **Redeploy surgically to avoid worker-version churn.** Don't run full `just platform-up` to
+  ship one component — it rebuilds the workers, producing a new image digest = a new Worker
+  Deployment version the Worker Controller must poll (extra shared Worker-Deployment-Read Cloud
+  load). Rebuild only the changed image and pass the *current* worker digests through to
+  `terraform apply` (`TF_VAR_worker_image_digests`), per `docs/RUNMODES.md`.
+- **Verify the RENDERED manifest, not just the code default.** A chart-injected env var wins over
+  an app's in-code default at runtime (a code default of 15s lost to a chart `POLL_INTERVAL=3s`).
+  After a deploy, check the live pod's env/args (`kubectl … -o yaml`), not the source default.
+
 # MCP servers for agents — ClickHouse, Prometheus, Kubernetes
 
 A project-scoped `.mcp.json` gives agents read-mostly MCP access to the three systems they
