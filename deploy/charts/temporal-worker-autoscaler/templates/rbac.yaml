@@ -1,0 +1,82 @@
+{{- if .Values.rbac.create }}
+---
+# Cluster-wide: read WorkerAutoscalers, read/patch the versioned Deployments (and
+# their scale subresource), and emit Events. Mirrors the controller-gen role
+# (apps/.../go/config/rbac/role.yaml) — keep in sync when the +kubebuilder:rbac
+# markers change.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Values.serviceAccount.name }}
+  labels:
+    app.kubernetes.io/name: temporal-worker-autoscaler
+rules:
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, patch, update, watch]
+  - apiGroups: [apps]
+    resources: [deployments/scale]
+    verbs: [get, patch, update]
+  - apiGroups: [autoscaling.ziggymart.io]
+    resources: [workerautoscalers]
+    verbs: [create, delete, get, list, patch, update, watch]
+  - apiGroups: [autoscaling.ziggymart.io]
+    resources: [workerautoscalers/finalizers]
+    verbs: [update]
+  - apiGroups: [autoscaling.ziggymart.io]
+    resources: [workerautoscalers/status]
+    verbs: [get, patch, update]
+  # Read the Worker Controller's WorkerDeployment CR to learn the current/ramping
+  # version — so we manage only ACTIVE versions and never fight the controller over
+  # a draining one (which would block its garbage collection).
+  - apiGroups: [temporal.io]
+    resources: [workerdeployments]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Values.serviceAccount.name }}
+  labels:
+    app.kubernetes.io/name: temporal-worker-autoscaler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Values.serviceAccount.name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccount.name }}
+    namespace: {{ .Release.Namespace }}
+---
+# Namespaced: leader-election Lease in the controller's own namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Values.serviceAccount.name }}-leaderelection
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: temporal-worker-autoscaler
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, list, watch, create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Values.serviceAccount.name }}-leaderelection
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: temporal-worker-autoscaler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Values.serviceAccount.name }}-leaderelection
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccount.name }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

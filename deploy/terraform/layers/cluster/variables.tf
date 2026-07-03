@@ -85,7 +85,25 @@ variable "registry_service" {
 variable "orders_workers_chart_version" {
   description = "Published version of the orders-workers OCI chart (matches Chart.yaml / just chart-publish)."
   type        = string
-  default     = "0.1.11"
+  default     = "0.1.12"
+}
+
+variable "autoscaler_chart_version" {
+  description = "Published version of the temporal-worker-autoscaler OCI chart (matches Chart.yaml / just chart-publish)."
+  type        = string
+  default     = "0.1.2"
+}
+
+variable "autoscaler_image_tag" {
+  description = "Tag for the temporal-worker-autoscaler image (fallback when a digest is not pinned; see autoscaler_image_digest)."
+  type        = string
+  default     = "latest"
+}
+
+variable "autoscaler_image_digest" {
+  description = "temporal-worker-autoscaler image digest (sha256:...) from `just ci`. When set, pins the controller by digest instead of tag."
+  type        = string
+  default     = ""
 }
 
 variable "worker_image_tag" {

@@ -34,6 +34,9 @@ locals {
   # orders-api image: same digest-or-tag pinning as the workers.
   orders_api_image = { repository = "localhost:5001/orders-api", tag = var.orders_api_image_tag, digest = var.orders_api_image_digest }
 
+  # temporal-worker-autoscaler controller image: same digest-or-tag pinning.
+  autoscaler_image = { repository = "localhost:5001/temporal-worker-autoscaler", tag = var.autoscaler_image_tag, digest = var.autoscaler_image_digest }
+
   # orders-workers: chart pulled from the local OCI registry; the account-bearing
   # connection values are injected here from cloud state (never committed to git).
   # sync-wave 0 keeps it after the wave -2/-1 add-ons.
@@ -59,10 +62,10 @@ locals {
               tls               = true
               apiKeySecret      = var.cloud_apikey_secret_name
             }
-            # Turn on per-version KEDA autoscaling (ADR-0023 Phase 1) — this is the
-            # kind+Cloud path that has KEDA + in-cluster Prometheus. Deep-merges over
-            # the chart's autoscaling defaults, so only `enabled` flips; the host/OSS
-            # `helm template` path keeps the chart default (enabled: false).
+            # Turn on per-worker autoscaling (ADR-0023): renders the WorkerAutoscaler
+            # CRs consumed by the temporal-worker-autoscaler controller. Only the
+            # kind+Cloud path enables it; the host/OSS `helm template` path keeps the
+            # chart default (enabled: false). Deep-merges, so only `enabled` flips.
             autoscaling = { enabled = true }
             workers = [
               {
@@ -208,9 +211,52 @@ locals {
     }
   }
 
+  # temporal-worker-autoscaler: the custom worker autoscaling controller (ADR-0023),
+  # a LOCAL chart published by `just chart-publish`. Account-bearing connection +
+  # controller image injected here from cloud state / `just ci`. Deployed to the
+  # orders namespace (co-located with the Cloud API-key Secret + the worker
+  # Deployments it patches). sync-wave 0, after the wave -2/-1 add-ons and alongside
+  # the workers it scales.
+  temporal_worker_autoscaler_application = {
+    apiVersion = "argoproj.io/v1alpha1"
+    kind       = "Application"
+    metadata = {
+      name        = "temporal-worker-autoscaler"
+      namespace   = var.argocd_namespace
+      annotations = { "argocd.argoproj.io/sync-wave" = "0" }
+    }
+    spec = {
+      project = "default"
+      source = {
+        repoURL        = var.oci_charts_repo
+        chart          = "temporal-worker-autoscaler"
+        targetRevision = var.autoscaler_chart_version
+        helm = {
+          valuesObject = {
+            connection = {
+              hostPort          = local.temporal_address
+              temporalNamespace = local.namespace_handle
+              tls               = true
+              apiKeySecret      = var.cloud_apikey_secret_name
+            }
+            image = local.autoscaler_image
+          }
+        }
+      }
+      destination = {
+        server    = "https://kubernetes.default.svc"
+        namespace = var.orders_namespace
+      }
+      syncPolicy = {
+        automated   = { prune = true, selfHeal = true }
+        syncOptions = ["CreateNamespace=true"]
+      }
+    }
+  }
+
   # Every Application TF seeds: the committed add-ons + the injected orders-workers,
-  # orders-data, orders-api, and the alloy log agent.
-  all_applications = { for app in concat(local.addon_applications, [local.orders_workers_application, local.orders_data_application, local.orders_api_application, local.alloy_application]) : app.metadata.name => app }
+  # orders-data, orders-api, the autoscaler controller, and the alloy log agent.
+  all_applications = { for app in concat(local.addon_applications, [local.orders_workers_application, local.orders_data_application, local.orders_api_application, local.temporal_worker_autoscaler_application, local.alloy_application]) : app.metadata.name => app }
 }
 
 # Seed the ArgoCD Applications after the release installs the Application CRD.
@@ -232,7 +278,7 @@ resource "kubectl_manifest" "applications" {
   lifecycle {
     precondition {
       condition = alltrue([
-        for img in concat(values(local.worker_image), [local.orders_api_image]) :
+        for img in concat(values(local.worker_image), [local.orders_api_image, local.autoscaler_image]) :
         img.digest != "" || (img.tag != "" && img.tag != "latest")
       ])
       error_message = "Unsafe image ref: each worker AND orders-api needs a pinned digest (preferred) or a non-'latest' tag that exists in the local registry. Empty digest + tag='latest' silently deploys :latest and breaks the pod. Use `just platform-up` (it builds + computes digests) rather than a bare `terraform apply`."

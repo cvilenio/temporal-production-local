@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-worker-autoscaler
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: temporal-worker-autoscaler
+    app.kubernetes.io/component: autoscaler
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: temporal-worker-autoscaler
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: temporal-worker-autoscaler
+        app.kubernetes.io/component: autoscaler
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: controller
+          # Prefer an immutable digest (content-addressed); fall back to a tag.
+          image: "{{ .Values.image.repository }}{{ if .Values.image.digest }}@{{ .Values.image.digest }}{{ else }}:{{ .Values.image.tag }}{{ end }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: []
+          env:
+            - name: TEMPORAL_HOSTPORT
+              value: {{ .Values.connection.hostPort | quote }}
+            - name: TEMPORAL_NAMESPACE
+              value: {{ .Values.connection.temporalNamespace | quote }}
+            - name: TEMPORAL_TLS
+              value: {{ .Values.connection.tls | quote }}
+            - name: TEMPORAL_API_KEY_FILE
+              value: /etc/temporal/api-key
+            - name: POLL_INTERVAL
+              value: {{ .Values.pollInterval | quote }}
+            - name: ENABLE_LEADER_ELECTION
+              value: {{ .Values.leaderElection | quote }}
+            - name: METRICS_ADDR
+              value: ":8080"
+            - name: HEALTH_PROBE_ADDR
+              value: ":8081"
+          ports:
+            - name: metrics
+              containerPort: 8080
+            - name: health
+              containerPort: 8081
+          livenessProbe:
+            httpGet: { path: /healthz, port: health }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: { path: /readyz, port: health }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - name: cloud-apikey
+              mountPath: /etc/temporal
+              readOnly: true
+      volumes:
+        - name: cloud-apikey
+          secret:
+            secretName: {{ .Values.connection.apiKeySecret | quote }}
+            items:
+              - key: {{ .Values.connection.apiKeySecretKey | quote }}
+                path: api-key

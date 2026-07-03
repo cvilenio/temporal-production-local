@@ -1,0 +1,48 @@
+# Connection to the Temporal frontend (shared central poller). Account-bearing
+# values (hostPort = regional endpoint, temporalNamespace = <ns>.<account>) are
+# injected at deploy time by the cluster TF layer from cloud state — NOT committed
+# here. Placeholders keep `helm template` runnable. Mirrors orders-workers.
+connection:
+  # API keys REQUIRE the regional endpoint, e.g. us-east-1.aws.api.temporal.io:7233.
+  hostPort: "regional-endpoint.example:7233"
+  temporalNamespace: "ziggymart.<account-id>"
+  tls: true
+  # The k8s Secret holding the Cloud API key (Metrics/worker read scope is enough:
+  # the controller only calls DescribeWorkerDeploymentVersion). Reuses the same
+  # Secret the orders workers use.
+  apiKeySecret: orders-cloud-apikey
+  apiKeySecretKey: api-key
+
+image:
+  repository: localhost:5001/temporal-worker-autoscaler
+  tag: "latest" # cluster layer overrides with the git-SHA tag from `just ci`
+  digest: "" # preferred when set (immutable); cluster layer injects from `just ci`
+  pullPolicy: IfNotPresent
+
+# Central poll cadence and backlog-freshness floor. 15s: the Cloud
+# Worker-Deployment-Read API is aggressively rate-limited AND shared with the
+# temporal-worker-controller (whose own reconciliation consumption scales with the
+# live-version count), so 3s tripped ResourceExhausted. One caller, rate-limited +
+# jittered in-process. Actuation stays instant (direct patch) once the signal lands.
+pollInterval: 15s
+
+# Leader election so exactly one replica polls Cloud + patches. Run >1 replica for
+# HA (standby); only the leader is active.
+replicaCount: 1
+leaderElection: true
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    memory: 128Mi
+
+# RBAC scope. cluster: a ClusterRole (watch/patch Deployments + WorkerAutoscalers
+# in any namespace) — future multi-namespace. The leader-election Lease + Events
+# are always namespaced to the release namespace.
+rbac:
+  create: true
+serviceAccount:
+  create: true
+  name: temporal-worker-autoscaler

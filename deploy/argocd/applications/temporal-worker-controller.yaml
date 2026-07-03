@@ -9,11 +9,10 @@
 # before the orders workload (wave 0).
 #
 # workerResourceTemplate.allowedResources gates which kinds a WorkerResourceTemplate
-# may embed AND drives the controller's ClusterRole RBAC for them. We add KEDA's
-# ScaledObject (keda.sh) alongside the default HPA so the orders-workers chart can
-# attach a per-version KEDA ScaledObject through the WRT seam (ADR-0023 Phase 1).
-# The WRT validating webhook additionally runs a SubjectAccessReview on the applying
-# identity (the ArgoCD app-controller SA, cluster-admin here) and the controller SA.
+# may embed AND drives the controller's ClusterRole RBAC for them. We keep only the
+# chart default (HPA); the KEDA ScaledObject entry was removed when per-version KEDA
+# autoscaling was replaced by the custom temporal-worker-autoscaler controller
+# (ADR-0023) — the orders-workers chart no longer renders a WorkerResourceTemplate.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -35,12 +34,9 @@ spec:
           enabled: true # but DO create the webhook Issuer + Certificate
         workerResourceTemplate:
           allowedResources:
-            - kinds: ["HorizontalPodAutoscaler"] # chart default — keep it
+            - kinds: ["HorizontalPodAutoscaler"] # chart default (WRT seam unused now)
               apiGroups: ["autoscaling"]
               resources: ["horizontalpodautoscalers"]
-            - kinds: ["ScaledObject"] # KEDA — the autoscaler we actually attach
-              apiGroups: ["keda.sh"]
-              resources: ["scaledobjects"]
   destination:
     server: https://kubernetes.default.svc
     namespace: temporal-system

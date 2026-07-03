@@ -1,0 +1,38 @@
+# Per-worker autoscaling via the custom temporal-worker-autoscaler controller
+# (ADR-0023). One WorkerAutoscaler CR per worker; the controller discovers each
+# worker's per-version Deployments (temporal.io/deployment-name label), reads
+# fresh per-version backlog from Temporal Cloud, and patches replicas directly for
+# seconds-level actuation. Replaces the former WorkerResourceTemplate → KEDA
+# ScaledObject seam (which bottomed out on the HPA sync loop and tripped the Cloud
+# per-API rate limit via per-version poll fan-out).
+#
+# Gated by .Values.autoscaling.enabled so the host/OSS `helm template` path (no
+# controller) renders nothing; the kind+Cloud path enables it (see applications.tf).
+{{- if .Values.autoscaling.enabled }}
+{{- $a := .Values.autoscaling }}
+{{- range .Values.workers }}
+{{- $wa := index $a.workers .name }}
+{{- if $wa }}
+---
+apiVersion: autoscaling.ziggymart.io/v1alpha1
+kind: WorkerAutoscaler
+metadata:
+  name: {{ .deploymentName }}
+  labels:
+    app.kubernetes.io/name: {{ .deploymentName }}
+    app.kubernetes.io/component: autoscaler
+spec:
+  # Matches the temporal.io/deployment-name label on the versioned Deployments.
+  deploymentName: {{ .deploymentName | quote }}
+  taskQueue: {{ $wa.taskQueue | quote }}
+  queueType: {{ $wa.queueType | default "workflow" | quote }}
+  minReplicas: {{ $wa.minReplicas }}
+  maxReplicas: {{ $wa.maxReplicas }}
+  targetBacklogPerReplica: {{ $wa.targetBacklogPerReplica | int }}
+  {{- with $wa.behavior }}
+  behavior:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

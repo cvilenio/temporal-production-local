@@ -1,0 +1,309 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: workerautoscalers.autoscaling.ziggymart.io
+spec:
+  group: autoscaling.ziggymart.io
+  names:
+    categories:
+    - autoscaling
+    kind: WorkerAutoscaler
+    listKind: WorkerAutoscalerList
+    plural: workerautoscalers
+    shortNames:
+    - wasc
+    - wa
+    singular: workerautoscaler
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.deploymentName
+      name: Deployment
+      type: string
+    - jsonPath: .spec.taskQueue
+      name: Queue
+      type: string
+    - jsonPath: .spec.minReplicas
+      name: Min
+      type: integer
+    - jsonPath: .spec.maxReplicas
+      name: Max
+      type: integer
+    - jsonPath: .status.currentReplicas
+      name: Current
+      type: integer
+    - jsonPath: .status.desiredReplicas
+      name: Desired
+      type: integer
+    - jsonPath: .status.lastReason
+      name: Reason
+      priority: 1
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          WorkerAutoscaler scales a Temporal worker's per-version Deployments directly
+          from live task-queue backlog, for seconds-level actuation (ADR-0023).
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              WorkerAutoscalerSpec declares how one Temporal worker (a WorkerDeployment and
+              all of its build-id versions) is scaled from live task-queue backlog.
+
+              The controller discovers the concrete, per-version Deployments to patch by the
+              labels the Temporal Worker Controller stamps on them
+              (temporal.io/deployment-name = .spec.deploymentName), and scales EACH version
+              on its OWN backlog so drainers sit at min while the current version scales.
+            properties:
+              behavior:
+                description: |-
+                  Behavior tunes reaction speed and flap damping. Optional; defaults model an
+                  "overscale-briefly beats flap" posture (fast up, damped down).
+                properties:
+                  maxScaleDownStep:
+                    default: 1
+                    description: |-
+                      MaxScaleDownStep caps replicas removed per decision (0 = unlimited).
+                      Default 1 (bleed down gradually).
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  maxScaleUpStep:
+                    default: 0
+                    description: MaxScaleUpStep caps replicas added per decision (0
+                      = unlimited). Default 0.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  panicThresholdPercent:
+                    default: 200
+                    description: |-
+                      PanicThresholdPercent triggers Knative-style panic scaling: if backlog
+                      demands >= this percent of current capacity, bypass up-stabilization and
+                      scale up hard. Default 200 (2x). 0 disables panic mode.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  scaleDownStabilizationSeconds:
+                    default: 120
+                    description: |-
+                      ScaleDownStabilizationSeconds holds the MAX recommendation over this window
+                      before scaling down — the primary anti-flap lever. Default 120.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  scaleUpStabilizationSeconds:
+                    default: 0
+                    description: |-
+                      ScaleUpStabilizationSeconds smooths scale-up recommendations. Default 0
+                      (react immediately up).
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  tolerancePercent:
+                    default: 10
+                    description: |-
+                      TolerancePercent is the deadband: no action while |ratio-1| <= tolerance.
+                      Default 10 (matches HPA's 0.1).
+                    format: int32
+                    maximum: 100
+                    minimum: 0
+                    type: integer
+                type: object
+              deploymentName:
+                description: |-
+                  DeploymentName is the WorkerDeployment name (matches the
+                  temporal.io/deployment-name label on the versioned Deployments to scale),
+                  e.g. "orders-workflow".
+                minLength: 1
+                type: string
+              maxReplicas:
+                description: MaxReplicas is the ceiling per version.
+                format: int32
+                minimum: 1
+                type: integer
+              minReplicas:
+                default: 1
+                description: |-
+                  MinReplicas is the floor per version. 0 enables scale-to-zero (the Temporal
+                  task queue is the durable buffer during a cold start).
+                format: int32
+                minimum: 0
+                type: integer
+              queueType:
+                default: workflow
+                description: QueueType selects which backlog to read for this worker.
+                enum:
+                - workflow
+                - activity
+                - nexus
+                type: string
+              targetBacklogPerReplica:
+                default: 5
+                description: |-
+                  TargetBacklogPerReplica is the desired backlog tasks per replica; desired
+                  replicas = ceil(backlog / target) subject to the deadband + bounds.
+                format: int32
+                minimum: 1
+                type: integer
+              taskQueue:
+                description: |-
+                  TaskQueue is the Temporal task queue whose backlog drives scaling,
+                  e.g. "orders-workflow-task-queue".
+                minLength: 1
+                type: string
+              workerDeploymentName:
+                description: |-
+                  WorkerDeploymentName is the Temporal-side Worker Deployment name used in the
+                  DescribeWorkerDeploymentVersion API, e.g. "orders/orders-workflow". If empty,
+                  it defaults to "<this CR's namespace>/<deploymentName>" (the Worker
+                  Controller's convention).
+                type: string
+            required:
+            - deploymentName
+            - maxReplicas
+            - taskQueue
+            type: object
+          status:
+            description: |-
+              WorkerAutoscalerStatus makes every scaling decision inspectable via
+              `kubectl describe` — the cure for "replicas change but there's no HPA".
+            properties:
+              conditions:
+                description: |-
+                  Conditions: Ready (signal source reachable), Active (currently scaling),
+                  Paused.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              currentReplicas:
+                description: CurrentReplicas summed across live versions.
+                format: int32
+                type: integer
+              desiredReplicas:
+                description: DesiredReplicas summed across live versions (for the
+                  printer column).
+                format: int32
+                type: integer
+              lastReason:
+                description: LastReason is a human-readable explanation of the last
+                  decision.
+                type: string
+              lastScaleTime:
+                description: LastScaleTime is when the controller last changed a replica
+                  count.
+                format: date-time
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the .metadata.generation last reconciled.
+                format: int64
+                type: integer
+              versions:
+                description: Versions is the per-build-id breakdown of the last decision.
+                items:
+                  description: VersionStatus reports the last decision for one build-id
+                    version.
+                  properties:
+                    backlog:
+                      format: int64
+                      type: integer
+                    buildId:
+                      type: string
+                    currentReplicas:
+                      format: int32
+                      type: integer
+                    desiredReplicas:
+                      format: int32
+                      type: integer
+                  required:
+                  - backlog
+                  - buildId
+                  - currentReplicas
+                  - desiredReplicas
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - buildId
+                x-kubernetes-list-type: map
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
