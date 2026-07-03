@@ -31,7 +31,6 @@ DEPS_ENV="config/.generated/deps.env"
 CERT_MANAGER_REPO="${CERT_MANAGER_REPO:-https://charts.jetstack.io}"
 CNPG_REPO="${CNPG_REPO:-https://cloudnative-pg.io/charts}"
 PROMETHEUS_REPO="${PROMETHEUS_REPO:-https://prometheus-community.github.io/helm-charts}"
-KEDA_REPO="${KEDA_REPO:-https://kedacore.github.io/charts}"
 
 command -v helm >/dev/null 2>&1 || { echo "✖ missing required tool: helm" >&2; exit 1; }
 
@@ -47,9 +46,6 @@ helm pull cloudnative-pg --repo "${CNPG_REPO}" --version "${CNPG_VERSION}" -d "$
 # prometheus: classic Helm repo (same → explicit copy). In-cluster scrape + short-
 # retention TSDB + remote_write egress to the host store (ADR-0021 metrics phase).
 helm pull prometheus --repo "${PROMETHEUS_REPO}" --version "${PROMETHEUS_VERSION}" -d "$tmp" >/dev/null
-# keda: classic Helm repo (same → explicit copy). The single autoscaling control
-# plane (ADR-0023); the chart bundles the ScaledObject/TriggerAuthentication CRDs.
-helm pull keda --repo "${KEDA_REPO}" --version "${KEDA_VERSION}" -d "$tmp" >/dev/null
 # Temporal Worker Controller: upstream OCI charts (CRDs split from the controller).
 helm pull oci://docker.io/temporalio/temporal-worker-controller-crds --version "${WORKER_CONTROLLER_VERSION}" -d "$tmp" >/dev/null
 helm pull oci://docker.io/temporalio/temporal-worker-controller --version "${WORKER_CONTROLLER_VERSION}" -d "$tmp" >/dev/null

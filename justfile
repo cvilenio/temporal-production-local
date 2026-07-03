@@ -144,7 +144,10 @@ build-images:
       --build-arg APP_MODULE=main:app \
       --build-arg APP_CMD=uvicorn \
       -t "$REGISTRY/orders-api:$TAG" .
-    echo "Built $REGISTRY/orders-worker-{workflow,activity}:$TAG and $REGISTRY/orders-api:$TAG"
+    docker build -f images/go.Dockerfile \
+      --build-arg APP_PATH=apps/platform/temporal-worker-autoscaler/go \
+      -t "$REGISTRY/temporal-worker-autoscaler:$TAG" .
+    echo "Built $REGISTRY/orders-worker-{workflow,activity}:$TAG, orders-api:$TAG, temporal-worker-autoscaler:$TAG"
 
 # Push the worker images + orders-api to the local registry.
 push-images:
@@ -156,7 +159,8 @@ push-images:
       docker push "$REGISTRY/orders-worker-$profile:$TAG"
     done
     docker push "$REGISTRY/orders-api:$TAG"
-    echo "Pushed $REGISTRY/orders-worker-{workflow,activity}:$TAG and $REGISTRY/orders-api:$TAG"
+    docker push "$REGISTRY/temporal-worker-autoscaler:$TAG"
+    echo "Pushed $REGISTRY/orders-worker-{workflow,activity}:$TAG, orders-api:$TAG, temporal-worker-autoscaler:$TAG"
 
 # Print the image tag (git-describe) for the current tree.
 image-tag:
@@ -172,6 +176,7 @@ image-digests:
       echo "$profile=$(crane digest "$REGISTRY/orders-worker-$profile:$TAG" --insecure)"
     done
     echo "orders-api=$(crane digest "$REGISTRY/orders-api:$TAG" --insecure)"
+    echo "temporal-worker-autoscaler=$(crane digest "$REGISTRY/temporal-worker-autoscaler:$TAG" --insecure)"
 
 # --- Local cluster (kind + local registry) -----------------------------------
 
@@ -246,12 +251,13 @@ mirror-deps: render-deps
     REGISTRY_PORT={{registry_port}} bash deploy/kind/mirror-deps.sh
 
 # Package the local charts (orders-workers + orders-data + orders-api + the alloy
-# log agent) and push them to the local OCI registry (ArgoCD pulls them from there).
+# log agent + the temporal-worker-autoscaler controller) and push them to the local
+# OCI registry (ArgoCD pulls them from there).
 chart-publish:
     #!/usr/bin/env bash
     set -euo pipefail
     tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-    for chart in orders-workers orders-data orders-api alloy; do
+    for chart in orders-workers orders-data orders-api alloy temporal-worker-autoscaler; do
       helm package "deploy/charts/$chart" -d "$tmp" >/dev/null
       helm push "$tmp/$chart"-*.tgz oci://localhost:{{registry_port}}/charts --plain-http
       ver="$(helm show chart "deploy/charts/$chart" | awk '/^version:/{print $2}')"
@@ -279,8 +285,8 @@ orders-db-reset:
 
 # Fetch the pinned, sha256-verified Headlamp UI plugins (config/dependencies.yaml
 # `headlamp.plugins`) into the bind-mounted compose/deployment/headlamp/plugins/.
-# Idempotent + offline once fetched — `up-cloud-kind` runs it first so the KEDA
-# explorer is present on boot. Bump a version/sha in the manifest to re-fetch.
+# Idempotent + offline once fetched. Currently no plugins are pinned (the KEDA
+# explorer was removed with KEDA; ADR-0023). Add a version/sha to re-enable fetch.
 headlamp-plugins:
     @uv run python compose/scripts/fetch-headlamp-plugins.py
 
@@ -321,8 +327,10 @@ platform-up:
     wf="$(crane digest localhost:{{registry_port}}/orders-worker-workflow:$tag --insecure)"
     ac="$(crane digest localhost:{{registry_port}}/orders-worker-activity:$tag --insecure)"
     api="$(crane digest localhost:{{registry_port}}/orders-api:$tag --insecure)"
+    aut="$(crane digest localhost:{{registry_port}}/temporal-worker-autoscaler:$tag --insecure)"
     export TF_VAR_worker_image_digests="{\"workflow\":\"$wf\",\"activity\":\"$ac\"}"
     export TF_VAR_orders_api_image_digest="$api"
+    export TF_VAR_autoscaler_image_digest="$aut"
     terraform -chdir=deploy/terraform/layers/cluster init -input=false
     terraform -chdir=deploy/terraform/layers/cluster apply -auto-approve
     just headlamp-reload 2>/dev/null || true

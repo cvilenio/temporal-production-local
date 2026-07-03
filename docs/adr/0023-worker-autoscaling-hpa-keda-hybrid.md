@@ -1,9 +1,12 @@
 # ADR-0023: Worker autoscaling — KEDA as single control plane, scaler per workload shape
 
-- **Status:** **Accepted — Phase 1 landed** (steady orders workers, KEDA Prometheus scaler,
-  `minReplicaCount: 1`). The bursty / scale-to-zero (Temporal scaler) archetype remains proposed
-  future work. See "Phase 1 implementation notes" below for what changed against the original design.
-- **Date:** 2026-06-29 (Phase 1 landed 2026-06-30)
+- **Status:** **Superseded (2026-07-02) by a custom direct-patch controller** — see
+  "## Update (2026-07-02): superseded by temporal-worker-autoscaler" at the end. Phase 1 (per-version
+  KEDA **Temporal scaler**) shipped and worked, but bottomed out on the HPA sync loop (too slow for a
+  seconds-level posture) and tripped the Cloud per-API rate limit via per-version poll fan-out
+  (steady non-zero `resource_exhausted_error_count`). The context/analysis below remains accurate and
+  is why the custom controller exists; the KEDA seam has been retired.
+- **Date:** 2026-06-29 (Phase 1 landed 2026-06-30; superseded 2026-07-02)
 - **Related:** Builds on ADR-0004 (Worker Versioning via the Temporal Worker Controller) — the
   controller owns the per-version `Deployment` an autoscaler attaches to. Depends on the metrics
   enablement phase (worker SDK `/metrics` scrape + Cloud OpenMetrics endpoint) landing first; see
@@ -211,3 +214,61 @@ PR #324, the KEDA Temporal scaler docs, and the live cluster):
    supports `minReplicaCount: 0`, but its docs warn backlog activation "fails to account for in-flight
    tasks" (kedacore/keda#7368 — can zero a worker mid-activity). The safe-to-zero guard wants a
    per-version slot/poller signal (the deferred item in #5), so scale-to-zero waits for that phase.
+
+---
+
+## Update (2026-07-02): superseded by temporal-worker-autoscaler
+
+**What changed.** The per-version KEDA **Temporal scaler** (Phase 1) is retired and replaced by a
+small custom controller, `apps/platform/temporal-worker-autoscaler` (first Go deployable). The
+`WorkerResourceTemplate → ScaledObject` seam and the `keda.sh/ScaledObject` entry in the
+worker-controller `allowedResources` are removed; `orders-workers` now renders `WorkerAutoscaler`
+CRs consumed by the controller.
+
+**Why the KEDA/HPA path was insufficient here.** The driving requirement is a **production-like,
+seconds-level scaling posture**. Both supported paths (Temporal's own
+[`scaling-recommendations`](https://github.com/temporalio/temporal-worker-controller/blob/main/docs/scaling-recommendations.md),
+PR #324, merged 2026-06-24) bottom out on the **cluster-wide HPA sync loop (~15s, not per-app
+tunable, locked on managed clusters)** for 1→N — KEDA's external/temporal scalers feed that same HPA.
+And they trade off: HPA+prometheus-adapter is rate-safe but ~3-min stale (Cloud OpenMetrics); the
+KEDA Temporal scaler is fresh but rate-limited (`FrontendGlobalWorkerDeploymentReadRPS = 50`) — the
+per-version poll fan-out is what lit the Resource Exhausted panel. **Neither is both fast and
+low-API-load.** Consumer autoscaling is harder than request-serving autoscaling because the load
+signal lives in the broker, not a request path; Knative KPA is fast only on the HTTP path and its
+activator/buffering is redundant here (the Temporal task queue is already the durable buffer for
+scale-to-zero). A community scan found no off-the-shelf fit (Custom Pod Autoscaler is the closest
+own-loop/direct-patch pattern but is dormant).
+
+**The decision.** A leader-elected singleton controller that (1) polls Temporal Cloud centrally for
+fresh per-`(taskQueue, buildId)` backlog via `DescribeWorkerDeploymentVersion(ReportTaskQueueStats)`
+— one caller, rate-limited + jittered, so O(task queues) and flat (ResourceExhausted → 0); (2)
+computes desired replicas with a **mirrored Kubernetes HPA algorithm** (ratio + 10% tolerance
+deadband + max-over-window downscale stabilization + step clamp) plus **Knative's stable/panic**
+burst idea; (3) **patches the versioned Deployment `.spec.replicas` directly** for seconds-level
+actuation (incl. scale-to-zero). Going custom **collapses** the Phase-1 fan-out problem: a single
+controller is inherently the one central poller, so the aggregator/cache machinery a KEDA fan-out
+would need disappears.
+
+**Reuse vs build.** Reuse `controller-runtime` (scaffolding, Events, `/metrics`, leader election),
+the Temporal Go SDK, and the *ideas* of the HPA algorithm + Knative stable/panic. Build ~60 lines of
+decision math (do **not** import `k8s.io/kubernetes` — un-vendorable) with a swappable
+`ScalingAlgorithm` interface (AIBrix shape). No PID (overkill; `go.einride.tech/pid` is the escape
+hatch).
+
+**Divergence, made defensible.** We diverge from HPA/KEDA in exactly **one** place — the actuation
+loop (direct `scale` patch) — to remove the ~15s HPA-sync latency; everything else reuses proven
+algorithms. It stays observable (Events on the Deployment + Prometheus + a rich `WorkerAutoscaler`
+`.status`) and discoverable (Deployment annotations `autoscaler.ziggymart.io/*`, labels; **no
+ownerReference on the Deployment** — GitOps/the Worker Controller own it), so scaling is never
+"magic". CRD-driven + signal-source-agnostic (Temporal today; Kafka/SQS later).
+
+**Kept vs retired.** Kept: the Temporal Worker Controller, Worker Versioning, the versioned
+Deployments, `Connection`, the Cloud API-key Secret. Retired: the WRT→KEDA ScaledObject seam. KEDA
+itself remains installed for now (harmless; removal is a follow-up).
+
+**Customer-facing rule (the reusable lesson).** Reaction SLO looser than ~3–4 min → the supported
+HPA+prometheus-adapter path on local `temporal_slot_utilization` (fast, per-version, zero Cloud
+load) + stale Cloud backlog; **no divergence needed**. Tighter/seconds-level or scale-to-zero → a
+custom direct-patch controller. Worker-sourced signals (slot utilization, schedule-to-start) are
+local → poll as fast as you like; **backlog is server-side** → only fresh via live gRPC, rate-safe
+only when centralized in one poller.

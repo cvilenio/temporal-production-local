@@ -51,7 +51,11 @@ def fetch_one(name: str, spec: dict) -> bool:
     dest = PLUGINS_DIR / name
     stamp = dest / STAMP
 
-    if stamp.exists() and stamp.read_text().strip() == version and (dest / "main.js").exists():
+    if (
+        stamp.exists()
+        and stamp.read_text().strip() == version
+        and (dest / "main.js").exists()
+    ):
         print(f"  [skip ] {name} {version} already present")
         return False
 
@@ -72,7 +76,9 @@ def fetch_one(name: str, spec: dict) -> bool:
         with tarfile.open(tgz) as tf:
             tf.extractall(PLUGINS_DIR, filter="data")  # filter blocks path traversal
     stamp.write_text(version + "\n")
-    print(f"  [ok   ] {name} {version} verified + extracted to {dest.relative_to(REPO_ROOT)}")
+    print(
+        f"  [ok   ] {name} {version} verified + extracted to {dest.relative_to(REPO_ROOT)}"
+    )
     return True
 
 
@@ -86,7 +92,9 @@ def _rmtree(path: Path) -> None:
 
 
 def main() -> None:
-    plugins = (yaml.safe_load(MANIFEST.read_text()).get("headlamp") or {}).get("plugins") or {}
+    plugins = (yaml.safe_load(MANIFEST.read_text()).get("headlamp") or {}).get(
+        "plugins"
+    ) or {}
     if not plugins:
         print("No headlamp.plugins pinned in config/dependencies.yaml — nothing to do.")
         return

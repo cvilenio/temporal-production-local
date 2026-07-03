@@ -105,23 +105,16 @@ charts:
   prometheus:
     # In-cluster Prometheus (ADR-0021 metrics phase): scrapes SDK :9000 (pod-
     # annotation discovery) + the Temporal Cloud OpenMetrics endpoint, evaluates
-    # the slot_utilization recording rule KEDA queries (ADR-0023), and remote_writes
-    # to the host metrics store (the "persist outside the cluster" tier, mirroring
-    # the Alloy->ClickHouse log path). Short local retention only. Classic Helm repo
-    # -> explicit mirror push. chart 29.13.0 ships Prometheus appVersion v3.12.0.
+    # the slot_utilization recording rule (worker-saturation signal for dashboards/
+    # alerting; ADR-0023), and remote_writes to the host metrics store (the "persist
+    # outside the cluster" tier, mirroring the Alloy->ClickHouse log path). Short
+    # local retention only. Classic Helm repo -> explicit mirror push. chart 29.13.0
+    # ships Prometheus appVersion v3.12.0.
     version: "29.13.0"
     repo: https://prometheus-community.github.io/helm-charts
-  keda:
-    # KEDA — the single external-metrics / autoscaling control plane (ADR-0023
-    # Phase 1). Generates a managed HPA per ScaledObject and serves the external
-    # metrics; the worker-controller's WorkerResourceTemplate renders one
-    # ScaledObject per running worker version (slot_utilization + Cloud backlog,
-    # both from in-cluster Prometheus). NOT prometheus-adapter — the two cannot both
-    # own the external.metrics.k8s.io APIService. chart 2.20.1 == appVersion 2.20.1
-    # (bundles the ScaledObject/TriggerAuthentication CRDs). Classic Helm repo ->
-    # explicit mirror push.
-    version: "2.20.1"
-    repo: https://kedacore.github.io/charts
+  # KEDA was removed (2026-07-02): per-version worker autoscaling moved from the
+  # KEDA Temporal scaler to the custom temporal-worker-autoscaler controller
+  # (ADR-0023 "Update 2026-07-02"). No external-metrics/ScaledObject stack needed.
 
 images:
   # TLS proxy that fronts the HTTP registry for ArgoCD (registry-proxy.tf).
@@ -140,15 +133,10 @@ images:
 # mounts at /headlamp/plugins. No second pin to drift, so versions-audit needs
 # no row here. To bump: change version + sha256 here, run `just headlamp-plugins`.
 headlamp:
-  plugins:
-    # KEDA plugin — UI for the ScaledObjects/TriggerAuthentications the worker-
-    # controller renders per worker version (ADR-0023). Surfaces them in the same
-    # Headlamp window the operator already watches the kind cluster through.
-    keda:
-      version: "0.1.2"
-      sha256: "979996aa0d0efdbc852baf6977e178c955264e346fea2c82df94b2d58ef57501"
-      # {repo}/releases/download/{name}-{version}/headlamp-k8s-{name}-{version}.tar.gz
-      url: "https://github.com/headlamp-k8s/plugins/releases/download/keda-0.1.2/headlamp-k8s-keda-0.1.2.tar.gz"
+  # KEDA Headlamp plugin removed with KEDA (2026-07-02). The custom
+  # temporal-worker-autoscaler exposes its state via the WorkerAutoscaler CRD
+  # (kubectl/Headlamp show it natively) + Events + Prometheus, so no UI plugin.
+  plugins: {}
 
 # grafana/otel-lgtm runs `bin/grafana server` directly (run-grafana.sh) — it does NOT
 # run the classic grafana-cli entrypoint that the official grafana/grafana image uses

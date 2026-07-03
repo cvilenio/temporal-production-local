@@ -1,0 +1,21 @@
+apiVersion: v2
+name: temporal-worker-autoscaler
+description: >-
+  Seconds-level, direct-patch autoscaler for Temporal worker Deployments. A
+  leader-elected controller that reads fresh per-version task-queue backlog from
+  Temporal Cloud (one central rate-safe caller) and patches versioned Deployment
+  replica counts directly — bypassing the HPA sync loop that caps HPA/KEDA
+  reaction time. Replaces the KEDA Temporal-scaler seam (ADR-0023). Ships the
+  WorkerAutoscaler CRD; the per-worker WorkerAutoscaler CRs live in the
+  orders-workers chart.
+type: application
+# 0.1.0: initial custom controller (supersedes per-version KEDA ScaledObject
+# autoscaling). Keep in lockstep with cluster TF autoscaler_chart_version.
+# 0.1.1: pollInterval 3s -> 15s (shared Cloud rate limit); adds
+# temporal.io/workerdeployments read RBAC.
+# 0.1.2: skip only FULLY-DRAINED versions (status=Drained / eligibleForDeletion) so
+# the worker-controller can GC them without a replica fight — Current, Ramping, and
+# still-Draining versions all keep autoscaling (proportional scaling across versions
+# running side by side, e.g. canary / gradual migration).
+version: 0.1.2
+appVersion: "0.1.2"
