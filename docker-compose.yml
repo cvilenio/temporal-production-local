@@ -430,6 +430,7 @@ services:
     ports:
       - "8087:8087"   # Headlamp
       - "8088:8088"   # ArgoCD UI
+      - "8089:8089"   # Temporal Web UI (OSS backend; dark on Cloud) — TEMPORAL_UI_EMBED_URL
     volumes:
       - ./compose/deployment/nginx/viz-proxy.conf:/etc/nginx/nginx.conf:ro
     extra_hosts:

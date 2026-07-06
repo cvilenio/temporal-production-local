@@ -12,6 +12,10 @@ connection:
   # Secret the orders workers use.
   apiKeySecret: orders-cloud-apikey
   apiKeySecretKey: api-key
+  # OSS backend (alternative to apiKeySecret): a cert-manager kubernetes.io/tls
+  # Secret (tls.crt/tls.key/ca.crt). Set by the cluster layer on the OSS path; the
+  # controller then does mTLS instead of API-key auth. Exactly one is non-empty.
+  mtlsSecret: ""
 
 image:
   repository: localhost:5001/temporal-worker-autoscaler

@@ -115,6 +115,13 @@ fresh: down up
 up-cloud-kind: headlamp-plugins grafana-plugins
     set -a; . .secrets/keys/cloud.env; set +a; docker compose -f docker-compose.yml up --build
 
+# Host visibility + console + mock-api for the kind + self-hosted OSS path
+# (ADR-0003). Same host stack as up-cloud-kind, but sourcing the OSS connection
+# profile (CONSOLE_BACKEND=oss, empty Cloud vars). Bring this up FIRST before any
+# live kind testing, then `just platform-up oss`.
+up-oss-kind: headlamp-plugins grafana-plugins
+    set -a; . config/local-oss-kind.env; set +a; docker compose -f docker-compose.yml up --build
+
 # Stop the Cloud-backed host stack and drop volumes.
 down-cloud:
     docker compose -f docker-compose.yml -f compose/host-apptier.yml down -v --remove-orphans; docker compose -p "${PWD##*/}" -f docker-compose.yml -f compose/host-apptier.yml down -v --remove-orphans || true; docker network rm temporal-network 2>/dev/null || true
@@ -253,11 +260,18 @@ mirror-deps: render-deps
 # Package the local charts (orders-workers + orders-data + orders-api + the alloy
 # log agent + the temporal-worker-autoscaler controller) and push them to the local
 # OCI registry (ArgoCD pulls them from there).
-chart-publish:
+chart-publish: render-oss-bootstrap
     #!/usr/bin/env bash
     set -euo pipefail
     tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-    for chart in orders-workers orders-data orders-api alloy temporal-worker-autoscaler; do
+    # temporal-server is a wrapper over the official Temporal chart: vendor the
+    # subchart from its classic repo (host has network; ArgoCD then pulls the
+    # self-contained wrapper offline — ADR-0013), and embed the namespace/search-
+    # attribute bootstrap spec rendered from config/temporal/namespaces.yaml (ADR-0007).
+    mkdir -p deploy/charts/temporal-server/files
+    cp config/temporal/.generated/oss-bootstrap.env deploy/charts/temporal-server/files/oss-bootstrap.env
+    helm dependency build deploy/charts/temporal-server >/dev/null
+    for chart in orders-workers orders-data orders-api alloy temporal-worker-autoscaler temporal-server; do
       helm package "deploy/charts/$chart" -d "$tmp" >/dev/null
       helm push "$tmp/$chart"-*.tgz oci://localhost:{{registry_port}}/charts --plain-http
       ver="$(helm show chart "deploy/charts/$chart" | awk '/^version:/{print $2}')"
@@ -282,6 +296,127 @@ orders-db-reset:
     KUBECONFIG={{kubeconfig}} kubectl -n orders delete cluster.postgresql.cnpg.io orders-db --ignore-not-found
     KUBECONFIG={{kubeconfig}} kubectl -n orders delete pvc -l cnpg.io/cluster=orders-db --ignore-not-found
     echo "Deleted. ArgoCD will re-sync orders-app; CNPG bootstraps a fresh orders-db."
+
+# =============================================================================
+# Temporal backend switchover + OSS-server lifecycle (ADR-0003 / -0005).
+#
+# The switch is a DELIBERATE HARD SWITCH — no shadowing / Cloud↔OSS replication.
+# The two directions are asymmetric: Cloud→OSS orphans Cloud workflows (Cloud
+# preserves them; they resume on switch-back), OSS→Cloud leaves OSS workflows in
+# the local Postgres (destroyed only by the explicit temporal-server-down /
+# temporal-db-reset). The OSS server's existence is DECOUPLED from the toggle:
+# switching to Cloud never prunes it. See docs/RUNMODES.md.
+# =============================================================================
+
+# Switch the live cluster's Temporal backend. THE official switchover process:
+# detects open workflows on the current backend and prompts y/n before an
+# orphaning/lossy switch; --drain waits for them to finish first; --yes skips the
+# prompt (automation). Repoints workers/apps (apply), then recreates the host
+# console with the target profile. Does NOT rebuild worker images (passes the
+# current digests through) or prune the OSS server.
+switch-backend target *FLAGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{target}}" in cloud|oss) ;; *) echo "usage: just switch-backend <cloud|oss> [--drain|--yes]"; exit 1;; esac
+    FLAGS="{{FLAGS}}"; DRAIN=false; YES=false
+    case "$FLAGS" in *--drain*) DRAIN=true;; esac
+    case "$FLAGS" in *--yes*) YES=true;; esac
+    just preflight
+    L="deploy/terraform/layers/cluster"
+    cur="$(terraform -chdir=$L output -raw temporal_backend 2>/dev/null || echo cloud)"
+    srv="$(terraform -chdir=$L output -raw oss_server_enabled 2>/dev/null || echo false)"
+    if [ "$cur" = "{{target}}" ]; then echo "Already on backend '{{target}}' — nothing to do."; exit 0; fi
+    echo "Switching backend: $cur -> {{target}}"
+
+    # Detect open workflows on the CURRENT backend (best-effort). Cloud: source the
+    # Cloud profile. OSS: query the frontend via the non-mTLS internal endpoint from
+    # inside a frontend pod. If the count can't be determined, treat as "unknown" and
+    # still prompt (fail safe).
+    count="?"
+    if [ "$cur" = "cloud" ] && [ -f .secrets/keys/cloud.env ]; then
+      set -a; . .secrets/keys/cloud.env; set +a
+      count="$(temporal workflow count --address "$TEMPORAL_ADDRESS" --namespace "$TEMPORAL_NAMESPACE" --api-key "$TEMPORAL_API_KEY" --tls -q 'ExecutionStatus="Running"' 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo '?')"
+    elif [ "$cur" = "oss" ]; then
+      count="$(KUBECONFIG={{kubeconfig}} kubectl -n temporal exec deploy/temporal-admintools -- \
+        temporal workflow count --address temporal-internal-frontend:7236 --namespace ziggymart -q 'ExecutionStatus="Running"' 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo '?')"
+    fi
+
+    if [ "$DRAIN" = true ] && { [ "$count" = "?" ] || [ "$count" -gt 0 ] 2>/dev/null; }; then
+      echo "Draining: waiting for in-flight workflows on '$cur' to complete..."
+      while :; do
+        [ "$count" != "?" ] && [ "$count" -le 0 ] 2>/dev/null && break
+        sleep 10
+        # (re-count using the same method — simplified: re-run this recipe's probe)
+        if [ "$cur" = "cloud" ]; then count="$(temporal workflow count --address "$TEMPORAL_ADDRESS" --namespace "$TEMPORAL_NAMESPACE" --api-key "$TEMPORAL_API_KEY" --tls -q 'ExecutionStatus="Running"' 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo '?')"
+        else count="$(KUBECONFIG={{kubeconfig}} kubectl -n temporal exec deploy/temporal-admintools -- temporal workflow count --address temporal-internal-frontend:7236 --namespace ziggymart -q 'ExecutionStatus="Running"' 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo '?')"; fi
+        echo "  still running: $count"
+      done
+      echo "Drained."
+    elif [ "$YES" != true ] && { [ "$count" = "?" ] || [ "$count" -gt 0 ] 2>/dev/null; }; then
+      echo
+      echo "  In-flight workflows on the CURRENT ($cur) backend: $count"
+      if [ "{{target}}" = "cloud" ]; then
+        echo "  Switching to Cloud will ORPHAN them (Cloud keeps them; they resume when you switch back to $cur)."
+      else
+        echo "  Switching away from Cloud stops workers polling Cloud; those Cloud workflows are preserved but idle until you switch back."
+      fi
+      read -r -p "  Proceed with the switch? [y/N] " ans
+      case "$ans" in y|Y|yes) ;; *) echo "aborted."; exit 1;; esac
+    fi
+
+    # Preserve the OSS server across the switch (decoupled). Ensure it's ON when
+    # switching TO oss; keep whatever it was when switching to cloud.
+    new_srv="$srv"; [ "{{target}}" = "oss" ] && new_srv=true
+    tag="$(git describe --tags --always --dirty --abbrev=12)"
+    export TF_VAR_worker_image_digests="{\"workflow\":\"$(crane digest localhost:{{registry_port}}/orders-worker-workflow:$tag --insecure)\",\"activity\":\"$(crane digest localhost:{{registry_port}}/orders-worker-activity:$tag --insecure)\"}"
+    export TF_VAR_orders_api_image_digest="$(crane digest localhost:{{registry_port}}/orders-api:$tag --insecure)"
+    export TF_VAR_autoscaler_image_digest="$(crane digest localhost:{{registry_port}}/temporal-worker-autoscaler:$tag --insecure)"
+    export TF_VAR_temporal_backend="{{target}}"
+    export TF_VAR_oss_server_enabled="$new_srv"
+    terraform -chdir=$L apply -auto-approve
+    echo "Cluster repointed to {{target}}. Waiting for ArgoCD to reconcile the workers..."
+
+    # Recreate the host console with the target profile (flips CONSOLE_BACKEND etc).
+    profile=".secrets/keys/cloud.env"; [ "{{target}}" = "oss" ] && profile="config/local-oss-kind.env"
+    set -a; . "$profile"; set +a
+    docker compose -f docker-compose.yml up -d --no-deps --force-recreate console
+    just headlamp-reload 2>/dev/null || true
+    echo "Switched to backend '{{target}}'. Console recreated with the {{target}} profile."
+
+# Remove the in-cluster OSS temporal-server (Application + CNPG Postgres + certs).
+# DESTRUCTIVE: drops all OSS workflow state. Refuses while the backend is still
+# 'oss' (workers would break) — switch to cloud first. Reclaims host resources.
+temporal-server-down:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    L="deploy/terraform/layers/cluster"
+    cur="$(terraform -chdir=$L output -raw temporal_backend 2>/dev/null || echo cloud)"
+    if [ "$cur" = "oss" ]; then
+      echo "Backend is still 'oss' — workers point at this server. Run 'just switch-backend cloud' first."; exit 1
+    fi
+    read -r -p "Remove the OSS temporal-server + its Postgres (ALL OSS workflow state lost)? Type 'yes': " ans
+    [ "$ans" = "yes" ] || { echo "aborted."; exit 1; }
+    tag="$(git describe --tags --always --dirty --abbrev=12)"
+    export TF_VAR_worker_image_digests="{\"workflow\":\"$(crane digest localhost:{{registry_port}}/orders-worker-workflow:$tag --insecure)\",\"activity\":\"$(crane digest localhost:{{registry_port}}/orders-worker-activity:$tag --insecure)\"}"
+    export TF_VAR_orders_api_image_digest="$(crane digest localhost:{{registry_port}}/orders-api:$tag --insecure)"
+    export TF_VAR_autoscaler_image_digest="$(crane digest localhost:{{registry_port}}/temporal-worker-autoscaler:$tag --insecure)"
+    export TF_VAR_temporal_backend=cloud
+    export TF_VAR_oss_server_enabled=false
+    terraform -chdir=$L apply -auto-approve
+    echo "temporal-server removed. (PVCs pruned by ArgoCD; run 'just k get pvc -n temporal' to confirm.)"
+
+# PHYSICALLY reset the OSS Temporal DB: drop the temporal-postgresql CNPG Cluster
+# + PVCs; ArgoCD re-syncs temporal-server and the schema jobs re-run — the local
+# "nuclear option" to re-pick numHistoryShards (immutable in-place). DESTRUCTIVE:
+# drops all OSS workflow history. Parallels orders-db-reset.
+temporal-db-reset:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    read -r -p "Delete temporal-postgresql Cluster + PVCs in namespace 'temporal'? ALL OSS workflow history lost. Type 'yes': " ans
+    [ "$ans" = "yes" ] || { echo "aborted."; exit 1; }
+    KUBECONFIG={{kubeconfig}} kubectl -n temporal delete cluster.postgresql.cnpg.io temporal-postgresql --ignore-not-found
+    KUBECONFIG={{kubeconfig}} kubectl -n temporal delete pvc -l cnpg.io/cluster=temporal-postgresql --ignore-not-found
+    echo "Deleted. ArgoCD re-syncs temporal-server; CNPG bootstraps a fresh DB + the schema jobs re-run."
 
 # Fetch the pinned, sha256-verified Headlamp UI plugins (config/dependencies.yaml
 # `headlamp.plugins`) into the bind-mounted compose/deployment/headlamp/plugins/.
@@ -315,9 +450,16 @@ preflight:
 # Full local bring-up: cluster + registry, mirror deps, CI (build/push), publish chart,
 # pin workers by digest, apply the cluster layer. One command, each step idempotent.
 # Gated on the console being up first (preflight) so the bring-up is never blind.
-platform-up:
+#
+# The positional `backend` selects the Temporal backend for this FRESH bring-up:
+# `cloud` (default, the supported path) or `oss` (the in-cluster self-hosted server) —
+# `just platform-up` vs `just platform-up oss`. On oss it also creates the
+# temporal-server Application. To SWITCH an already-running stack use the guarded
+# `just switch-backend` — do NOT re-run platform-up to flip a live backend.
+platform-up backend="cloud":
     #!/usr/bin/env bash
     set -euo pipefail
+    case "{{backend}}" in cloud|oss) ;; *) echo "backend must be 'cloud' or 'oss'"; exit 1;; esac
     just preflight
     just cluster-up
     just mirror-deps
@@ -331,10 +473,14 @@ platform-up:
     export TF_VAR_worker_image_digests="{\"workflow\":\"$wf\",\"activity\":\"$ac\"}"
     export TF_VAR_orders_api_image_digest="$api"
     export TF_VAR_autoscaler_image_digest="$aut"
+    export TF_VAR_temporal_backend="{{backend}}"
+    # Fresh bring-up: the OSS server exists iff this is an OSS bring-up. (Switching a
+    # live stack is switch-backend's job, which preserves the server independently.)
+    [ "{{backend}}" = "oss" ] && export TF_VAR_oss_server_enabled=true || export TF_VAR_oss_server_enabled=false
     terraform -chdir=deploy/terraform/layers/cluster init -input=false
     terraform -chdir=deploy/terraform/layers/cluster apply -auto-approve
     just headlamp-reload 2>/dev/null || true
-    echo "platform up."
+    echo "platform up (backend={{backend}})."
     echo "  Console (all UIs): http://localhost:8086   ArgoCD: http://localhost:8088   Headlamp: http://localhost:8087"
     echo "  (If the host stack wasn't running, start it with 'just up-cloud-kind' then 'just headlamp-reload'."
     echo "   up-cloud-kind runs the app tier + visibility WITHOUT workers — the cluster runs those.)"

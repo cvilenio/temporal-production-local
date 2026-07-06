@@ -1,0 +1,83 @@
+# Bootstrap Job — registers the namespace + custom search attributes from the shared
+# spec (config/temporal/namespaces.yaml, ADR-0007). The spec is rendered to a shell
+# env file at `helm package` time (chart-publish copies config/temporal/.generated/
+# oss-bootstrap.env into files/), embedded here as a ConfigMap, so this stays in
+# lockstep with the Cloud namespaces. Targets the non-mTLS internal-frontend endpoint,
+# so the Job needs no client cert. The production-grade equivalent of the Compose
+# bootstrap containers (create-namespace.sh + bootstrap-search-attributes.sh).
+{{- $bootstrapEnv := .Files.Get "files/oss-bootstrap.env" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: temporal-bootstrap-spec
+  namespace: {{ .Values.namespaceName }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+data:
+  oss-bootstrap.env: |
+{{ $bootstrapEnv | indent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: temporal-bootstrap
+  namespace: {{ .Values.namespaceName }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "5" # after the server (default wave 0) is up
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 20
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: bootstrap
+          image: {{ .Values.bootstrap.image | quote }}
+          env:
+            # Internal-frontend endpoint (non-mTLS, port 7236) — no client cert needed.
+            - name: TEMPORAL_ADDRESS
+              value: "temporal-internal-frontend:7236"
+          volumeMounts:
+            - name: spec
+              mountPath: /spec
+          command: ["/bin/sh", "-eu", "-c"]
+          args:
+            - |
+              . /spec/oss-bootstrap.env
+              NS="${OSS_NAMESPACE:-{{ .Values.bootstrap.namespace }}}"
+              RET="${OSS_RETENTION_DAYS:-{{ .Values.bootstrap.retentionDays }}}"
+
+              echo "Waiting for Temporal frontend to be healthy at $TEMPORAL_ADDRESS..."
+              until temporal operator cluster health --address "$TEMPORAL_ADDRESS" >/dev/null 2>&1; do
+                echo "  not ready, retrying..."; sleep 5
+              done
+
+              if temporal operator namespace describe -n "$NS" --address "$TEMPORAL_ADDRESS" >/dev/null 2>&1; then
+                echo "Namespace '$NS' already exists"
+              else
+                echo "Creating namespace '$NS' (retention ${RET}d)"
+                temporal operator namespace create -n "$NS" --retention "${RET}d" --address "$TEMPORAL_ADDRESS"
+              fi
+
+              # A freshly-created namespace isn't immediately visible to the
+              # search-attribute API (namespace-cache propagation across frontend
+              # hosts). Wait until it's queryable before registering, or the creates
+              # fail "Namespace not found". Mirrors the Compose bootstrap script.
+              echo "Waiting for namespace '$NS' to propagate..."
+              until temporal operator search-attribute list --namespace "$NS" --address "$TEMPORAL_ADDRESS" >/dev/null 2>&1; do
+                echo "  namespace not queryable yet, retrying..."; sleep 3
+              done
+
+              # OSS_SEARCH_ATTRIBUTES is space-separated NAME=TYPE pairs.
+              for pair in ${OSS_SEARCH_ATTRIBUTES:-}; do
+                name="${pair%%=*}"; typ="${pair#*=}"
+                echo "Registering search attribute $name ($typ) on $NS"
+                temporal operator search-attribute create --name "$name" --type "$typ" \
+                  --namespace "$NS" --address "$TEMPORAL_ADDRESS" || true
+              done
+              echo "Bootstrap complete."
+      volumes:
+        - name: spec
+          configMap:
+            name: temporal-bootstrap-spec

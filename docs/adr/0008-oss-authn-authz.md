@@ -186,3 +186,22 @@ strictness) is now expressed **per domain** rather than per env — each domain 
 carries its own least-privilege service account + key in the `cloud_overlay`, and a future
 `auth_method` field would sit there. The control-plane/data-plane identity split is unchanged;
 there is simply one namespace per domain instead of one per domain×env.
+
+## Update (2026-07-06) — Phase 1 (frontend mTLS on kind) IMPLEMENTED
+
+The data-plane transport+authn phase is now built with the OSS-on-kind backend (ADR-0003):
+
+- **cert-manager issues the material.** `deploy/charts/temporal-server/templates/certificates.yaml`
+  bootstraps a self-signed CA (ClusterIssuer → CA `Certificate` → CA ClusterIssuer), then a **server**
+  cert for the frontend (SANs covering `temporal-frontend.temporal.svc…`) and **client** certs for the
+  workers / orders-api / autoscaler, issued into the `orders` namespace where those pods mount them.
+- **Frontend requires client auth** (`server.config.tls.frontend` with `requireClientAuth` +
+  `clientCaFiles`); internal system traffic uses the non-mTLS **internal-frontend** service so
+  requiring external client-auth doesn't break history/matching/worker internal RPCs.
+- **The apps trust the self-signed CA.** `appkit` gained `temporal_tls_server_ca_cert_path`
+  (→ `TLSConfig.server_root_ca_cert`); the Go autoscaler's `Dial` gained client-cert + RootCAs
+  loading. The connection contract is unchanged — `tls` stays on; the credential type is the only
+  per-backend difference (Cloud API key ↔ OSS client cert).
+
+Still **Proposed** for Phase 2 (JWT/OIDC authorization — RBAC via a claim mapper + issuer). The mTLS
+transport/authn portion above can move to **Accepted** once live-verified on the kind cluster.

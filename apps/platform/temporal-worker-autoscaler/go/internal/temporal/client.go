@@ -9,9 +9,11 @@ package temporal
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -78,9 +80,18 @@ type Client struct {
 	namespace string
 }
 
-// Dial builds a lazy Temporal client (boots even if Cloud is briefly
-// unreachable; connects on first call). API-key auth requires TLS.
-func Dial(hostPort, namespace, apiKey string, useTLS bool) (*Client, error) {
+// TLSPaths carries the OSS mTLS material (file paths from the mounted cert-manager
+// Secret). All empty on the Cloud (API-key) path.
+type TLSPaths struct {
+	ClientCertPath   string
+	ClientKeyPath    string
+	ServerCACertPath string
+}
+
+// Dial builds a lazy Temporal client (boots even if the backend is briefly
+// unreachable; connects on first call). Two auth modes: Cloud API key (requires
+// TLS), or self-hosted OSS mTLS (client cert + the self-signed server CA).
+func Dial(hostPort, namespace, apiKey string, useTLS bool, mtls TLSPaths) (*Client, error) {
 	opts := temporalclient.Options{HostPort: hostPort, Namespace: namespace}
 	if apiKey != "" {
 		opts.Credentials = temporalclient.NewAPIKeyStaticCredentials(apiKey)
@@ -93,7 +104,27 @@ func Dial(hostPort, namespace, apiKey string, useTLS bool) (*Client, error) {
 	// handled as ErrTransient by the caller.
 	conn := temporalclient.ConnectionOptions{KeepAliveTime: 30 * time.Second, KeepAliveTimeout: 15 * time.Second}
 	if useTLS {
-		conn.TLS = &tls.Config{}
+		tlsCfg := &tls.Config{}
+		// OSS mTLS: present a client cert and trust the self-signed server CA.
+		if mtls.ClientCertPath != "" && mtls.ClientKeyPath != "" {
+			cert, err := tls.LoadX509KeyPair(mtls.ClientCertPath, mtls.ClientKeyPath)
+			if err != nil {
+				return nil, fmt.Errorf("load mTLS client cert/key: %w", err)
+			}
+			tlsCfg.Certificates = []tls.Certificate{cert}
+			if mtls.ServerCACertPath != "" {
+				caPEM, err := os.ReadFile(mtls.ServerCACertPath)
+				if err != nil {
+					return nil, fmt.Errorf("read server CA cert: %w", err)
+				}
+				pool := x509.NewCertPool()
+				if !pool.AppendCertsFromPEM(caPEM) {
+					return nil, fmt.Errorf("no certs parsed from server CA %q", mtls.ServerCACertPath)
+				}
+				tlsCfg.RootCAs = pool
+			}
+		}
+		conn.TLS = tlsCfg
 	}
 	opts.ConnectionOptions = conn
 	c, err := temporalclient.NewLazyClient(opts)

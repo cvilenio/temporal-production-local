@@ -1,54 +1,191 @@
-# Values for the official Temporal Helm chart (go.temporal.io/helm-charts).
-# Starting point adapted from alexandreroman/temporal-k8s — verify against the
-# chart version you pin in the Application. Backed by CloudNativePG (an external
-# Postgres the chart connects to), not the chart's bundled Cassandra/Postgres.
+# temporal-server — self-hosted OSS backend on kind (ADR-0003).
 #
-# Self-hosted backend for the local-k8s profile (ADR-0003). Sized for a ~16 GB host.
+# Two halves:
+#   temporal:  values passed through to the official chart subchart (server config,
+#              persistence, TLS, metrics, web, schema).
+#   top-level: this wrapper's own resources (CNPG Postgres, cert-manager certs,
+#              bootstrap Job) — see values under `postgres:`, `mtls:`, `bootstrap:`.
+#
+# Sized for a ~16 GB host: single replica per service; the load-testing headroom
+# comes from history shards + relaxed rate limits, not replica count. Scale history
+# to 2 later WITHOUT a reshard (512 shards already support it).
 
-server:
-  replicaCount: 1
-  config:
-    numHistoryShards: 4 # dev value; production uses 512+
-    persistence:
-      default:
-        driver: sql
-        sql:
-          driver: postgres12
-          host: temporal-postgresql-rw # CNPG read-write service
-          port: 5432
-          database: temporal
-          user: temporal
-          # password from the CNPG-generated secret; wire via existingSecret
-      visibility:
-        driver: sql
-        sql:
-          driver: postgres12
-          host: temporal-postgresql-rw
-          port: 5432
-          database: temporal_visibility
-  metrics:
-    prometheusEndpoint: "0.0.0.0:9090" # scraped via a PodMonitor (chart emits none)
+# ── This wrapper's resources ─────────────────────────────────────────────────
+namespaceName: temporal # k8s namespace the server + Postgres land in
+ordersNamespace: orders # where the workers / orders-api / autoscaler run (client certs land here)
 
-# Disable the bundled datastores — CNPG provides Postgres.
-cassandra:
-  enabled: false
-prometheus:
-  enabled: false
-grafana:
-  enabled: false # observability is a separate chart (kube-prometheus-stack + OTel)
-elasticsearch:
-  enabled: false
+postgres:
+  # CloudNativePG Cluster (distinct from orders-db). Primary + replica, auto-failover.
+  clusterName: temporal-postgresql
+  instances: 2
+  storageSize: 2Gi
+  owner: temporal
+  # Local-dev throwaway password (not account-bearing). CNPG adopts it via the
+  # pre-created basic-auth Secret so the temporal chart's existingSecret can read it.
+  password: temporal
+  # Two databases: the default (history/matching) store + the visibility store.
+  defaultDatabase: temporal
+  visibilityDatabase: temporal_visibility
+  # Postgres tuning so DB connections aren't the local throughput ceiling under load
+  # (a common self-hosted footgun — see the shard/DB-connection forum cases).
+  maxConnections: "200"
 
-schema:
-  createDatabase:
-    enabled: true
-  setup:
-    enabled: true
-  update:
-    enabled: true
-
-web:
+mtls:
+  # cert-manager self-signed CA + a server cert for the frontend and client certs
+  # for the workers / orders-api / autoscaler (ADR-0008). Client-cert Secret names
+  # are consumed by the orders-workers / orders-api / autoscaler charts.
   enabled: true
+  caDurationHours: 8760h # 1y CA
+  certDurationHours: 2160h # 90d leaf certs
+  # DNS SANs the server cert must cover (in-cluster service names workers dial).
+  serverDnsNames:
+    - temporal-frontend
+    - temporal-frontend.temporal
+    - temporal-frontend.temporal.svc
+    - temporal-frontend.temporal.svc.cluster.local
+  clientCertSecrets:
+    workers: temporal-worker-mtls
+    ordersApi: temporal-client-mtls
+    autoscaler: temporal-autoscaler-mtls
 
-# First install pulls several images and runs schema jobs serially — bump the
-# Application/helm timeout to ~15m to avoid a spurious failure.
+bootstrap:
+  # Argo-managed Job (temporalio/admin-tools) that registers the namespace + custom
+  # search attributes from config/temporal/namespaces.yaml (ADR-0007). Populated at
+  # chart-package time from the shared spec into bootstrap-spec.yaml → a ConfigMap.
+  image: temporalio/admin-tools:1.31.1
+  namespace: ziggymart
+  retentionDays: 30
+
+# ── Upstream official chart (go.temporal.io/helm-charts) ─────────────────────
+# Datastore selection is purely via server.config.persistence.datastores (the
+# bundled cassandra/prometheus/grafana/elasticsearch sub-charts were removed in
+# chart v1.0.0-rc.2). We point persistence at the CNPG Postgres below; observability
+# is the separate in-cluster Prometheus + host Grafana (ADR-0021).
+temporal:
+  server:
+    replicaCount: 1
+    # First install pulls images + runs schema jobs serially — allow ~15m.
+    config:
+      logLevel: "info"
+      numHistoryShards: 512 # IMMUTABLE after schema setup. `just temporal-db-reset` to re-pick.
+      persistence:
+        defaultStore: default
+        visibilityStore: visibility
+        numHistoryShards: 512
+        datastores:
+          default:
+            sql:
+              pluginName: postgres12
+              driverName: postgres12
+              databaseName: temporal
+              connectAddr: "temporal-postgresql-rw:5432"
+              connectProtocol: "tcp"
+              user: temporal
+              existingSecret: temporal-postgresql-app # CNPG-generated basic-auth secret
+              secretKey: password
+              createDatabase: false # CNPG pre-creates both DBs (postInitSQL)
+              manageSchema: true # server runs schema setup/update itself
+              maxConns: 40
+              maxIdleConns: 40
+          visibility:
+            sql:
+              pluginName: postgres12
+              driverName: postgres12
+              databaseName: temporal_visibility
+              connectAddr: "temporal-postgresql-rw:5432"
+              connectProtocol: "tcp"
+              user: temporal
+              existingSecret: temporal-postgresql-app
+              secretKey: password
+              createDatabase: false
+              manageSchema: true
+              maxConns: 20
+              maxIdleConns: 20
+      # External-frontend mTLS (ADR-0008). Internal system traffic uses the
+      # internal-frontend service (below), so requiring client auth on the public
+      # frontend does not break history/matching/worker internal RPCs.
+      tls:
+        frontend:
+          server:
+            certFile: /etc/temporal/tls/frontend/tls.crt
+            keyFile: /etc/temporal/tls/frontend/tls.key
+            requireClientAuth: true
+            clientCaFiles:
+              - /etc/temporal/tls/frontend/ca.crt
+          client:
+            serverName: temporal-frontend.temporal.svc.cluster.local
+            rootCaFiles:
+              - /etc/temporal/tls/frontend/ca.crt
+      metrics:
+        prometheus:
+          timerType: histogram
+          listenAddress: "0.0.0.0:9090"
+      # Namespace creation is handled by the bootstrap Job (from the shared spec),
+      # not the chart, so it stays in lockstep with the Cloud namespaces (ADR-0007).
+      namespaces:
+        create: false
+    # Relaxed rate limits so the SERVER doesn't throttle load tests with
+    # resource_exhausted — worker scaling is what we demonstrate, not server limits.
+    dynamicConfig:
+      frontend.rps:
+        - value: 12000
+      history.rps:
+        - value: 12000
+      matching.rps:
+        - value: 12000
+      frontend.namespaceRPS:
+        - value: 12000
+    # Mount the cert-manager server cert (+ CA) the frontend TLS config references.
+    additionalVolumes:
+      - name: frontend-tls
+        secret:
+          secretName: temporal-frontend-mtls
+    additionalVolumeMounts:
+      - name: frontend-tls
+        mountPath: /etc/temporal/tls/frontend
+        readOnly: true
+    # NOTE: the upstream chart already emits prometheus.io/scrape|port|path on each
+    # server-role pod (per-role metrics.annotations.enabled, default true) pointing at
+    # the metrics listenAddress :9090 — do NOT re-add them here (duplicate map keys).
+    # The cluster layer's temporal-oss scrape job (observability) relies on them.
+
+    # Internal system traffic (the internal worker → frontend) rides this non-mTLS
+    # in-cluster endpoint (port 7236), so external-frontend client-auth is isolated.
+    # Key uses the upstream dash form; nested under server.
+    internal-frontend:
+      enabled: true
+
+    # Schema management is per-datastore above (manageSchema: true); createDatabase
+    # is false there (CNPG owns DB creation). server.replicaCount (1) covers every
+    # role (frontend/history/matching/worker) — scale history later without a reshard.
+
+  # Schema setup runs as a NORMAL (non-hook) Job — the chart docs say to disable the
+  # Helm hooks for Terraform/Argo delivery. As a hook it runs in ArgoCD PreSync, BEFORE
+  # any sync-wave, so it would fire before our CNPG Postgres (wave -2) exists and
+  # deadlock on the missing DB + secret. As a normal resource pinned to sync-wave -1
+  # it runs AFTER CNPG (wave -2, waited Healthy) and BEFORE the server (wave 0).
+  schema:
+    useHelmHooks: false
+    jobAnnotations:
+      argocd.argoproj.io/sync-wave: "-1"
+
+  # 1.29-compat shims off — our server/admin-tools images are 1.31.
+  shims:
+    dockerize: false
+    elasticsearchTool: false
+
+  web:
+    enabled: true
+    # Expose the Web UI on a NodePort that kind maps to host 8091 (kind-config.yaml);
+    # the host viz-proxy fronts it on :8089 with frame headers stripped so the console
+    # can iframe it (TEMPORAL_UI_EMBED_URL). Mirrors the ArgoCD viz-proxy path (ADR-0014).
+    service:
+      type: NodePort
+      port: 8080
+      nodePort: 30081
+    # The Web UI is a gRPC CLIENT of the frontend. The external frontend requires
+    # client-cert auth (mTLS) and the web pod has no cert, so point it at the non-mTLS
+    # internal-frontend (:7236) instead — otherwise the UI's API calls 500. Use the
+    # chart's dedicated temporalAddress override (NOT additionalEnv: a second
+    # TEMPORAL_ADDRESS is a duplicate env key that breaks ArgoCD's structured-merge diff).
+    temporalAddress: temporal-internal-frontend:7236

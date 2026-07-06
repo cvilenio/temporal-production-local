@@ -12,7 +12,10 @@ resource "kubernetes_namespace" "orders" {
 
 # Worker API key as an Opaque Secret. Key `api-key` matches the chart's
 # apiKeySecretRef.key; the Worker Controller injects it as TEMPORAL_API_KEY.
+# CLOUD ONLY — on the OSS backend the worker credential is a cert-manager mTLS
+# client cert issued by the temporal-server chart into this namespace, not an API key.
 resource "kubernetes_secret" "orders_cloud_apikey" {
+  count = local.is_oss ? 0 : 1
   metadata {
     name      = var.cloud_apikey_secret_name
     namespace = kubernetes_namespace.orders.metadata[0].name
@@ -25,10 +28,10 @@ resource "kubernetes_secret" "orders_cloud_apikey" {
 
 # Dedicated CLIENT API key for orders-api (starts/signals workflows). Separate
 # identity + Secret from the workers (ADR-0008). Seeded only when the cloud layer
-# minted a client key for this namespace. orders-app reads it via the chart's
-# connection.apiKeySecret -> TEMPORAL_API_KEY.
+# minted a client key for this namespace. CLOUD ONLY (see above). orders-app reads
+# it via the chart's connection.apiKeySecret -> TEMPORAL_API_KEY.
 resource "kubernetes_secret" "orders_client_apikey" {
-  count = local.client_api_key != null ? 1 : 0
+  count = (local.is_oss || local.client_api_key == null) ? 0 : 1
   metadata {
     name      = var.client_apikey_secret_name
     namespace = kubernetes_namespace.orders.metadata[0].name

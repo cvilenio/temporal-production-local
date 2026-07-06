@@ -14,11 +14,75 @@ locals {
   # GitHub dependency. They point at the local OCI mirror; their targetRevision is
   # injected here from config/dependencies.yaml (keyed by chart name) so the chart
   # version lives in exactly one place (shared with mirror-deps via deps.env).
+  # Backend-specific Prometheus scrape wiring (kept OUT of the committed
+  # prometheus.yaml so it stays secret-free + backend-neutral). Cloud scrapes the
+  # OpenMetrics endpoint with a Bearer token (honor_timestamps; never rate()); OSS
+  # scrapes the in-cluster server's raw :9090 per-service endpoints (annotation
+  # discovery scoped to the temporal namespace, with a stable job=temporal-oss label
+  # the self-hosted-internals dashboards key on). $1/$2 are Prometheus relabel refs
+  # (literal to Terraform — only $${ } would interpolate).
+  scrape_oss = <<-EOT
+    - job_name: temporal-oss
+      kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names: ['${var.temporal_k8s_namespace}']
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+          action: keep
+          regex: "true"
+        - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+          action: replace
+          regex: ([^:]+)(?::\d+)?;(\d+)
+          replacement: $1:$2
+          target_label: __address__
+        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+          target_label: temporal_service
+  EOT
+
+  scrape_cloud = <<-EOT
+    - job_name: temporal-cloud
+      scheme: https
+      metrics_path: /v1/metrics
+      honor_timestamps: true
+      scrape_interval: 30s
+      scrape_timeout: 10s
+      authorization:
+        type: Bearer
+        credentials_file: /etc/secrets/cloud/api-key
+      static_configs:
+        - targets: ['metrics.temporal.io']
+  EOT
+
+  prometheus_scrape_configs = local.is_oss ? local.scrape_oss : local.scrape_cloud
+
+  # Cloud mounts the OpenMetrics bearer-token Secret by file; OSS needs no mount.
+  prometheus_server_extra = local.is_oss ? {} : {
+    extraSecretMounts = [{
+      name       = "cloud-metrics-apikey"
+      secretName = "cloud-metrics-apikey"
+      mountPath  = "/etc/secrets/cloud"
+      readOnly   = true
+    }]
+  }
+
   addon_applications = [
     for a in [for f in fileset(local.apps_dir, "*.yaml") : yamldecode(file("${local.apps_dir}/${f}"))] :
     merge(a, {
       spec = merge(a.spec, {
-        source = merge(a.spec.source, { targetRevision = local.chart_versions[a.spec.source.chart] })
+        source = merge(
+          a.spec.source,
+          { targetRevision = local.chart_versions[a.spec.source.chart] },
+          # Inject the backend-specific scrape wiring into the prometheus app only.
+          a.metadata.name != "prometheus" ? {} : {
+            helm = merge(a.spec.source.helm, {
+              valuesObject = merge(a.spec.source.helm.valuesObject, {
+                extraScrapeConfigs = local.prometheus_scrape_configs
+                server             = merge(a.spec.source.helm.valuesObject.server, local.prometheus_server_extra)
+              })
+            })
+          },
+        )
       })
     })
   ]
@@ -59,8 +123,9 @@ locals {
             connection = {
               hostPort          = local.temporal_address
               temporalNamespace = local.namespace_handle
-              tls               = true
-              apiKeySecret      = var.cloud_apikey_secret_name
+              tls               = true                       # ON in both modes; credential type differs
+              apiKeySecret      = local.worker_apikey_secret # Cloud: set; OSS: ""
+              mtlsSecret        = local.worker_mtls_secret   # OSS: set; Cloud: ""
             }
             # Turn on per-worker autoscaling (ADR-0023): renders the WorkerAutoscaler
             # CRs consumed by the temporal-worker-autoscaler controller. Only the
@@ -154,7 +219,8 @@ locals {
               hostPort          = local.temporal_address
               temporalNamespace = local.namespace_handle
               tls               = true
-              apiKeySecret      = var.client_apikey_secret_name
+              apiKeySecret      = local.client_apikey_secret # Cloud: set; OSS: ""
+              mtlsSecret        = local.client_mtls_secret   # OSS: set; Cloud: ""
             }
           }
         }
@@ -237,7 +303,8 @@ locals {
               hostPort          = local.temporal_address
               temporalNamespace = local.namespace_handle
               tls               = true
-              apiKeySecret      = var.cloud_apikey_secret_name
+              apiKeySecret      = local.worker_apikey_secret   # Cloud: set; OSS: ""
+              mtlsSecret        = local.autoscaler_mtls_secret # OSS: set; Cloud: ""
             }
             image = local.autoscaler_image
           }
@@ -254,9 +321,63 @@ locals {
     }
   }
 
+  # temporal-server: the in-cluster OSS backend (ADR-0003), a LOCAL wrapper chart
+  # (published by `just chart-publish`) over the official Temporal chart + CNPG
+  # Postgres + cert-manager mTLS + a namespace/search-attribute bootstrap Job.
+  #
+  # releaseName = "temporal" is REQUIRED: the upstream subchart names its Services
+  # <release>-<role>, so this forces temporal-frontend / temporal-web / etc. — the
+  # names the mTLS SANs, the workers' hostPort, and the console selectors all assume.
+  #
+  # Its EXISTENCE is gated on var.oss_server_enabled, NOT temporal_backend (decoupled
+  # lifecycle): switching workers back to Cloud leaves the server running so its state
+  # survives; `just temporal-server-down` sets oss_server_enabled=false to remove it.
+  # sync-wave -1: after the CNPG operator + cert-manager add-ons (wave -2), before the
+  # workers (wave 0).
+  temporal_server_application = {
+    apiVersion = "argoproj.io/v1alpha1"
+    kind       = "Application"
+    metadata = {
+      name        = "temporal-server"
+      namespace   = var.argocd_namespace
+      annotations = { "argocd.argoproj.io/sync-wave" = "-1" }
+    }
+    spec = {
+      project = "default"
+      source = {
+        repoURL        = var.oci_charts_repo
+        chart          = "temporal-server"
+        targetRevision = var.temporal_server_chart_version
+        helm = {
+          releaseName = "temporal"
+          valuesObject = {
+            namespaceName   = var.temporal_k8s_namespace
+            ordersNamespace = var.orders_namespace
+          }
+        }
+      }
+      destination = {
+        server    = "https://kubernetes.default.svc"
+        namespace = var.temporal_k8s_namespace
+      }
+      syncPolicy = {
+        automated = { prune = true, selfHeal = true }
+        # ServerSideApply: the official chart's server ConfigMap is large; SSA avoids
+        # the client-side last-applied annotation size limit. CreateNamespace for the
+        # temporal namespace.
+        syncOptions = ["CreateNamespace=true", "ServerSideApply=true"]
+      }
+    }
+  }
+
   # Every Application TF seeds: the committed add-ons + the injected orders-workers,
-  # orders-data, orders-api, the autoscaler controller, and the alloy log agent.
-  all_applications = { for app in concat(local.addon_applications, [local.orders_workers_application, local.orders_data_application, local.orders_api_application, local.temporal_worker_autoscaler_application, local.alloy_application]) : app.metadata.name => app }
+  # orders-data, orders-api, the autoscaler controller, the alloy log agent, and
+  # (only when oss_server_enabled) the in-cluster OSS temporal-server.
+  all_applications = { for app in concat(
+    local.addon_applications,
+    [local.orders_workers_application, local.orders_data_application, local.orders_api_application, local.temporal_worker_autoscaler_application, local.alloy_application],
+    var.oss_server_enabled ? [local.temporal_server_application] : [],
+  ) : app.metadata.name => app }
 }
 
 # Seed the ArgoCD Applications after the release installs the Application CRD.

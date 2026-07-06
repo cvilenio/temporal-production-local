@@ -18,6 +18,76 @@ variable "cloud_state_path" {
   default     = "../../../../.secrets/terraform/cloud.tfstate"
 }
 
+# ── Temporal backend toggle (ADR-0003 / -0005) ───────────────────────────────
+# Which Temporal server the workers/apps connect to. `cloud` (default) keeps the
+# supported path unchanged; `oss` repoints them at the in-cluster temporal-server.
+# The guarded `just switch-backend` recipe sets TF_VAR_temporal_backend; do not
+# flip it by hand on a live stack (see docs/RUNMODES.md). TLS stays ON in BOTH
+# modes — only the credential type differs (Cloud API key ↔ OSS client cert).
+variable "temporal_backend" {
+  description = "Temporal backend for the cluster workers/apps: 'cloud' (default) or 'oss'."
+  type        = string
+  default     = "cloud"
+  validation {
+    condition     = contains(["cloud", "oss"], var.temporal_backend)
+    error_message = "temporal_backend must be 'cloud' or 'oss'."
+  }
+}
+
+# Whether the in-cluster OSS temporal-server Application exists. DECOUPLED from
+# temporal_backend on purpose (confirmed design): switching workers to Cloud must
+# NOT prune the OSS server and destroy its state. Set true on first OSS bring-up;
+# `just temporal-server-down` sets it false (removes the app + CNPG cluster).
+variable "oss_server_enabled" {
+  description = "Create the in-cluster OSS temporal-server ArgoCD Application (independent of temporal_backend)."
+  type        = bool
+  default     = false
+}
+
+variable "temporal_server_chart_version" {
+  description = "Published version of the temporal-server wrapper OCI chart (matches Chart.yaml / just chart-publish)."
+  type        = string
+  default     = "0.1.4"
+}
+
+variable "temporal_k8s_namespace" {
+  description = "Kubernetes namespace the OSS temporal-server + its Postgres run in."
+  type        = string
+  default     = "temporal"
+}
+
+variable "oss_namespace" {
+  description = "Temporal namespace on the OSS backend (matches the bootstrap Job; the bare domain name, no account suffix)."
+  type        = string
+  default     = "ziggymart"
+}
+
+variable "oss_temporal_address" {
+  description = "In-cluster gRPC address of the OSS frontend the workers/apps dial (mTLS)."
+  type        = string
+  default     = "temporal-frontend.temporal.svc.cluster.local:7233"
+}
+
+# Client-cert Secret names the temporal-server chart issues into the orders
+# namespace (must match deploy/charts/temporal-server/values.yaml mtls.clientCertSecrets).
+variable "oss_worker_mtls_secret" {
+  description = "k8s Secret (in the orders namespace) holding the worker mTLS client cert on the OSS backend."
+  type        = string
+  default     = "temporal-worker-mtls"
+}
+
+variable "oss_client_mtls_secret" {
+  description = "k8s Secret holding the orders-api mTLS client cert on the OSS backend."
+  type        = string
+  default     = "temporal-client-mtls"
+}
+
+variable "oss_autoscaler_mtls_secret" {
+  description = "k8s Secret holding the autoscaler mTLS client cert on the OSS backend."
+  type        = string
+  default     = "temporal-autoscaler-mtls"
+}
+
 variable "cloud_namespace" {
   description = "Which cloud namespace (domain) this cluster mirrors — the key into the cloud layer's per-domain outputs (`<domain>`, no env axis)."
   type        = string
@@ -85,13 +155,13 @@ variable "registry_service" {
 variable "orders_workers_chart_version" {
   description = "Published version of the orders-workers OCI chart (matches Chart.yaml / just chart-publish)."
   type        = string
-  default     = "0.1.12"
+  default     = "0.1.15"
 }
 
 variable "autoscaler_chart_version" {
   description = "Published version of the temporal-worker-autoscaler OCI chart (matches Chart.yaml / just chart-publish)."
   type        = string
-  default     = "0.1.3"
+  default     = "0.1.4"
 }
 
 variable "autoscaler_image_tag" {
@@ -121,13 +191,13 @@ variable "worker_image_digests" {
 variable "orders_data_chart_version" {
   description = "Published version of the orders-data OCI chart (CNPG orders-db + credential)."
   type        = string
-  default     = "0.1.0"
+  default     = "0.1.4"
 }
 
 variable "orders_api_chart_version" {
   description = "Published version of the orders-api OCI chart (orders-api Deployment + Service)."
   type        = string
-  default     = "0.1.3"
+  default     = "0.1.4"
 }
 
 variable "alloy_chart_version" {

@@ -13,11 +13,17 @@ import (
 
 // Config is the controller's process-level configuration.
 type Config struct {
-	// Temporal Cloud connection (shared by the central poller).
-	TemporalHostPort  string // regional endpoint, e.g. us-east-1.aws.api.temporal.io:7233
-	TemporalNamespace string // <ns>.<account>
-	TemporalAPIKey    string // Bearer token (from the mounted Secret)
+	// Temporal connection (shared by the central poller). On Cloud this is an
+	// API key; on the self-hosted OSS backend it is an mTLS client cert + the
+	// self-signed server CA (exactly one credential type is populated).
+	TemporalHostPort  string // regional (Cloud) or in-cluster (OSS) endpoint
+	TemporalNamespace string // <ns>.<account> (Cloud) or the bare domain (OSS)
+	TemporalAPIKey    string // Bearer token (Cloud; from the mounted Secret)
 	TemporalTLS       bool
+	// OSS mTLS material (file paths from the mounted cert-manager Secret). Empty on Cloud.
+	TemporalTLSClientCertPath   string
+	TemporalTLSClientKeyPath    string
+	TemporalTLSServerCACertPath string
 
 	// PollInterval is the central Cloud poll cadence. Fast because it is ONE
 	// caller; keep it rate-safe with jitter (see poller).
@@ -33,10 +39,13 @@ type Config struct {
 // Load reads Config from the environment, applying defaults.
 func Load() (*Config, error) {
 	c := &Config{
-		TemporalHostPort:     getenv("TEMPORAL_HOSTPORT", ""),
-		TemporalNamespace:    getenv("TEMPORAL_NAMESPACE", ""),
-		TemporalAPIKey:       readSecretOrEnv("TEMPORAL_API_KEY_FILE", "TEMPORAL_API_KEY"),
-		TemporalTLS:          getbool("TEMPORAL_TLS", true),
+		TemporalHostPort:            getenv("TEMPORAL_HOSTPORT", ""),
+		TemporalNamespace:           getenv("TEMPORAL_NAMESPACE", ""),
+		TemporalAPIKey:              readSecretOrEnv("TEMPORAL_API_KEY_FILE", "TEMPORAL_API_KEY"),
+		TemporalTLS:                 getbool("TEMPORAL_TLS", true),
+		TemporalTLSClientCertPath:   getenv("TEMPORAL_TLS_CLIENT_CERT_PATH", ""),
+		TemporalTLSClientKeyPath:    getenv("TEMPORAL_TLS_CLIENT_KEY_PATH", ""),
+		TemporalTLSServerCACertPath: getenv("TEMPORAL_TLS_SERVER_CA_CERT_PATH", ""),
 		// 15s default: the Cloud Worker-Deployment-Read API is aggressively
 		// rate-limited, so this is the safe backlog-freshness floor for one central
 		// caller polling per version. Actuation stays instant once the signal lands.
