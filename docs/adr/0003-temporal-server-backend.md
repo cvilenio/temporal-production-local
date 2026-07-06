@@ -44,7 +44,7 @@ Self-hosted-on-kind is now implemented (`deploy/charts/temporal-server` — a wr
 mTLS (ADR-0008), and an Argo-managed bootstrap Job from `config/temporal/namespaces.yaml`).
 
 - **Single control point:** a `temporal_backend` (`cloud`|`oss`) Terraform var in the cluster layer,
-  driven by `just platform-up backend=…` (fresh) and the guarded `just switch-backend` (live). The
+  driven by `just platform-up oss` (fresh) and the guarded `just switch-backend` (live). The
   connection contract is unchanged — `tls` stays on both backends; only the credential type differs
   (Cloud API key ↔ OSS mTLS client cert). `numHistoryShards=512`, tunable, immutable in-place with
   `just temporal-db-reset` as the local re-pick escape hatch.

@@ -324,7 +324,10 @@ switch-backend target *FLAGS:
     just preflight
     L="deploy/terraform/layers/cluster"
     cur="$(terraform -chdir=$L output -raw temporal_backend 2>/dev/null || echo cloud)"
-    srv="$(terraform -chdir=$L output -raw oss_server_enabled 2>/dev/null || echo false)"
+    # Default to the NON-destructive value on a failed read: a switch must never
+    # prune the OSS server (only `temporal-server-down` does). Guessing false here
+    # would set oss_server_enabled=false → Terraform destroys the server + CNPG.
+    srv="$(terraform -chdir=$L output -raw oss_server_enabled 2>/dev/null || echo true)"
     if [ "$cur" = "{{target}}" ]; then echo "Already on backend '{{target}}' — nothing to do."; exit 0; fi
     echo "Switching backend: $cur -> {{target}}"
 
@@ -343,14 +346,17 @@ switch-backend target *FLAGS:
 
     if [ "$DRAIN" = true ] && { [ "$count" = "?" ] || [ "$count" -gt 0 ] 2>/dev/null; }; then
       echo "Draining: waiting for in-flight workflows on '$cur' to complete..."
-      while :; do
-        [ "$count" != "?" ] && [ "$count" -le 0 ] 2>/dev/null && break
+      # Bounded: if the count never becomes a number (probe unreachable — missing
+      # cloud.env, admintools down), abort instead of sleeping forever.
+      drained=false
+      for _ in $(seq 1 60); do
+        [ "$count" != "?" ] && [ "$count" -le 0 ] 2>/dev/null && { drained=true; break; }
         sleep 10
-        # (re-count using the same method — simplified: re-run this recipe's probe)
         if [ "$cur" = "cloud" ]; then count="$(temporal workflow count --address "$TEMPORAL_ADDRESS" --namespace "$TEMPORAL_NAMESPACE" --api-key "$TEMPORAL_API_KEY" --tls -q 'ExecutionStatus="Running"' 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo '?')"
         else count="$(KUBECONFIG={{kubeconfig}} kubectl -n temporal exec deploy/temporal-admintools -- temporal workflow count --address temporal-internal-frontend:7236 --namespace ziggymart -q 'ExecutionStatus="Running"' 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo '?')"; fi
         echo "  still running: $count"
       done
+      [ "$drained" = true ] || { echo "Drain timed out (10m) with count='$count' — aborting the switch. Re-run without --drain to force."; exit 1; }
       echo "Drained."
     elif [ "$YES" != true ] && { [ "$count" = "?" ] || [ "$count" -gt 0 ] 2>/dev/null; }; then
       echo

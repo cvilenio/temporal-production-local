@@ -79,15 +79,12 @@ spec:
               value: "true"
             {{- end }}
             {{- if $.Values.connection.mtlsSecret }}
-            # OSS mTLS: the worker PROCESS builds its own client (appkit) from env,
-            # so point it at the mounted cert-manager client cert + the server CA
-            # (the self-signed OSS frontend CA must be trusted). The Connection CRD's
-            # mutualTLSSecretRef covers the controller's own poll connection; these
-            # env + mount cover the worker process itself.
-            - name: TEMPORAL_TLS_CLIENT_CERT_PATH
-              value: /etc/temporal/tls/tls.crt
-            - name: TEMPORAL_TLS_CLIENT_KEY_PATH
-              value: /etc/temporal/tls/tls.key
+            # OSS mTLS: the Worker Controller (from the Connection's mutualTLSSecretRef)
+            # already mounts the client cert at /etc/temporal/tls and injects
+            # TEMPORAL_TLS_CLIENT_CERT_PATH / _KEY_PATH into the worker pods — so we set
+            # ONLY the server-CA path (which the controller does NOT set), needed so the
+            # worker process (appkit) trusts the self-signed OSS frontend. Re-setting the
+            # cert/key paths here would just duplicate the controller's env.
             - name: TEMPORAL_TLS_SERVER_CA_CERT_PATH
               value: /etc/temporal/tls/ca.crt
             {{- end }}

@@ -105,24 +105,28 @@ func Dial(hostPort, namespace, apiKey string, useTLS bool, mtls TLSPaths) (*Clie
 	conn := temporalclient.ConnectionOptions{KeepAliveTime: 30 * time.Second, KeepAliveTimeout: 15 * time.Second}
 	if useTLS {
 		tlsCfg := &tls.Config{}
-		// OSS mTLS: present a client cert and trust the self-signed server CA.
+		// OSS mTLS: present a client cert (if provided).
 		if mtls.ClientCertPath != "" && mtls.ClientKeyPath != "" {
 			cert, err := tls.LoadX509KeyPair(mtls.ClientCertPath, mtls.ClientKeyPath)
 			if err != nil {
 				return nil, fmt.Errorf("load mTLS client cert/key: %w", err)
 			}
 			tlsCfg.Certificates = []tls.Certificate{cert}
-			if mtls.ServerCACertPath != "" {
-				caPEM, err := os.ReadFile(mtls.ServerCACertPath)
-				if err != nil {
-					return nil, fmt.Errorf("read server CA cert: %w", err)
-				}
-				pool := x509.NewCertPool()
-				if !pool.AppendCertsFromPEM(caPEM) {
-					return nil, fmt.Errorf("no certs parsed from server CA %q", mtls.ServerCACertPath)
-				}
-				tlsCfg.RootCAs = pool
+		}
+		// Trust the self-signed server CA when supplied — INDEPENDENT of the client
+		// cert. Kept out of the client-cert branch so a CA-only config (server-auth
+		// TLS, or a mount where only ca.crt is present) still verifies the server
+		// instead of silently falling back to system roots (x509: unknown authority).
+		if mtls.ServerCACertPath != "" {
+			caPEM, err := os.ReadFile(mtls.ServerCACertPath)
+			if err != nil {
+				return nil, fmt.Errorf("read server CA cert: %w", err)
 			}
+			pool := x509.NewCertPool()
+			if !pool.AppendCertsFromPEM(caPEM) {
+				return nil, fmt.Errorf("no certs parsed from server CA %q", mtls.ServerCACertPath)
+			}
+			tlsCfg.RootCAs = pool
 		}
 		conn.TLS = tlsCfg
 	}

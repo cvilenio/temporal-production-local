@@ -47,7 +47,7 @@ variable "oss_server_enabled" {
 variable "temporal_server_chart_version" {
   description = "Published version of the temporal-server wrapper OCI chart (matches Chart.yaml / just chart-publish)."
   type        = string
-  default     = "0.1.4"
+  default     = "0.1.5"
 }
 
 variable "temporal_k8s_namespace" {
@@ -155,7 +155,7 @@ variable "registry_service" {
 variable "orders_workers_chart_version" {
   description = "Published version of the orders-workers OCI chart (matches Chart.yaml / just chart-publish)."
   type        = string
-  default     = "0.1.15"
+  default     = "0.1.16"
 }
 
 variable "autoscaler_chart_version" {
@@ -191,7 +191,7 @@ variable "worker_image_digests" {
 variable "orders_data_chart_version" {
   description = "Published version of the orders-data OCI chart (CNPG orders-db + credential)."
   type        = string
-  default     = "0.1.4"
+  default     = "0.1.0"
 }
 
 variable "orders_api_chart_version" {

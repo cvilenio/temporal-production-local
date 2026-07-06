@@ -82,6 +82,27 @@ Notes:
   and push directly, no PR"). Then commit + push as they specify.
 - All commit/PR titles still obey the Commit Convention above.
 
+# Verify before merge — static review gates the PR (MUST)
+
+Live testing proves a change *runs*; it does not prove the paths you didn't run are correct.
+This matters here specifically: the Cloud footprint rule below defaults to one happy-path execution, so failure branches, retry behavior, and replay/non-determinism are structurally under-exercised by live runs.
+A static review on the diff is the cheap complement that covers exactly what the live budget skips.
+
+Run the review as an **independent** pass, never as author self-review.
+`/code-review` fans the work out to fresh subagents that read only the PR diff (plus git history and this file) — they never inherit the session that wrote the code, so the review is genuinely independent.
+For that reason there is no need to open a separate Claude Code session; invoking the command from the implementing session is equivalent.
+
+When to run it (scale the gate to the diff — this is a cost decision, not a blanket step):
+
+- **Skip the review call** for trivial diffs: docs, comments, `values.yaml`/config, chart-version bumps, generated files.
+  Live smoke (where relevant) is enough.
+- **Run `/code-review <pr>`** for any diff with real logic — after opening the PR, before the rebase-merge.
+  Fold the findings into the branch, then merge.
+  The command posts its findings as a PR comment, so the review lives next to the *why* in the PR artifact.
+- **Prefer the Temporal-aware review** (temporal-architect workflow review) over generic `/code-review` when the diff touches workflow or activity code, retry/timeout policy, versioning/patch gates, or anything determinism-sensitive — generic review does not deeply know those traps.
+
+State in the PR body which review ran (or that the diff was trivial and the review was skipped), so "how it was verified" reflects both the live check and the static pass.
+
 # Python app layout — settings / dependencies / main (+ routes/) (MUST)
 
 Applies to **Python** deployable apps under `/apps` (ADR-0022). Other languages are **not

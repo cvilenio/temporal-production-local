@@ -73,8 +73,16 @@ spec:
               for pair in ${OSS_SEARCH_ATTRIBUTES:-}; do
                 name="${pair%%=*}"; typ="${pair#*=}"
                 echo "Registering search attribute $name ($typ) on $NS"
-                temporal operator search-attribute create --name "$name" --type "$typ" \
-                  --namespace "$NS" --address "$TEMPORAL_ADDRESS" || true
+                # Tolerate only the idempotent "already exists" case; surface any
+                # other failure (bad type, RBAC, frontend error) as a visible WARN
+                # rather than swallowing it with `|| true` (which would let the Job
+                # report Completed with attributes silently unregistered).
+                out="$(temporal operator search-attribute create --name "$name" --type "$typ" \
+                  --namespace "$NS" --address "$TEMPORAL_ADDRESS" 2>&1)" || true
+                case "$out" in
+                  *already*|*exists*|"") : ;;
+                  *) echo "  WARN: could not register $name: $out" ;;
+                esac
               done
               echo "Bootstrap complete."
       volumes:
