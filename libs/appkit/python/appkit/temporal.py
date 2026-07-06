@@ -31,12 +31,15 @@ async def build_temporal_client(
     api_key: str | None = None,
     tls_client_cert_path: str | None = None,
     tls_client_key_path: str | None = None,
+    tls_server_ca_cert_path: str | None = None,
 ) -> Client:
     """Connect a Temporal `Client`, baking in the shared data-converter contract.
 
     Connection profile (driven by Settings / env):
-      Local (compose or self-hosted on kind): tls=False, no auth.
-      Temporal Cloud: tls=True + API key, or mTLS client cert/key.
+      Local Compose quick-start: tls=False, no auth.
+      Temporal Cloud: tls=True + API key, or mTLS client cert/key (public CA).
+      Self-hosted OSS on kind: tls=True + mTLS client cert/key + the server CA
+        (tls_server_ca_cert_path), so the self-signed frontend cert is trusted.
 
     The TracingInterceptor (passed in via `interceptors`) propagates OTel span context
     across the client → workflow → activity boundary; `pydantic_data_converter` handles
@@ -48,7 +51,15 @@ async def build_temporal_client(
             client_cert = cert_file.read()
         with open(tls_client_key_path, "rb") as key_file:
             client_key = key_file.read()
-        tls_config = TLSConfig(client_cert=client_cert, client_private_key=client_key)
+        server_root_ca_cert: bytes | None = None
+        if tls_server_ca_cert_path:
+            with open(tls_server_ca_cert_path, "rb") as ca_file:
+                server_root_ca_cert = ca_file.read()
+        tls_config = TLSConfig(
+            client_cert=client_cert,
+            client_private_key=client_key,
+            server_root_ca_cert=server_root_ca_cert,
+        )
 
     return await Client.connect(
         address,

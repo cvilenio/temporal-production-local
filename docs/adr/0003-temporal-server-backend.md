@@ -36,3 +36,21 @@ repo. The operator is a sync-wave −2 ArgoCD add-on (`deploy/charts/cloudnative
 replica, auto-failover). State lives on kind's `local-path` PVC; lifecycle + reset semantics are
 documented in `docs/RUNMODES.md`. Applies on the kind path regardless of whether the *Temporal*
 backend is Cloud or self-hosted.
+
+## Update (2026-07-06): OSS-on-kind wired; toggle + decoupled server lifecycle
+
+Self-hosted-on-kind is now implemented (`deploy/charts/temporal-server` — a wrapper over the official
+`go.temporal.io/helm-charts` chart, vendored as a subchart, plus CNPG Postgres, cert-manager frontend
+mTLS (ADR-0008), and an Argo-managed bootstrap Job from `config/temporal/namespaces.yaml`).
+
+- **Single control point:** a `temporal_backend` (`cloud`|`oss`) Terraform var in the cluster layer,
+  driven by `just platform-up backend=…` (fresh) and the guarded `just switch-backend` (live). The
+  connection contract is unchanged — `tls` stays on both backends; only the credential type differs
+  (Cloud API key ↔ OSS mTLS client cert). `numHistoryShards=512`, tunable, immutable in-place with
+  `just temporal-db-reset` as the local re-pick escape hatch.
+- **Decoupled server lifecycle:** the OSS server's existence is a separate `oss_server_enabled` var,
+  NOT gated on `temporal_backend` — switching workers to Cloud never prunes the server (its state
+  survives; swap-back is instant). Teardown is the explicit `just temporal-server-down`.
+- **Default deferral:** this ADR intends self-hosted as the eventual *default* backend. That flip is
+  deferred — **Cloud remains the default** (`temporal_backend="cloud"`) until the OSS path is proven
+  in live use; only then does the default move. No hard switch of the supported path yet.

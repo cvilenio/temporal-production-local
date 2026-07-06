@@ -40,29 +40,47 @@ SERVICE_REGISTRY = {
         "description": "Managed Temporal namespace (account/region provisioned by Terraform)",
         "http_probe": None,
     },
+    # The self-hosted OSS server trio. On Compose (`poe up`) these are Docker
+    # containers; on kind + OSS (ADR-0003) they are cluster pods — the `kube`
+    # locators source them from the `temporal` namespace via KubeProvider (the
+    # upstream chart labels every pod app.kubernetes.io/name=temporal, split by
+    # component; CNPG labels its pods cnpg.io/cluster=<name>). Group is backend-
+    # neutral ("Temporal") — the managed-Cloud entry above owns "Temporal Cloud".
     "temporal": {
-        "group": "Temporal Cloud",
+        "group": "Temporal",
         "icon_key": "server-rack",
         "display_name": "Temporal Server",
         "description": "Orchestration engine for long-running workflows",
         "http_probe": None,
         "tcp_port": 7233,
+        "kube": {
+            "namespace": "temporal",
+            "selector": "app.kubernetes.io/name=temporal,app.kubernetes.io/component=frontend",
+        },
     },
     "temporal-ui": {
-        "group": "Temporal Cloud",
+        "group": "Temporal",
         "icon_key": "window",
         "display_name": "Temporal UI",
         "description": "Temporal Web Console",
         "http_probe": None,
         "tcp_port": 8080,
+        "kube": {
+            "namespace": "temporal",
+            "selector": "app.kubernetes.io/name=temporal,app.kubernetes.io/component=web",
+        },
     },
     "postgresql": {
-        "group": "Temporal Cloud",
+        "group": "Temporal",
         "icon_key": "database",
         "display_name": "Temporal DB",
         "description": "Internal state store",
         "http_probe": None,
         "tcp_port": 5432,
+        "kube": {
+            "namespace": "temporal",
+            "selector": "cnpg.io/cluster=temporal-postgresql",
+        },
     },
     "orders-service": {
         "group": "Customer Environment",
@@ -285,6 +303,11 @@ OSS_ONLY_KEYS = frozenset(
 KIND_ONLY_KEYS = frozenset(
     {"headlamp", "viz-proxy", "argocd", "kind-cluster", "artifact-registry"}
 )
+# Dev UIs that only exist in the Compose OSS stack (oss-server.yml): the nginx
+# frame-stripping proxy for the Temporal Web UI and pgweb for the Temporal DB. On
+# kind + OSS the Temporal Web UI is fronted by the viz-proxy (KIND_ONLY) and there is
+# no pgweb, so these are excluded on the kind substrate to avoid spurious "down".
+COMPOSE_ONLY_KEYS = frozenset({"ui-proxy", "pgweb-temporal"})
 
 _current_snapshot: dict[str, dict] = {}
 

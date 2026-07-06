@@ -7,5 +7,5 @@ description: >-
   wave — so a slow DB makes orders-api crash-loop-until-ready (self-healing,
   visible) rather than deadlocking a shared sync. See ADR-0016.
 type: application
-version: 0.1.3
+version: 0.1.4
 appVersion: "1.0"

@@ -8,6 +8,19 @@
 > worker scrape targets below (`orders-*-worker:9000`) and the `temporal:9091` server target
 > describe the **historical, no-longer-running legacy Compose-OSS topology** — kept for
 > reference on that path, not the current kind + Cloud one.
+>
+> **Backend swap (ADR-0003).** The Cloud OpenMetrics scrape + its `cloud-metrics-apikey`
+> mount are no longer committed in `prometheus.yaml`; the cluster layer injects the
+> backend-specific scrape by `temporal_backend`. On the **kind + OSS** backend the
+> `temporal-cloud` job is replaced by a **`temporal-oss`** job that scrapes the in-cluster
+> server's raw per-service Prometheus endpoints (frontend/history/matching/worker `:9090`,
+> annotation-discovered in the `temporal` namespace) — so the **self-hosted-internals**
+> dashboards (`service_requests`, `persistence_latency_bucket`, `lock_latency_bucket`, …),
+> dark on Cloud, light up on OSS. The dual-sourced Critical Flows panels render on either
+> backend; the pure-Cloud `durable-execution-value` dashboard + the Cloud-only capacity/
+> replication panels are expected to go **dark on OSS** (no OSS equivalent). Worker SDK
+> (`:9000`), business (OTLP→ClickHouse), and the `temporal_slot_utilization` recording rule
+> are backend-independent and unchanged across the swap.
 
 The stack uses `grafana/otel-lgtm` — a single container bundling OpenTelemetry Collector, Prometheus,
 Tempo, Loki, and Grafana with all datasources pre-wired.  Just run `docker compose up` and open Grafana.

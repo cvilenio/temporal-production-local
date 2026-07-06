@@ -40,8 +40,19 @@ spec:
               value: {{ .Values.connection.temporalNamespace | quote }}
             - name: TEMPORAL_TLS
               value: {{ .Values.connection.tls | quote }}
+            {{- if .Values.connection.apiKeySecret }}
+            # Cloud: API-key auth (file-mounted).
             - name: TEMPORAL_API_KEY_FILE
               value: /etc/temporal/api-key
+            {{- else if .Values.connection.mtlsSecret }}
+            # OSS: mTLS client cert + the self-signed server CA (mounted below).
+            - name: TEMPORAL_TLS_CLIENT_CERT_PATH
+              value: /etc/temporal/tls/tls.crt
+            - name: TEMPORAL_TLS_CLIENT_KEY_PATH
+              value: /etc/temporal/tls/tls.key
+            - name: TEMPORAL_TLS_SERVER_CA_CERT_PATH
+              value: /etc/temporal/tls/ca.crt
+            {{- end }}
             - name: POLL_INTERVAL
               value: {{ .Values.pollInterval | quote }}
             - name: ENABLE_LEADER_ELECTION
@@ -69,13 +80,25 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: { drop: ["ALL"] }
           volumeMounts:
+            {{- if .Values.connection.apiKeySecret }}
             - name: cloud-apikey
               mountPath: /etc/temporal
               readOnly: true
+            {{- else if .Values.connection.mtlsSecret }}
+            - name: temporal-mtls
+              mountPath: /etc/temporal/tls
+              readOnly: true
+            {{- end }}
       volumes:
+        {{- if .Values.connection.apiKeySecret }}
         - name: cloud-apikey
           secret:
             secretName: {{ .Values.connection.apiKeySecret | quote }}
             items:
               - key: {{ .Values.connection.apiKeySecretKey | quote }}
                 path: api-key
+        {{- else if .Values.connection.mtlsSecret }}
+        - name: temporal-mtls
+          secret:
+            secretName: {{ .Values.connection.mtlsSecret | quote }}
+        {{- end }}

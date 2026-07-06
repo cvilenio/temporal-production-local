@@ -27,6 +27,7 @@ import os
 import httpx
 from app.services.status.cloud import CloudStatusProvider
 from app.services.status.core import (
+    COMPOSE_ONLY_KEYS,
     KIND_ONLY_KEYS,
     KUBE_OWNED_KEYS,
     OSS_ONLY_KEYS,
@@ -105,9 +106,13 @@ def _select_provider() -> StatusProvider:
     # Exclusions for the base providers. temporal-cloud is always cloud-owned.
     base_exclude = {_CLOUD_KEY}
     if backend != "oss":
-        base_exclude |= OSS_ONLY_KEYS  # no in-Compose Temporal cluster on Cloud
+        base_exclude |= OSS_ONLY_KEYS  # no self-hosted Temporal on Cloud
     if substrate != "kind":
         base_exclude |= KIND_ONLY_KEYS  # cluster-visibility tooling needs a cluster
+    else:
+        base_exclude |= (
+            COMPOSE_ONLY_KEYS  # Compose-only dev UIs (ui-proxy/pgweb) absent on kind
+        )
 
     cloud = CloudStatusProvider() if backend == "cloud" else None
 

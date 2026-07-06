@@ -39,8 +39,12 @@ connection:
   hostPort: "regional-endpoint.example:7233"
   temporalNamespace: "ziggymart.<account-id>"
   tls: true
+  # Exactly one credential is set by the cluster layer per backend: apiKeySecret
+  # (Cloud) or mtlsSecret (OSS, a cert-manager kubernetes.io/tls Secret with
+  # tls.crt/tls.key/ca.crt). The template branches on whichever is non-empty.
   apiKeySecret: orders-client-apikey
   apiKeySecretKey: api-key
+  mtlsSecret: ""
 
 # orders-db coordinates (the Cluster + credential live in the orders-data chart).
 # Used to build DATABASE_URL and to reference the orders-data-created credential
