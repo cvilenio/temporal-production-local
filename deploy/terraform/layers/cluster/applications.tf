@@ -404,5 +404,16 @@ resource "kubectl_manifest" "applications" {
       ])
       error_message = "Unsafe image ref: each worker AND orders-api needs a pinned digest (preferred) or a non-'latest' tag that exists in the local registry. Empty digest + tag='latest' silently deploys :latest and breaks the pod. Use `just platform-up` (it builds + computes digests) rather than a bare `terraform apply`."
     }
+    # One-directional guard: running the workers/apps against OSS requires the OSS
+    # server to exist (it issues the mTLS client-cert Secrets they mount). The reverse
+    # is intentionally free — oss_server_enabled=true with backend=cloud is the valid
+    # "server up but idle" state that keeps switch-backend non-destructive. Without
+    # this, an off-`just` apply of temporal_backend=oss with the default
+    # oss_server_enabled=false strands every worker pod in ContainerCreating (the
+    # temporal-worker-mtls Secret never gets issued).
+    precondition {
+      condition     = !local.is_oss || var.oss_server_enabled
+      error_message = "temporal_backend=\"oss\" requires oss_server_enabled=true (the OSS server issues the mTLS client certs the workers/apps mount). Use `just platform-up oss`, which sets both."
+    }
   }
 }

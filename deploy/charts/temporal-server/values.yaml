@@ -67,10 +67,12 @@ temporal:
     # First install pulls images + runs schema jobs serially — allow ~15m.
     config:
       logLevel: "info"
-      numHistoryShards: 512 # IMMUTABLE after schema setup. `just temporal-db-reset` to re-pick.
       persistence:
         defaultStore: default
         visibilityStore: visibility
+        # The consumed shard count (rendered into persistence.numHistoryShards in the
+        # server config). IMMUTABLE after schema setup — `just temporal-db-reset` to
+        # re-pick. (A top-level server.config.numHistoryShards is NOT read by the chart.)
         numHistoryShards: 512
         datastores:
           default:
