@@ -74,9 +74,22 @@ spec:
             - name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
               value: {{ $.Values.metricsOtelEndpoint | quote }}
             {{- if $.Values.connection.tls }}
-            # API-key connections require TLS (the controller doesn't set it).
+            # API-key AND mTLS connections require TLS (the controller doesn't set it).
             - name: TEMPORAL_TLS
               value: "true"
+            {{- end }}
+            {{- if $.Values.connection.mtlsSecret }}
+            # OSS mTLS: the worker PROCESS builds its own client (appkit) from env,
+            # so point it at the mounted cert-manager client cert + the server CA
+            # (the self-signed OSS frontend CA must be trusted). The Connection CRD's
+            # mutualTLSSecretRef covers the controller's own poll connection; these
+            # env + mount cover the worker process itself.
+            - name: TEMPORAL_TLS_CLIENT_CERT_PATH
+              value: /etc/temporal/tls/tls.crt
+            - name: TEMPORAL_TLS_CLIENT_KEY_PATH
+              value: /etc/temporal/tls/tls.key
+            - name: TEMPORAL_TLS_SERVER_CA_CERT_PATH
+              value: /etc/temporal/tls/ca.crt
             {{- end }}
             # --- Logging (obslog / ADR-0018) ---
             # On kind the Alloy DaemonSet tails pod stdout, so workers emit JSON
@@ -89,6 +102,10 @@ spec:
               value: {{ $.Values.logging.otlpPush | quote }}
             - name: SERVICE_NAMESPACE
               value: {{ $.Values.logging.serviceNamespace | quote }}
+          # NOTE: no mTLS volumeMount/volume here. The Worker Controller ALREADY mounts
+          # the Connection's mutualTLSSecretRef cert at /etc/temporal/tls on every worker
+          # pod; adding our own mount there is a duplicate mountPath (rejected as
+          # "must be unique"). The cert-path env above points at the controller's mount.
           {{- if $.Values.startupProbe.enabled }}
           # Downstream-reachability gate, STARTUP-ONLY (not a periodic readiness
           # probe — that would re-ping downstream forever and couple failure

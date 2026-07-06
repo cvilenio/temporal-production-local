@@ -16,6 +16,11 @@ venv/
 config/temporal/.generated/
 # Rendered from config/dependencies.yaml by render-deps.py; ephemeral.
 config/.generated/
+# temporal-server wrapper: the vendored upstream subchart (fetched by `helm
+# dependency build` at publish time) + the bootstrap spec copied in from the
+# generated OSS env. Both ephemeral; Chart.lock IS committed (pins the digest).
+deploy/charts/temporal-server/charts/
+deploy/charts/temporal-server/files/
 # Fetched (pinned + sha256-verified) Headlamp UI plugins; ephemeral artifacts
 # pulled by fetch-headlamp-plugins.py. Keep the dir, ignore its contents.
 compose/deployment/headlamp/plugins/*

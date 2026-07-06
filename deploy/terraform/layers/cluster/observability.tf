@@ -19,11 +19,13 @@ resource "kubernetes_namespace" "observability" {
 #
 # Source precedence: the in-band token minted by the cloud layer's metricsread SA
 # (remote state — the default path now that the provider is >= 1.x), else the
-# out-of-band var.cloud_metrics_apikey (tcld), else empty. Created unconditionally
-# even when empty: that keeps Prometheus bootable (its extraSecretMount resolves) so
-# the SDK scrape, recording rule, and remote_write all work; only the Cloud scrape
-# job 401s until a real key is supplied.
+# out-of-band var.cloud_metrics_apikey (tcld), else empty. On the CLOUD backend it is
+# created even when empty (keeps Prometheus bootable — its extraSecretMount resolves —
+# so the SDK scrape, recording rule, and remote_write work; only the Cloud scrape job
+# 401s until a real key is supplied). SKIPPED on the OSS backend: there is no Cloud
+# metrics endpoint and applications.tf injects no extraSecretMount, so nothing mounts it.
 resource "kubernetes_secret" "cloud_metrics_apikey" {
+  count = local.is_oss ? 0 : 1
   metadata {
     name      = "cloud-metrics-apikey"
     namespace = kubernetes_namespace.observability.metadata[0].name

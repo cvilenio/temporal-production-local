@@ -189,6 +189,34 @@ def build_rows(spec: dict) -> list[Row]:
         )
     )
 
+    # temporal-server wrapper: its Chart.yaml subchart dependency version must equal
+    # the canonical charts.temporal entry, and its appVersion must equal the server pin.
+    tsrv_chart = "deploy/charts/temporal-server/Chart.yaml"
+    dep_ver, _ = search1(
+        tsrv_chart,
+        r"-\s*name:\s*temporal\b.*?version:\s*\"?([^\"\n]+)\"?",
+        flags=re.DOTALL,
+    )
+    rows.append(
+        Row(
+            1,
+            "temporal-server subchart dep",
+            charts["temporal"]["version"],
+            dep_ver.strip(),
+            f"{tsrv_chart} (dependencies.temporal.version)",
+        )
+    )
+    app_ver, _ = search1(tsrv_chart, r'appVersion:\s*"?([^"\n]+)"?')
+    rows.append(
+        Row(
+            1,
+            "temporal-server appVersion",
+            t["server"],
+            app_ver.strip(),
+            f"{tsrv_chart} (appVersion == temporal.server)",
+        )
+    )
+
     # ---- Tier 2: platform -----------------------------------------------------
     # Terraform required_version across the layers + the reusable module.
     for f in [

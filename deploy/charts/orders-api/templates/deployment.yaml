@@ -55,18 +55,29 @@ spec:
                   key: password
             - name: DATABASE_URL
               value: "postgresql+asyncpg://{{ .Values.db.owner }}:$(DB_PASSWORD)@{{ .Values.db.clusterName }}-rw:5432/{{ .Values.db.database }}"
-            # --- Temporal Cloud (client identity) ---
+            # --- Temporal (client identity) — credential type depends on backend ---
             - name: TEMPORAL_ADDRESS
               value: {{ .Values.connection.hostPort | quote }}
             - name: TEMPORAL_NAMESPACE
               value: {{ .Values.connection.temporalNamespace | quote }}
             - name: TEMPORAL_TLS
               value: {{ .Values.connection.tls | quote }}
+            {{- if .Values.connection.apiKeySecret }}
+            # Cloud: API-key auth.
             - name: TEMPORAL_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.connection.apiKeySecret | quote }}
                   key: {{ .Values.connection.apiKeySecretKey | default "api-key" | quote }}
+            {{- else if .Values.connection.mtlsSecret }}
+            # OSS: mTLS client cert + the self-signed server CA (mounted below).
+            - name: TEMPORAL_TLS_CLIENT_CERT_PATH
+              value: /etc/temporal/tls/tls.crt
+            - name: TEMPORAL_TLS_CLIENT_KEY_PATH
+              value: /etc/temporal/tls/tls.key
+            - name: TEMPORAL_TLS_SERVER_CA_CERT_PATH
+              value: /etc/temporal/tls/ca.crt
+            {{- end }}
             # --- Observability (best-effort; kind obs not yet wired) ---
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: {{ .Values.ordersApi.otelEndpoint | quote }}
@@ -93,3 +104,15 @@ spec:
               port: http
             initialDelaySeconds: 5
             periodSeconds: 5
+          {{- if .Values.connection.mtlsSecret }}
+          volumeMounts:
+            - name: temporal-mtls
+              mountPath: /etc/temporal/tls
+              readOnly: true
+          {{- end }}
+      {{- if .Values.connection.mtlsSecret }}
+      volumes:
+        - name: temporal-mtls
+          secret:
+            secretName: {{ .Values.connection.mtlsSecret | quote }}
+      {{- end }}

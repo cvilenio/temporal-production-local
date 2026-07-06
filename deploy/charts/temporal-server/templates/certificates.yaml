@@ -1,0 +1,96 @@
+# Frontend mTLS material (ADR-0008), issued by cert-manager. Standard two-tier
+# bootstrap: a self-signed ClusterIssuer mints a CA cert, a CA ClusterIssuer then
+# issues the leaf certs. ClusterIssuer (not namespaced Issuer) because the leaf
+# certs span namespaces: the SERVER cert lands in the temporal namespace, while the
+# CLIENT certs must land in the `orders` namespace where the workers / orders-api /
+# autoscaler pods mount them (cert-manager Secrets are namespace-scoped).
+#
+# tls stays ON on both backends (Cloud API key ↔ OSS client cert) — only the
+# credential type differs; the swap interface is unchanged (see ADR-0005 / -0008).
+{{- if .Values.mtls.enabled }}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: temporal-selfsigned
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  selfSigned: {}
+---
+# CA certificate — lives in the cert-manager namespace so a ClusterIssuer can read it.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: temporal-ca
+  namespace: cert-manager
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+spec:
+  isCA: true
+  commonName: temporal-ca
+  secretName: temporal-ca
+  duration: {{ .Values.mtls.caDurationHours }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: temporal-selfsigned
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: temporal-ca
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  ca:
+    secretName: temporal-ca
+---
+# Server cert for the external frontend (temporal namespace). ca.crt is written into
+# the Secret by cert-manager (CA-issued), matching the clientCaFiles path in values.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: temporal-frontend-mtls
+  namespace: {{ .Values.namespaceName }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: temporal-frontend-mtls
+  duration: {{ .Values.mtls.certDurationHours }}
+  usages:
+    - server auth
+    - client auth
+  dnsNames:
+    {{- range .Values.mtls.serverDnsNames }}
+    - {{ . | quote }}
+    {{- end }}
+  issuerRef:
+    name: temporal-ca
+    kind: ClusterIssuer
+    group: cert-manager.io
+{{- $ordersNs := .Values.ordersNamespace | default "orders" }}
+{{- range $role, $secret := .Values.mtls.clientCertSecrets }}
+---
+# Client cert ({{ $role }}) in the orders namespace, mounted by that workload.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $secret }}
+  namespace: {{ $ordersNs }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: {{ $secret }}
+  duration: {{ $.Values.mtls.certDurationHours }}
+  commonName: temporal-{{ $role }}
+  usages:
+    - client auth
+  issuerRef:
+    name: temporal-ca
+    kind: ClusterIssuer
+    group: cert-manager.io
+{{- end }}
+{{- end }}

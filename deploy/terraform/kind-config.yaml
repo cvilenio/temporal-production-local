@@ -34,6 +34,11 @@ nodes:
       # iframe it; the raw host port stays reachable for `open in new tab`.
       # See ADR-0014 (local visibility plane).
       - { containerPort: 30808, hostPort: 8090, protocol: TCP }
+      # Temporal Web UI (OSS backend only, ADR-0003): temporal-web NodePort 30081 →
+      # host 8091. The host-plane viz-proxy fronts this on :8089 and strips frame
+      # headers so the console can iframe it (TEMPORAL_UI_EMBED_URL); dark on the
+      # Cloud backend (no temporal-web running). Mirrors the ArgoCD viz-proxy path.
+      - { containerPort: 30081, hostPort: 8091, protocol: TCP }
       # App tier now runs on kind (ai_checkpoints/0011). The still-on-host console
       # (and the order E2E curl) reach it through these NodePort → host maps,
       # reusing the host ports the Compose orders-service/orders-db used to publish:

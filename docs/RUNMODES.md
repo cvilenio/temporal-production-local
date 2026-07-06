@@ -12,8 +12,8 @@ Two axes. **Where the apps run** (local laptop) × **where Temporal lives** (the
 
 | Apps/workers run on | Backend          | How                                              | Status |
 |---------------------|------------------|--------------------------------------------------|--------|
-| **kind**            | **Temporal Cloud** | `just platform-up` + `just up-cloud-kind` (ArgoCD + Cloud API-key Secrets; kind runs workers + app tier) | ✅ **the supported path** |
-| kind                | Local OSS server | ArgoCD + `charts/temporal-server` (cluster layer)| 🚧 planned — not wired |
+| **kind**            | **Temporal Cloud** | `just up-cloud-kind` + `just platform-up` (ArgoCD + Cloud API-key Secrets; kind runs workers + app tier) | ✅ **the supported path (default)** |
+| **kind**            | **Local OSS server** | `just up-oss-kind` + `just platform-up oss` (ArgoCD + `charts/temporal-server`: official Temporal chart + CNPG Postgres + cert-manager frontend mTLS + bootstrap Job) | ✅ **supported** (ADR-0003) |
 | Compose             | Local OSS server | `poe up` (server + app tier, **no workers**)     | ⚠️ legacy fallback — see below |
 
 **The pivot (this is the important part).** Temporal **workers run on kind** (Worker
@@ -193,6 +193,47 @@ Things worth knowing:
 The account-bearing namespace handle + API keys are read from the cloud layer's state by the cluster
 layer and injected cluster-side (Secrets + ArgoCD Application valuesObject) — never committed
 (`.githooks/pre-commit`).
+
+### kind + OSS server — how to run it (ADR-0003)
+
+The self-hosted backend runs the official Temporal chart (`deploy/charts/temporal-server`, a wrapper
+over `go.temporal.io/helm-charts`) with CNPG Postgres, **frontend mTLS** via cert-manager (ADR-0008),
+and an Argo-managed bootstrap Job that registers the namespace + search attributes from the shared
+`config/temporal/namespaces.yaml` (ADR-0007). `numHistoryShards` is **512** (Temporal's small-prod
+standard) and is a tunable chart value — immutable in-place, so `just temporal-db-reset` is the local
+re-pick escape hatch.
+
+```sh
+just up-oss-kind                 # host visibility + console (CONSOLE_BACKEND=oss) — start FIRST
+just platform-up oss     # same bring-up as Cloud, but temporal_backend=oss + the OSS server
+```
+
+The connection contract is unchanged — `tls` stays **on**; only the credential type differs (Cloud
+API key ↔ OSS mTLS client cert issued by cert-manager into the `orders` namespace). The console
+sidebar Temporal link + `/architecture` work on OSS: the Web UI is fronted by the viz-proxy
+(`http://localhost:8089`, frame-stripped) and the server pods surface via the console's kube status.
+
+#### Switching a live backend (the guarded, deliberate way)
+
+**Do not flip `temporal_backend` by hand on a running stack.** Use the single control point:
+
+```sh
+just switch-backend oss     # or: cloud
+just switch-backend cloud --drain   # wait for in-flight workflows first
+just switch-backend cloud --yes     # skip the prompt (automation)
+```
+
+`switch-backend` is a **hard switch** (no shadowing / Cloud↔OSS replication). It detects open
+workflows on the current backend and **prompts y/n** before an orphaning switch, repoints the
+workers/apps (`terraform apply`, reusing the current image digests — no worker rebuild), then
+recreates the host console with the target profile. The directions are asymmetric:
+
+- **Cloud → OSS:** Cloud workflows are preserved by Cloud (idle until you switch back).
+- **OSS → Cloud:** OSS workflows stay in the local Postgres; the OSS server keeps running
+  (state preserved) because its lifecycle is **decoupled** from the toggle.
+
+Destroying the OSS server is a separate, explicit step: `just temporal-server-down` (refuses while
+the backend is still `oss`). Cloud remains the default backend.
 
 ### App tier on kind (orders-api + orders-db)
 

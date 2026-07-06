@@ -1,0 +1,50 @@
+# temporal-postgresql — the OSS server's persistence, run by the CloudNativePG
+# operator (the same operator that backs orders-db; ADR-0003 "one Postgres story").
+# Distinct Cluster from orders-db. Pre-creates BOTH the default and visibility
+# databases (postInitSQL) so the Temporal schema jobs only run schema setup/update,
+# never CREATE DATABASE. State lives on kind's local-path PVC; `just temporal-db-reset`
+# drops the Cluster + PVCs (the local re-pick-the-shard-count escape hatch).
+{{- if .Values.postgres }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.postgres.clusterName }}-app
+  namespace: {{ .Values.namespaceName }}
+  labels:
+    app.kubernetes.io/name: temporal-postgresql
+    app.kubernetes.io/component: db
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+type: kubernetes.io/basic-auth
+stringData:
+  username: {{ .Values.postgres.owner | quote }}
+  password: {{ .Values.postgres.password | quote }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ .Values.postgres.clusterName }}
+  namespace: {{ .Values.namespaceName }}
+  labels:
+    app.kubernetes.io/name: temporal-postgresql
+    app.kubernetes.io/component: db
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  instances: {{ .Values.postgres.instances }}
+  storage:
+    size: {{ .Values.postgres.storageSize | quote }}
+  postgresql:
+    parameters:
+      max_connections: {{ .Values.postgres.maxConnections | quote }}
+  bootstrap:
+    initdb:
+      database: {{ .Values.postgres.defaultDatabase | quote }}
+      owner: {{ .Values.postgres.owner | quote }}
+      secret:
+        name: {{ .Values.postgres.clusterName }}-app
+      # Runs as superuser after initdb — create the visibility DB owned by the
+      # temporal role (the default DB is created by initdb.database above).
+      postInitSQL:
+        - CREATE DATABASE {{ .Values.postgres.visibilityDatabase }} OWNER {{ .Values.postgres.owner }};
+{{- end }}

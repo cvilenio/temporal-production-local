@@ -76,8 +76,9 @@ vision above:
 | Retail order workflow (saga, signals, idempotent vs. write-then-verify retries) | ✅ working |
 | App tier (orders API, mock API, console) on kind | ✅ working — orders-api + orders-db (CNPG) on kind; console + mock-api on the host plane |
 | **Observability / metrics on kind** | ✅ working — in-cluster Prometheus scrapes SDK/server pods + the Temporal Cloud OpenMetrics endpoint into `prometheus-kind`; backend-agnostic Grafana dashboards (Critical Flows, Worker Fleet & KEDA, Durable Execution Value) verified live against real Cloud data |
-| Self-hosted Temporal **server** on kind (the OSS backend) | 🚧 planned — not wired (workers already run on kind against Cloud) |
+| Self-hosted Temporal **server** on kind (the OSS backend) | ✅ working — live-verified; official Temporal chart + CNPG Postgres + frontend mTLS, one-toggle Cloud↔OSS swap (`just platform-up oss` / `just switch-backend`), ADR-0003 |
 | Polyglot workers (Go / TypeScript / Java) | 🚧 planned — Python only today; the layout is polyglot-ready |
+| Nexus integration (cross-namespace / cross-domain services) | 🚧 planned — per-domain namespaces + least-privilege service accounts already enable it |
 | Encryption codec + codec server (client-side decode, per-user access) | 🧱 scaffold only — placeholder codec; replace with real AEAD before any sensitive use (ADR-0006) |
 | Codec proxy (payload encoding at the proxy layer) | 🚧 planned |
 | Alerting | 🚧 planned |
@@ -88,8 +89,8 @@ vision above:
 
 | Apps/workers run on | Temporal backend | Command                              | Status |
 |---------------------|------------------|--------------------------------------|--------|
-| **kind**            | **Temporal Cloud** | `just platform-up` + `just up-cloud-kind` | ✅ **the supported path** |
-| kind                | Local OSS server  | (in-cluster `temporal-server` chart) | 🚧 planned — not wired |
+| **kind**            | **Temporal Cloud** | `just up-cloud-kind` + `just platform-up` | ✅ **the supported path (default)** |
+| **kind**            | **Local OSS server** | `just up-oss-kind` + `just platform-up oss` | ✅ working — in-cluster `temporal-server` chart (ADR-0003) |
 | Compose             | Local OSS server  | `just up` (server + app, **no workers**) | ⚠️ legacy fallback; see caveat |
 
 > **Compose caveat (important).** Compose is **no longer a workflow-execution runtime**.

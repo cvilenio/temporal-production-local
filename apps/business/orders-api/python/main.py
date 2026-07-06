@@ -51,6 +51,7 @@ async def lifespan(app: FastAPI):
         api_key=settings.temporal_api_key,
         tls_client_cert_path=settings.temporal_tls_client_cert_path,
         tls_client_key_path=settings.temporal_tls_client_key_path,
+        tls_server_ca_cert_path=settings.temporal_tls_server_ca_cert_path,
     )
     app.state.temporal_service = TemporalService(client)
 

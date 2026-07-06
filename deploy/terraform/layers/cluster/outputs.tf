@@ -8,12 +8,22 @@ output "argocd_namespace" {
   value       = helm_release.argocd.namespace
 }
 
+output "temporal_backend" {
+  description = "Active Temporal backend for the cluster workers/apps ('cloud' or 'oss')."
+  value       = var.temporal_backend
+}
+
+output "oss_server_enabled" {
+  description = "Whether the in-cluster OSS temporal-server Application is deployed (decoupled from temporal_backend)."
+  value       = var.oss_server_enabled
+}
+
 output "temporal_address" {
-  description = "Regional Cloud gRPC endpoint the workers connect to (from the cloud layer; API-key auth)."
+  description = "gRPC endpoint the workers connect to — regional Cloud endpoint (API-key auth) or the in-cluster OSS frontend (mTLS)."
   value       = local.temporal_address
 }
 
 output "cloud_apikey_secret" {
-  description = "Name of the k8s Secret holding the Cloud worker API key."
-  value       = kubernetes_secret.orders_cloud_apikey.metadata[0].name
+  description = "Name of the k8s Secret holding the Cloud worker API key (empty on the OSS backend)."
+  value       = one(kubernetes_secret.orders_cloud_apikey[*].metadata[0].name)
 }

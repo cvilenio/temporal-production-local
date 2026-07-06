@@ -70,7 +70,7 @@
           <path stroke-linecap="round" stroke-linejoin="round"
             d="M2.25 15a4.5 4.5 0 0 0 4.5 4.5H18a3.75 3.75 0 0 0 1.332-7.257 3 3 0 0 0-3.758-3.848 5.25 5.25 0 0 0-10.233 2.33A4.502 4.502 0 0 0 2.25 15Z" />
         </svg>
-        TEMPORAL CLOUD
+        <span x-text="backend === 'oss' ? 'TEMPORAL SERVER (SELF-HOSTED)' : 'TEMPORAL CLOUD'">TEMPORAL CLOUD</span>
       </div>
 
       <!-- Right-anchored status chip (hoverable for tooltip) -->
@@ -84,12 +84,15 @@
       </div>
 
 
-      <!-- Caption inside boundary -->
-      <p class="absolute top-5 left-6 right-6 text-[11px] text-textMuted/60 italic leading-snug z-10">
+      <!-- Caption inside boundary (backend-aware) -->
+      <p x-show="backend !== 'oss'" class="absolute top-5 left-6 right-6 text-[11px] text-textMuted/60 italic leading-snug z-10">
         Managed by Temporal — a single namespace endpoint (<span
           class="font-mono not-italic text-textMuted/80"
           x-text="(backend === 'cloud' && cloudInfo().endpoint) ? cloudInfo().endpoint : 'your-ns.tmprl.cloud:7233'"></span>); internal topology is opaque
         to the customer.
+      </p>
+      <p x-show="backend === 'oss'" class="absolute top-5 left-6 right-6 text-[11px] text-textMuted/60 italic leading-snug z-10">
+        Self-hosted on kind — the in-cluster frontend (<span class="font-mono not-italic text-textMuted/80">temporal-frontend.temporal:7233</span>, mTLS); the full server topology runs as cluster pods.
       </p>
 
       <!-- Temporal logo watermark -->

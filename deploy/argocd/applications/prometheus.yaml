@@ -54,34 +54,15 @@ spec:
             # receiver on :9009). kind pods reach the host via the cluster's host
             # gateway, exactly like Alloy ships logs to host.docker.internal:4320.
             - url: http://host.docker.internal:9009/api/v1/write
-          extraSecretMounts:
-            # Temporal Cloud OpenMetrics bearer token (key `api-key`), created by the
-            # cluster layer in this namespace. Mounted read-only as a file so the
-            # token never appears in this committed manifest.
-            - name: cloud-metrics-apikey
-              secretName: cloud-metrics-apikey
-              mountPath: /etc/secrets/cloud
-              readOnly: true
-        # Appended to the chart's default scrape_configs (which already include the
-        # kubernetes-pods job honoring prometheus.io/scrape|port|path annotations —
-        # that job scrapes the worker + orders-api :9000 SDK endpoints).
-        extraScrapeConfigs: |
-          - job_name: temporal-cloud
-            scheme: https
-            metrics_path: /v1/metrics
-            # v1 metrics are pre-computed per-second rates published ~3min late and
-            # once per minute. Honor the response timestamps; NEVER rate() these.
-            honor_timestamps: true
-            scrape_interval: 30s        # 180 req/hr account cap -> 30s; >60s skips windows
-            scrape_timeout: 10s
-            authorization:
-              type: Bearer
-              credentials_file: /etc/secrets/cloud/api-key
-            static_configs:
-              - targets: ['metrics.temporal.io']
-            # If the response approaches the 30k-datapoint cap, filter at scrape time:
-            # params:
-            #   namespaces: ['ziggymart-*']
+        # NOTE: the backend-specific scrape wiring is NOT committed here — the cluster
+        # layer (applications.tf) injects it into this app's valuesObject based on
+        # temporal_backend, so the manifest stays secret-free AND backend-neutral:
+        #   cloud -> server.extraSecretMounts (cloud-metrics-apikey) + a `temporal-cloud`
+        #            OpenMetrics scrape (Bearer token, honor_timestamps, never rate()).
+        #   oss   -> a `temporal-oss` scrape over the in-cluster server's :9090 raw
+        #            per-service Prometheus endpoints (you rate()/histogram_quantile these).
+        # The SDK :9000 scrape (default kubernetes-pods job) + remoteWrite above are
+        # common to both backends. See docs/OBSERVABILITY.md.
         serverFiles:
           recording_rules.yml:
             groups:

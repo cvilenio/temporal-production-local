@@ -34,7 +34,7 @@
 # equal (so "bump in one place" stays honest). `cli` has no in-repo consumer yet —
 # it is pinned for the upstream-latest audit and as the documented expected version.
 temporal:
-  python_sdk: ">=1.29,<1.30" # verify: root pyproject (codec-server + platform-console groups) + libs/orders + libs/appkit
+  python_sdk: ">=1.30,<1.31" # verify: root pyproject (codec-server + platform-console groups) + libs/orders + libs/appkit
   server: "1.31.1" # verify: .env TEMPORAL_VERSION (compose/oss-server.yml)
   admin_tools: "1.31.1" # verify: .env TEMPORAL_ADMINTOOLS_VERSION
   ui: "2.51.1" # verify: .env TEMPORAL_UI_VERSION
@@ -102,6 +102,15 @@ charts:
     # cert-manager). chart 0.28.3 ships operator appVersion 1.29.1.
     version: "0.28.3"
     repo: https://cloudnative-pg.io/charts # classic Helm repo -> explicit mirror push
+  temporal:
+    # Official Temporal Server chart (go.temporal.io/helm-charts): the self-hosted
+    # OSS backend on kind (ADR-0003), wrapped by the local deploy/charts/temporal-server
+    # chart as a subchart dependency. chart 1.5.0 ships server appVersion 1.31.1 —
+    # kept in lockstep with temporal.server above (versions-audit asserts the
+    # wrapper's server/web image tags match temporal.server/temporal.ui). Classic
+    # Helm repo -> explicit mirror push (like cert-manager / cloudnative-pg).
+    version: "1.5.0"
+    repo: https://go.temporal.io/helm-charts
   prometheus:
     # In-cluster Prometheus (ADR-0021 metrics phase): scrapes SDK :9000 (pod-
     # annotation discovery) + the Temporal Cloud OpenMetrics endpoint, evaluates

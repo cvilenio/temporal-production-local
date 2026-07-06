@@ -13,10 +13,13 @@ from pydantic_settings import BaseSettings
 class TemporalConnectionSettings(BaseSettings):
     """Temporal connection profile (ADR-0005).
 
-    Local (Docker Compose or self-hosted on kind): TLS off, no auth (defaults).
+    Local (Docker Compose quick-start): TLS off, no auth (defaults).
     Temporal Cloud: set temporal_tls=true and supply either an API key
     (temporal_api_key) or mTLS client cert/key paths. The address becomes the
     Cloud endpoint, e.g. <namespace>.<account>.tmprl.cloud:7233.
+    Self-hosted OSS on kind: temporal_tls=true + mTLS client cert/key + the
+    server CA (temporal_tls_server_ca_cert_path) so the self-signed frontend cert
+    is trusted; the credential is a cert-manager client cert, not an API key.
     """
 
     temporal_address: str = "localhost:7233"
@@ -25,6 +28,9 @@ class TemporalConnectionSettings(BaseSettings):
     temporal_api_key: str | None = None
     temporal_tls_client_cert_path: str | None = None
     temporal_tls_client_key_path: str | None = None
+    # Root CA that signed the SERVER cert — required to trust a self-signed OSS
+    # frontend (the OSS mTLS path). Unused on Cloud (public CA) and local plaintext.
+    temporal_tls_server_ca_cert_path: str | None = None
 
 
 class WorkerTuningSettings(BaseSettings):
