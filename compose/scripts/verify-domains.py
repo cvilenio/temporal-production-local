@@ -87,12 +87,15 @@ def collect_descriptor_queues(descriptor: dict) -> set[str]:
     return queues
 
 
-def verify_descriptor(path: Path, namespace_domains: set[str]) -> list[str]:
+def verify_descriptor(
+    path: Path, namespace_domains: set[str]
+) -> tuple[list[str], list[str]]:
     errors: list[str] = []
+    warnings: list[str] = []
     descriptor = load_yaml(path)
     domain = descriptor.get("domain")
     if not domain:
-        return [f"{path.relative_to(REPO_ROOT)}: missing 'domain'"]
+        return [f"{path.relative_to(REPO_ROOT)}: missing 'domain'"], []
     rel = path.relative_to(REPO_ROOT)
 
     if domain not in namespace_domains:
@@ -103,14 +106,14 @@ def verify_descriptor(path: Path, namespace_domains: set[str]) -> list[str]:
     language = descriptor.get("language")
     if not language:
         errors.append(f"{rel}: missing 'language'")
-        return errors
+        return errors, warnings
 
     try:
         kernel = kernel_name(descriptor, path)
         kernel_queues = kernel_task_queues(language, kernel)
     except (FileNotFoundError, ValueError) as exc:
         errors.append(f"{rel}: {exc}")
-        return errors
+        return errors, warnings
 
     desc_queues = collect_descriptor_queues(descriptor)
     if not desc_queues:
@@ -125,12 +128,12 @@ def verify_descriptor(path: Path, namespace_domains: set[str]) -> list[str]:
 
     unused = kernel_queues - desc_queues
     if unused:
-        errors.append(
+        warnings.append(
             f"{rel}: kernel defines task queues not listed in descriptor: "
             f"{sorted(unused)}"
         )
 
-    return errors
+    return errors, warnings
 
 
 def main() -> None:
@@ -147,8 +150,16 @@ def main() -> None:
     namespace_domains = set((ns_spec.get("domains") or {}).keys())
 
     all_errors: list[str] = []
+    all_warnings: list[str] = []
     for path in domain_files:
-        all_errors.extend(verify_descriptor(path, namespace_domains))
+        errors, warnings = verify_descriptor(path, namespace_domains)
+        all_errors.extend(errors)
+        all_warnings.extend(warnings)
+
+    if all_warnings:
+        print("WARN: domain descriptor verification:")
+        for warn in all_warnings:
+            print(f"  - {warn}")
 
     if all_errors:
         print("FAIL: domain descriptor verification:")

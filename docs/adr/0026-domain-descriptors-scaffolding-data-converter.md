@@ -71,11 +71,10 @@ converters register in `resolve_data_converter()` when needed.
 
 - **Java appkit + `templates/domain/java/`** — PR #2 (Spring Boot composition kit)
 - **Generic console trigger UI** — reads descriptor `workflows[].sample_inputs`; later milestone
-- **In-image descriptor path** — `domains.py` resolves `config/domains/` from the repo tree;
-  container images without that path silently fall back to pydantic (documented design debt;
-  fix when real custom converters land)
-- **Scaffolder pyproject anchors** — string-replace patches can no-op if anchor text drifts;
-  the pytest scaffolder test guards the happy path; anchor hardening deferred
+- **In-image descriptor path** — fixed in PR #34 review: workers/starters read
+  `TEMPORAL_DATA_CONVERTER` from settings (chart injects from descriptor at deploy time).
+  `data_converter_for_namespace` remains for Phase B console (needs descriptor mount).
+- **Scaffolder pyproject anchors** — string-replace patches fail loud if anchor drifts (F3).
 
 ## Consequences
 

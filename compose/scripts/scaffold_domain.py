@@ -79,6 +79,16 @@ def substitute(text: str, mapping: dict[str, str]) -> str:
     return text
 
 
+def require_replace(text: str, old: str, new: str, *, label: str) -> str:
+    """Replace once; die if anchor missing or replace had no effect."""
+    if old not in text:
+        die(f"scaffold anchor not found ({label}): {old!r}")
+    updated = text.replace(old, new, 1)
+    if updated == text:
+        die(f"scaffold replace had no effect ({label})")
+    return updated
+
+
 def copy_tree(
     ctx: ScaffoldCtx, src: Path, dst: Path, mapping: dict[str, str]
 ) -> None:
@@ -214,34 +224,46 @@ def patch_pyproject(ctx: ScaffoldCtx, domain: str) -> None:
     text = ctx.pyproject.read_text()
     member = f'"libs/{domain}/python"'
     if member not in text:
-        text = text.replace(
+        text = require_replace(
+            text,
             'members = ["libs/orders/python"',
             f'members = ["libs/{domain}/python", "libs/orders/python"',
+            label="pyproject workspace members",
         )
     group = f"{domain}-workers"
     if f"{group} = [" not in text:
         insert = f'{group} = ["{domain}", "appkit", "dependency-injector>=4.49"]\n'
-        text = text.replace("workers = [", insert + "workers = [")
+        text = require_replace(
+            text, "workers = [", insert + "workers = [", label="pyproject dependency group"
+        )
     if group not in text.split("default-groups")[1]:
-        text = text.replace(
+        text = require_replace(
+            text,
             'default-groups = ["workers"',
             f'default-groups = ["{group}", "workers"',
+            label="pyproject default-groups",
         )
     source_key = f"{domain} = {{ workspace = true }}"
     if source_key not in text:
-        text = text.replace(
+        text = require_replace(
+            text,
             "orders = { workspace = true }",
             f"{source_key}\norders = {{ workspace = true }}",
+            label="pyproject workspace sources",
         )
     pyright_root = f'{{ root = "apps/temporal/workers/python/{domain}/workflow" }}'
     if pyright_root not in text:
-        text = text.replace(
+        text = require_replace(
+            text,
             '{ root = "apps/temporal/workers/python/workflow" }',
             pyright_root + ',\n  { root = "apps/temporal/workers/python/workflow" }',
+            label="pyproject pyright workflow root",
         )
-        text = text.replace(
+        text = require_replace(
+            text,
             '{ root = "apps/temporal/workers/python/activity" }',
             f'{{ root = "apps/temporal/workers/python/{domain}/activity" }},\n  {{ root = "apps/temporal/workers/python/activity" }}',
+            label="pyproject pyright activity root",
         )
     ctx.pyproject.write_text(text)
 

@@ -30,6 +30,8 @@ Set `VersioningBehavior.PINNED` on workflow classes that participate in Worker D
 Update `config/domains/<domain>.yaml` so `workers`, `workflows`, and `task_queue` fields mirror the kernel.
 Use `kernel: <other-lib>` when the domain key differs from the Python package name (see `ziggymart` → `orders`).
 Set `data_converter: default` unless you add a custom resolver in `appkit.domains.resolve_data_converter`.
+The cluster layer reads this field at deploy time and injects `TEMPORAL_DATA_CONVERTER` on worker and starter pods.
+Workers resolve the ref via settings at startup — unknown refs raise immediately.
 Run `just verify-domains` — it must pass before you commit.
 
 ## Cloud overlay and cluster wiring

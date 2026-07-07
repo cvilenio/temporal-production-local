@@ -25,6 +25,10 @@ connection:
 # fail "All connection attempts failed".
 ordersServiceUrl: "http://orders-service:8000"
 
+# Data-converter ref from config/domains/*.yaml — injected at deploy time as
+# TEMPORAL_DATA_CONVERTER on worker pods (ADR-0026).
+dataConverter: "default"
+
 # Startup-only downstream-reachability gate (see workerdeployment.yaml). Gates
 # Worker-Controller promotion (Build-ID routing) on the worker actually reaching
 # orders-service + mock-api, without continuous dependency pinging. failureThreshold

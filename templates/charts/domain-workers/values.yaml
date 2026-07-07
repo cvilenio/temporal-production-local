@@ -25,6 +25,10 @@ connection:
 # fail "All connection attempts failed".
 ordersServiceUrl: "http://orders-service:8000"
 
+# Data-converter ref from config/domains/*.yaml — injected at deploy time as
+# TEMPORAL_DATA_CONVERTER on worker pods (ADR-0026).
+dataConverter: "default"
+
 # Demo domains (HelloWorkflow) have no orders-api dependency — disable the
 # downstream-reachability startup gate so Worker-Controller promotion is not blocked.
 startupProbe:
