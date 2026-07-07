@@ -1,0 +1,3 @@
+io.temporal.demo.appkit.AppkitDataConverterAutoConfiguration
+io.temporal.demo.appkit.AppkitConnectionAutoConfiguration
+io.temporal.demo.appkit.AppkitWorkerVersioningAutoConfiguration
