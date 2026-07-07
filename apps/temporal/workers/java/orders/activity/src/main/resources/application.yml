@@ -1,0 +1,36 @@
+spring:
+  application:
+    name: orders-activity-java-worker
+  config:
+    import: optional:classpath:application-appkit.yaml
+  temporal:
+    namespace: ${TEMPORAL_NAMESPACE}
+    connection:
+      target: ${TEMPORAL_ADDRESS:localhost:7233}
+    start-workers: true
+    workers-auto-discovery:
+      packages: io.temporal.demo.orders.activity
+    workers:
+      - task-queue: orders-java-activity-task-queue
+
+temporal:
+  data-converter: ${TEMPORAL_DATA_CONVERTER:default}
+
+appkit:
+  telemetry:
+    otel-service-name: ${OTEL_SERVICE_NAME:orders-worker-activity-java}
+
+orders:
+  service-url: ${ORDERS_SERVICE_URL:http://localhost:8002}
+
+management:
+  endpoint:
+    health:
+      group:
+        readiness:
+          include: readinessState,ordersService
+
+logging:
+  level:
+    root: ${LOG_LEVEL:INFO}
+    io.temporal: INFO

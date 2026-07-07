@@ -137,6 +137,12 @@ autoscaling:
       minReplicas: 1
       maxReplicas: 10
       targetBacklogPerReplica: 5
+    activity-java:
+      taskQueue: orders-java-activity-task-queue
+      queueType: activity
+      minReplicas: 1
+      maxReplicas: 10
+      targetBacklogPerReplica: 5
 
 # One entry per worker profile (mirrors orders.worker.WORKER_PROFILES and
 # apps/temporal/workers/python/<name>/). Each profile is its own image (the entrypoint is
@@ -164,3 +170,17 @@ workers:
       repository: localhost:5001/orders-worker-activity
       tag: "latest"
     command: ["python", "main.py"]
+  - name: activity-java
+    deploymentName: orders-activity-java
+    replicas: 1
+    language: java
+    image:
+      repository: localhost:5001/orders-worker-activity-java
+      tag: "latest"
+    startupProbe:
+      type: httpGet
+      path: /health/readiness
+      port: 9000
+    extraEnv:
+      OTEL_SERVICE_NAME: orders-worker-activity-java
+      SDK_METRICS_PORT: "9000"

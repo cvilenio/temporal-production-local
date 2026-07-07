@@ -5,6 +5,7 @@
 domain: ziggymart
 kernel: orders
 language: python
+# finalize_order runs on the Java activity worker (cross-language Independent Activity).
 data_converter: default
 workers:
   - profile: workflow
@@ -15,6 +16,10 @@ workers:
     kind: activity
     deployment_name: orders-activity
     task_queue: orders-activity-task-queue
+  - profile: activity-java
+    kind: activity
+    deployment_name: orders-activity-java
+    task_queue: orders-java-activity-task-queue
 workflows:
   - type: OrderWorkflow
     task_queue: orders-workflow-task-queue

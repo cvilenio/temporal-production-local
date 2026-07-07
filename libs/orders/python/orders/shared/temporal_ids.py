@@ -6,6 +6,7 @@ from temporalio.common import SearchAttributeKey
 class TaskQueue(StrEnum):
     ORDERS_WORKFLOW = "orders-workflow-task-queue"
     ORDERS_ACTIVITY = "orders-activity-task-queue"
+    ORDERS_JAVA_ACTIVITY = "orders-java-activity-task-queue"
 
 
 class ActivityName(StrEnum):

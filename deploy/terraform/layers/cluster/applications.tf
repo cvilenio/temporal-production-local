@@ -98,8 +98,9 @@ locals {
   # content-addressed Build ID), else by tag. Image bytes live in the local
   # registry; in-cluster the nodes pull them as localhost:5001/... via certs.d.
   worker_image = {
-    workflow = { repository = "localhost:5001/orders-worker-workflow", tag = var.worker_image_tag, digest = lookup(var.worker_image_digests, "workflow", "") }
-    activity = { repository = "localhost:5001/orders-worker-activity", tag = var.worker_image_tag, digest = lookup(var.worker_image_digests, "activity", "") }
+    workflow      = { repository = "localhost:5001/orders-worker-workflow", tag = var.worker_image_tag, digest = lookup(var.worker_image_digests, "workflow", "") }
+    activity      = { repository = "localhost:5001/orders-worker-activity", tag = var.worker_image_tag, digest = lookup(var.worker_image_digests, "activity", "") }
+    activity_java = { repository = "localhost:5001/orders-worker-activity-java", tag = var.worker_image_tag, digest = lookup(var.worker_image_digests, "activity-java", "") }
   }
 
   # orders-api image: same digest-or-tag pinning as the workers.
@@ -154,6 +155,22 @@ locals {
                 replicas       = 2
                 image          = local.worker_image.activity
                 command        = ["python", "main.py"]
+              },
+              {
+                name           = "activity-java"
+                deploymentName = "orders-activity-java"
+                replicas       = 1
+                language       = "java"
+                image          = local.worker_image.activity_java
+                startupProbe = {
+                  type = "httpGet"
+                  path = "/health/readiness"
+                  port = 9000
+                }
+                extraEnv = {
+                  OTEL_SERVICE_NAME = "orders-worker-activity-java"
+                  SDK_METRICS_PORT  = "9000"
+                }
               },
             ]
           }

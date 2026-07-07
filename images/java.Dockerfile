@@ -18,6 +18,7 @@ COPY libs/appkit/java ./libs/appkit/java
 
 ARG DOMAIN=hello
 COPY libs/${DOMAIN}/java ./libs/${DOMAIN}/java
+COPY libs/${DOMAIN}/proto ./libs/${DOMAIN}/proto
 COPY apps/temporal/workers/java ./apps/temporal/workers/java
 
 ARG APP_MODULE=:hello-workflow-worker

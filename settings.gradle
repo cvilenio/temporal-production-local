@@ -2,3 +2,9 @@ rootProject.name = 'temporal-production-local-java'
 
 include 'appkit-java'
 project(':appkit-java').projectDir = file('libs/appkit/java')
+
+include 'orders-lib-java'
+project(':orders-lib-java').projectDir = file('libs/orders/java')
+
+include 'orders-activity-java-worker'
+project(':orders-activity-java-worker').projectDir = file('apps/temporal/workers/java/orders/activity')

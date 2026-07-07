@@ -1,0 +1,41 @@
+plugins {
+    id 'java-library'
+    id 'com.google.protobuf' version '0.9.4'
+    id 'io.spring.dependency-management'
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.boot:spring-boot-dependencies:${springBootVersion}"
+    }
+}
+
+protobuf {
+    protoc {
+        artifact = 'com.google.protobuf:protoc:3.25.5'
+    }
+    generateProtoTasks {
+        all().configureEach {
+            builtins {
+                java {}
+            }
+        }
+    }
+}
+
+sourceSets {
+    main {
+        proto {
+            srcDir "${rootProject.projectDir}/libs/orders/proto"
+        }
+    }
+}
+
+dependencies {
+    api project(':appkit-java')
+    api "io.temporal:temporal-sdk:${temporalJavaSdkVersion}"
+    api 'com.google.protobuf:protobuf-java:3.25.5'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+}
