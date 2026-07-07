@@ -100,7 +100,7 @@ locals {
   worker_image = {
     workflow      = { repository = "localhost:5001/orders-worker-workflow", tag = var.worker_image_tag, digest = lookup(var.worker_image_digests, "workflow", "") }
     activity      = { repository = "localhost:5001/orders-worker-activity", tag = var.worker_image_tag, digest = lookup(var.worker_image_digests, "activity", "") }
-    activity_java = { repository = "localhost:5001/orders-worker-activity-java", tag = var.worker_image_tag, digest = lookup(var.worker_image_digests, "activity-java", "") }
+    finalization_java = { repository = "localhost:5001/orders-worker-finalization-java", tag = var.worker_image_tag, digest = lookup(var.worker_image_digests, "finalization-java", "") }
   }
 
   # orders-api image: same digest-or-tag pinning as the workers.
@@ -144,31 +144,31 @@ locals {
             workers = [
               {
                 name           = "workflow"
-                deploymentName = "orders-workflow"
+                deploymentName = "orders-workflow-python"
                 replicas       = 1
                 image          = local.worker_image.workflow
                 command        = ["python", "main.py"]
               },
               {
                 name           = "activity"
-                deploymentName = "orders-activity"
+                deploymentName = "orders-activity-python"
                 replicas       = 2
                 image          = local.worker_image.activity
                 command        = ["python", "main.py"]
               },
               {
-                name           = "activity-java"
-                deploymentName = "orders-activity-java"
+                name           = "finalization-java"
+                deploymentName = "orders-finalization-java"
                 replicas       = 1
                 language       = "java"
-                image          = local.worker_image.activity_java
+                image          = local.worker_image.finalization_java
                 startupProbe = {
                   type = "httpGet"
                   path = "/health/readiness"
                   port = 9000
                 }
                 extraEnv = {
-                  OTEL_SERVICE_NAME = "orders-worker-activity-java"
+                  OTEL_SERVICE_NAME = "orders-worker-finalization-java"
                   SDK_METRICS_PORT  = "9000"
                 }
               },

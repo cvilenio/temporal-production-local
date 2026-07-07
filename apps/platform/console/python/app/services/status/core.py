@@ -103,7 +103,7 @@ SERVICE_REGISTRY = {
         "task_queue": TaskQueue.WORKFLOW,
         "kube": {
             "namespace": "orders",
-            "selector": "app.kubernetes.io/name=orders-workflow",
+            "selector": "app.kubernetes.io/name=orders-workflow-python",
         },
     },
     "orders-activity-worker": {
@@ -115,7 +115,7 @@ SERVICE_REGISTRY = {
         "task_queue": TaskQueue.ACTIVITY,
         "kube": {
             "namespace": "orders",
-            "selector": "app.kubernetes.io/name=orders-activity",
+            "selector": "app.kubernetes.io/name=orders-activity-python",
         },
     },
     "orders-db": {

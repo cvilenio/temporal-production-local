@@ -92,7 +92,7 @@ can't reclaim a deployment still owned by a prior cluster's controller. (A manua
 
 ```sh
 set -a; . .secrets/keys/cloud.env; set +a
-for wd in orders/orders-workflow orders/orders-activity; do
+for wd in orders/orders-workflow-python orders/orders-activity-python orders/orders-finalization-java; do
   temporal worker deployment manager-identity unset --yes \
     --address "$TEMPORAL_ADDRESS" --namespace "$TEMPORAL_NAMESPACE" --api-key "$TEMPORAL_API_KEY" --tls \
     --deployment-name "$wd"

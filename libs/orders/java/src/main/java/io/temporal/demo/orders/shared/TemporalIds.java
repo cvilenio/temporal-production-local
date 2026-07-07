@@ -2,7 +2,7 @@ package io.temporal.demo.orders.shared;
 
 public final class TemporalIds {
 
-  public static final String ORDERS_JAVA_ACTIVITY_TASK_QUEUE = "orders-java-activity-task-queue";
+  public static final String ORDERS_FINALIZATION_TASK_QUEUE = "orders-finalization-task-queue";
 
   private TemporalIds() {}
 }

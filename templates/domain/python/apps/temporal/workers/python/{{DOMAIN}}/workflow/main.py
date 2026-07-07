@@ -39,6 +39,7 @@ async def main() -> None:
         tls_client_key_path=settings.temporal_tls_client_key_path,
         tls_server_ca_cert_path=settings.temporal_tls_server_ca_cert_path,
         data_converter=resolve_data_converter(settings.temporal_data_converter),
+        default_deployment_name="{{DOMAIN}}-workflow-python",
     )
 
     await run_worker(
@@ -55,7 +56,7 @@ async def main() -> None:
             max_cached_workflows=settings.worker_max_cached_workflows,
         ),
         deployment_config=build_deployment_config(
-            default_deployment_name="{{DOMAIN}}-workflow"
+            default_deployment_name="{{DOMAIN}}-workflow-python"
         ),
         on_shutdown=container.shutdown_resources,
     )

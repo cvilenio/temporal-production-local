@@ -1,5 +1,6 @@
 io.temporal.demo.appkit.AppkitDataConverterAutoConfiguration
 io.temporal.demo.appkit.AppkitConnectionAutoConfiguration
+io.temporal.demo.appkit.AppkitWorkerIdentityAutoConfiguration
 io.temporal.demo.appkit.AppkitWorkerVersioningAutoConfiguration
 io.temporal.demo.appkit.AppkitOtelResourceAutoConfiguration
 io.temporal.demo.appkit.AppkitTracingAutoConfiguration
