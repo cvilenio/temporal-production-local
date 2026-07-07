@@ -77,7 +77,7 @@ vision above:
 | App tier (orders API, mock API, console) on kind | ✅ working — orders-api + orders-db (CNPG) on kind; console + mock-api on the host plane |
 | **Observability / metrics on kind** | ✅ working — in-cluster Prometheus scrapes SDK/server pods + the Temporal Cloud OpenMetrics endpoint into `prometheus-kind`; backend-agnostic Grafana dashboards (Critical Flows, Worker Fleet & KEDA, Durable Execution Value) verified live against real Cloud data |
 | Self-hosted Temporal **server** on kind (the OSS backend) | ✅ working — live-verified; official Temporal chart + CNPG Postgres + frontend mTLS, one-toggle Cloud↔OSS swap (`just platform-up oss` / `just switch-backend`), ADR-0003 |
-| Polyglot workers (Go / TypeScript / Java) | 🚧 planned — Python only today; the layout is polyglot-ready |
+| Polyglot workers (Go / TypeScript / Java) | ✅ **Python + Java** — Go/TS still planned; layout is polyglot-ready |
 | Nexus integration (cross-namespace / cross-domain services) | 🚧 planned — per-domain namespaces + least-privilege service accounts already enable it |
 | Encryption codec + codec server (client-side decode, per-user access) | 🧱 scaffold only — placeholder codec; replace with real AEAD before any sensitive use (ADR-0006) |
 | Codec proxy (payload encoding at the proxy layer) | 🚧 planned |
@@ -319,7 +319,7 @@ apps/        Thin deployment units, grouped by class: temporal/ (workers, codec 
              orchestration substrate), platform/ (console — operability tooling),
              business/ (orders API + mock API — domain apps & simulated integrations).
 libs/        Shared-kernel code apps import (the orders domain: workflows, activities,
-             clients, DB, telemetry). Polyglot-ready; Python today.
+             clients, DB, telemetry). Python and Java today; Go/TS planned.
 images/      One configurable Dockerfile per language.
 deploy/      How it ships: terraform/ (control plane), argocd/ (app-of-apps), charts/.
 config/      Connection profiles + the shared namespace/dependency specs.
