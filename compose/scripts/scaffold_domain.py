@@ -21,7 +21,7 @@ from pathlib import Path
 import yaml
 
 SCRIPT_REPO = Path(__file__).resolve().parents[2]
-SUPPORTED_LANGS = {"python"}
+SUPPORTED_LANGS = {"java", "python"}
 
 
 @dataclass(frozen=True)
@@ -48,6 +48,10 @@ class ScaffoldCtx:
         return self.root / "pyproject.toml"
 
     @property
+    def settings_gradle(self) -> Path:
+        return self.root / "settings.gradle"
+
+    @property
     def chart_template(self) -> Path:
         return SCRIPT_REPO / "templates/charts/domain-workers"
 
@@ -70,6 +74,7 @@ def tokens(domain: str) -> dict[str, str]:
         "{{DOMAIN}}": domain,
         "{{Domain}}": domain.replace("-", " ").title().replace(" ", ""),
         "{{DOMAIN_UPPER}}": domain.upper().replace("-", "_"),
+        "{{DOMAIN_PKG}}": domain.replace("-", ""),
     }
 
 
@@ -111,6 +116,8 @@ def copy_tree(
             ".md",
             ".txt",
             ".tf",
+            ".java",
+            ".gradle",
         }:
             out.write_text(substitute(path.read_text(), mapping))
         else:
@@ -268,6 +275,63 @@ def patch_pyproject(ctx: ScaffoldCtx, domain: str) -> None:
     ctx.pyproject.write_text(text)
 
 
+def patch_settings_gradle(ctx: ScaffoldCtx, domain: str) -> None:
+    path = ctx.settings_gradle
+    if not path.is_file():
+        die("missing settings.gradle — add the M5 Gradle spine before scaffolding Java domains")
+    text = path.read_text()
+    lib_include = f"include '{domain}-lib'"
+    if lib_include in text:
+        return
+    anchor = "project(':appkit-java').projectDir = file('libs/appkit/java')"
+    block = textwrap.dedent(
+        f"""
+
+        include '{domain}-lib'
+        project(':{domain}-lib').projectDir = file('libs/{domain}/java')
+
+        include '{domain}-workflow-worker'
+        project(':{domain}-workflow-worker').projectDir = file('apps/temporal/workers/java/{domain}/workflow')
+
+        include '{domain}-activity-worker'
+        project(':{domain}-activity-worker').projectDir = file('apps/temporal/workers/java/{domain}/activity')
+        """
+    ).rstrip()
+    text = require_replace(text, anchor, anchor + block, label="settings.gradle domain modules")
+    path.write_text(text)
+
+
+def patch_chart_for_lang(ctx: ScaffoldCtx, domain: str, lang: str) -> None:
+    """Java images use the Dockerfile ENTRYPOINT (JAVA_OPTS + jar); omit chart command."""
+    if lang != "java":
+        return
+    values = ctx.root / "deploy/charts" / f"{domain}-workers" / "values.yaml"
+    text = values.read_text()
+    text = text.replace('    command: ["python", "main.py"]\n', "")
+    values.write_text(text)
+
+
+def domain_copy_paths(lang: str, domain: str) -> list[tuple[str, str]]:
+    """Return (template_rel, dest_rel) pairs for the domain tree."""
+    if lang == "python":
+        return [
+            ("libs/{{DOMAIN}}/python", f"libs/{domain}/python"),
+            (
+                "apps/temporal/workers/python/{{DOMAIN}}",
+                f"apps/temporal/workers/python/{domain}",
+            ),
+        ]
+    if lang == "java":
+        return [
+            ("libs/{{DOMAIN}}/java", f"libs/{domain}/java"),
+            (
+                "apps/temporal/workers/java/{{DOMAIN}}",
+                f"apps/temporal/workers/java/{domain}",
+            ),
+        ]
+    die(f"unsupported language {lang!r}")
+
+
 def scaffold_chart(ctx: ScaffoldCtx, domain: str, mapping: dict[str, str]) -> None:
     dst = ctx.root / "deploy/charts" / f"{domain}-workers"
     copy_tree(ctx, ctx.chart_template, dst, mapping)
@@ -312,20 +376,33 @@ def scaffold_grafana(ctx: ScaffoldCtx, domain: str, mapping: dict[str, str]) -> 
     )
 
 
-def print_next_steps(domain: str) -> None:
+def print_next_steps(domain: str, lang: str) -> None:
     chart_var = domain.replace("-", "_")
-    print(
-        textwrap.dedent(
+    if lang == "java":
+        build_block = textwrap.dedent(
             f"""
-            === Scaffold complete: {domain} ===
-
-            Manual follow-ups (not auto-generated):
-              1. Add an ArgoCD Application for {domain}-workers in
-                 deploy/terraform/layers/cluster/applications.tf (copy orders_workers_application).
-              2. Add Grafana volume mounts for {domain} in docker-compose.yml (copy ziggymart block).
-              3. Run `uv lock` after pyproject.toml changes.
-
-            Build + deploy (run each step separately — never chain publish && apply):
+              TAG=$(git describe --always --dirty)
+              just java-build
+              docker build -f images/java.Dockerfile \\
+                --build-arg DOMAIN={domain} \\
+                --build-arg APP_MODULE=:{domain}-workflow-worker \\
+                --build-arg WORKER_REL_PATH=apps/temporal/workers/java/{domain}/workflow \\
+                --build-arg APP_JAR={domain}-workflow-worker \\
+                -t localhost:5001/{domain}-worker-workflow:$TAG .
+              docker build -f images/java.Dockerfile \\
+                --build-arg DOMAIN={domain} \\
+                --build-arg APP_MODULE=:{domain}-activity-worker \\
+                --build-arg WORKER_REL_PATH=apps/temporal/workers/java/{domain}/activity \\
+                --build-arg APP_JAR={domain}-activity-worker \\
+                -t localhost:5001/{domain}-worker-activity:$TAG .
+              docker push localhost:5001/{domain}-worker-workflow:$TAG
+              docker push localhost:5001/{domain}-worker-activity:$TAG
+            """
+        ).rstrip()
+        extra = ""
+    else:
+        build_block = textwrap.dedent(
+            f"""
               TAG=$(git describe --always --dirty)
               docker build -f images/python.Dockerfile \\
                 --build-arg APP_GROUP={domain}-workers \\
@@ -339,6 +416,22 @@ def print_next_steps(domain: str) -> None:
                 -t localhost:5001/{domain}-worker-activity:$TAG .
               docker push localhost:5001/{domain}-worker-workflow:$TAG
               docker push localhost:5001/{domain}-worker-activity:$TAG
+            """
+        ).rstrip()
+        extra = "              3. Run `uv lock` after pyproject.toml changes.\n"
+
+    print(
+        textwrap.dedent(
+            f"""
+            === Scaffold complete: {domain} ({lang}) ===
+
+            Manual follow-ups (not auto-generated):
+              1. Add an ArgoCD Application for {domain}-workers in
+                 deploy/terraform/layers/cluster/applications.tf (copy orders_workers_application).
+              2. Add Grafana volume mounts for {domain} in docker-compose.yml (copy ziggymart block).
+            {extra}
+            Build + deploy (run each step separately — never chain publish && apply):
+            {build_block}
               just chart-publish   # confirm chart landed before apply
               # terraform apply with TF_VAR_{chart_var}_workers_chart_version=0.1.0
               # and worker image digests for {domain}
@@ -374,7 +467,9 @@ def main() -> None:
     args = parser.parse_args()
 
     root = args.root.resolve()
-    template_root = (args.template_root or (SCRIPT_REPO / "templates/domain/python")).resolve()
+    lang = args.lang
+    default_template = SCRIPT_REPO / f"templates/domain/{lang}"
+    template_root = (args.template_root or default_template).resolve()
     ctx = ScaffoldCtx(root=root, template_root=template_root)
 
     domain = args.name.strip().lower()
@@ -384,9 +479,9 @@ def main() -> None:
     if domain_exists(ctx, domain) and not args.force:
         die(f"domain {domain!r} already exists — pass --force to overwrite")
 
-    if args.lang not in SUPPORTED_LANGS:
+    if lang not in SUPPORTED_LANGS:
         die(
-            f"language {args.lang!r} not supported yet (available: {sorted(SUPPORTED_LANGS)})"
+            f"language {lang!r} not supported yet (available: {sorted(SUPPORTED_LANGS)})"
         )
 
     if not template_root.is_dir():
@@ -394,29 +489,30 @@ def main() -> None:
 
     mapping = tokens(domain)
 
-    for rel in [
-        f"libs/{domain}/python",
-        f"apps/temporal/workers/python/{domain}",
-    ]:
-        src = template_root / rel.replace(domain, "{{DOMAIN}}")
-        dst = root / rel
+    for template_rel, dest_rel in domain_copy_paths(lang, domain):
+        src = template_root / template_rel
+        dst = root / dest_rel
         if dst.exists() and args.force:
             shutil.rmtree(dst)
         copy_tree(ctx, src, dst, mapping)
 
-    write_domain_descriptor(ctx, domain, args.lang)
+    write_domain_descriptor(ctx, domain, lang)
     append_namespace(ctx, domain)
     append_cloud_overlay(ctx, domain)
     add_chart_version_variable(ctx, domain)
-    patch_pyproject(ctx, domain)
+    if lang == "python":
+        patch_pyproject(ctx, domain)
+    elif lang == "java":
+        patch_settings_gradle(ctx, domain)
 
     chart_dst = root / "deploy/charts" / f"{domain}-workers"
     if chart_dst.exists() and args.force:
         shutil.rmtree(chart_dst)
     scaffold_chart(ctx, domain, mapping)
+    patch_chart_for_lang(ctx, domain, lang)
     scaffold_grafana(ctx, domain, mapping)
 
-    print_next_steps(domain)
+    print_next_steps(domain, lang)
 
 
 if __name__ == "__main__":
