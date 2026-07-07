@@ -1,0 +1,21 @@
+spring:
+  application:
+    name: {{DOMAIN}}-workflow-worker
+  temporal:
+    namespace: ${TEMPORAL_NAMESPACE}
+    connection:
+      target: ${TEMPORAL_ADDRESS:localhost:7233}
+    start-workers: true
+    workers-auto-discovery:
+      packages: io.temporal.demo.{{DOMAIN_PKG}}.workflow
+    workers:
+      - task-queue: {{DOMAIN}}-workflow-task-queue
+
+# Pluggable data converter ref — injected at deploy time as TEMPORAL_DATA_CONVERTER (ADR-0026).
+temporal:
+  data-converter: ${TEMPORAL_DATA_CONVERTER:default}
+
+logging:
+  level:
+    root: INFO
+    io.temporal: INFO

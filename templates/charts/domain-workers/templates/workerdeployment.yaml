@@ -54,7 +54,9 @@ spec:
           # Prefer an immutable digest (content-addressed → Build ID changes iff
           # image content changes); fall back to a tag when no digest is pinned.
           image: "{{ .image.repository }}{{ if .image.digest }}@{{ .image.digest }}{{ else }}:{{ .image.tag }}{{ end }}"
+          {{- if .command }}
           command: {{ .command | toJson }}
+          {{- end }}
           # The controller injects the TEMPORAL_* envs (address/namespace/api-key/
           # version), but not these. Both MUST be set explicitly: the kernel's
           # defaults are the host-dev values (localhost:8001/:8002), so without an

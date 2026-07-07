@@ -1,0 +1,20 @@
+spring:
+  application:
+    name: {{DOMAIN}}-activity-worker
+  temporal:
+    namespace: ${TEMPORAL_NAMESPACE}
+    connection:
+      target: ${TEMPORAL_ADDRESS:localhost:7233}
+    start-workers: true
+    workers-auto-discovery:
+      packages: io.temporal.demo.{{DOMAIN_PKG}}.activity
+    workers:
+      - task-queue: {{DOMAIN}}-activity-task-queue
+
+temporal:
+  data-converter: ${TEMPORAL_DATA_CONVERTER:default}
+
+logging:
+  level:
+    root: INFO
+    io.temporal: INFO
