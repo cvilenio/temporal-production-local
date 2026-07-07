@@ -19,5 +19,5 @@ dependencies {
 }
 
 bootJar {
-    archiveBaseName = 'orders-activity-java-worker'
+    archiveBaseName = 'orders-finalization-java-worker'
 }

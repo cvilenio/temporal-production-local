@@ -70,7 +70,7 @@ def build_deployment_config(
     from temporalio.common import WorkerDeploymentVersion
     from temporalio.worker import WorkerDeploymentConfig
 
-    deployment_name = os.getenv("TEMPORAL_DEPLOYMENT_NAME", default_deployment_name)
+    deployment_name = os.getenv("TEMPORAL_DEPLOYMENT_NAME") or default_deployment_name
     return WorkerDeploymentConfig(
         version=WorkerDeploymentVersion(
             deployment_name=deployment_name, build_id=build_id
