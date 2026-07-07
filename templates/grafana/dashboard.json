@@ -21,7 +21,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(temporal_workflow_task_schedule_to_start_latency_bucket{namespace=\"{{DOMAIN}}\", task_queue=\"{{DOMAIN}}-workflow-task-queue\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(temporal_workflow_task_schedule_to_start_latency_seconds_bucket{namespace=\"{{DOMAIN}}\", task_queue=\"{{DOMAIN}}-workflow-task-queue\"}[5m])))",
           "legendFormat": "p99 schedule-to-start"
         }
       ]
@@ -36,7 +36,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(temporal_activity_schedule_to_start_latency_bucket{namespace=\"{{DOMAIN}}\", task_queue=\"{{DOMAIN}}-activity-task-queue\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(temporal_activity_schedule_to_start_latency_seconds_bucket{namespace=\"{{DOMAIN}}\", task_queue=\"{{DOMAIN}}-activity-task-queue\"}[5m])))",
           "legendFormat": "p99 schedule-to-start"
         }
       ]

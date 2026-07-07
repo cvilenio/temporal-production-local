@@ -167,21 +167,24 @@ The endpoint listens on `0.0.0.0:9000` (configurable via `SDK_METRICS_PORT` env)
 ```
 
 `durations_as_seconds=True` makes latency histogram **values** second-scale (vs the SDK default of
-milliseconds) — it does **not** add a `_seconds` name suffix. The name suffix is a *separate* exporter
-option (`unit_suffix`, default **off**, not set here), so histograms are exposed as bare
-`temporal_*_latency_bucket` with second-scale values (verified on the live Python worker). This applies
-to **custom** histograms via `activity.metric_meter()`/`workflow.metric_meter()` too — same pull
-exporter — so `orders_payment_capture_duration` → `orders_payment_capture_duration_bucket` (no `_seconds`).
-Any `*_seconds_bucket` series still visible in Prometheus are **stale leftovers** in the TSDB from an
-earlier run and carry no current data. The **OTLP push** path is separate: the collector appends `_total`
-to counters and the unit to histograms (e.g. `orders_payment_amount_usd_cents_bucket`).
+milliseconds).
+`unit_suffix=True` (ADR-0027) appends the `_seconds` unit suffix to duration histogram names, so
+SDK latencies are exposed as `temporal_*_latency_seconds_bucket` with second-scale values (verified
+on the live Python worker).
+`counters_total_suffix` is intentionally **off** until a release honors it — see ADR-0027.
+Custom histograms via `activity.metric_meter()`/`workflow.metric_meter()` follow the same pull
+exporter.
+The **OTLP push** path is separate: the collector appends `_total` to counters and the unit to
+histograms (e.g. `orders_payment_amount_usd_cents_bucket`).
 
-> **Counter naming gotcha.** The Temporal **Python** SDK's Prometheus exporter exposes counters
-> **without** a `_total` suffix (e.g. `temporal_workflow_completed`, `order_workflow_steps_completed`).
-> `counters_total_suffix=True` is a no-op in this SDK build, so we don't set it, and the bundled
-> `sdk.json` has been aligned to the no-`_total` names. By contrast, counters sent over **OTLP**
-> (business metrics) **do** get `_total` appended by the collector's Prometheus exporter — so business
-> counters are queried as `orders_payments_captured_total`. Two pipelines, two conventions.
+> **Counter naming (ADR-0027).** Python SDK counters are bare on `:9000` today
+> (e.g. `temporal_workflow_completed`, `temporal_workflow_task_queue_poll_succeed`).
+> `counters_total_suffix=True` is a no-op on `temporalio==1.30.0` and is not set — flipping it
+> without migrating dashboard panels would be a landmine on a future SDK bump.
+> Java (Micrometer) already emits `_total` on counters; counter names diverge across SDKs until
+> the coupled toggle + dashboard migration lands in one PR.
+> OTLP business counters **do** get `_total` from the collector (`orders_payments_captured_total`).
+> Two pipelines, two conventions.
 
 ---
 
@@ -207,10 +210,10 @@ then appeared (135 / 26) once workflows completed and the flaky scenario failed 
 
 **What actually differs — naming conventions:**
 
-| | sdk-core (Python, .NET, Ruby) | Tally + Prometheus naming (Java native; Go via opt-in `contrib/tally`) |
+| | sdk-core (Python, .NET, Ruby) — this repo | Tally + Prometheus naming (Java native; Go via opt-in `contrib/tally`) |
 |---|---|---|
-| `_total` on counters | no (`counters_total_suffix` default off) | **yes** (`NewPrometheusNamingScope` appends it) |
-| `_seconds` unit suffix on latencies | no (`unit_suffix` default off); value still seconds via `durations_as_seconds` | **yes** |
+| `_total` on counters | no (`counters_total_suffix` off until coupled ADR-0027 change) | **yes** (`NewPrometheusNamingScope` / Micrometer default) |
+| `_seconds` unit suffix on latencies | **yes** (`unit_suffix=True` in appkit); values in seconds via `durations_as_seconds` | **yes** |
 | metric prefix | configurable | configurable |
 
 **SDK architecture (per SDK source):**
@@ -227,13 +230,14 @@ then appeared (135 / 26) once workflows completed and the flaky scenario failed 
 
 ### One-dashboard-fits-all (future multi-language)
 
-Because the metric *families and names* line up across SDKs, these SDK panels are largely **portable as-is** —
-no per-language dashboards needed. The one gap to handle when non-Python workers are added is the **suffix
-divergence**: a Tally Java/Go worker exposes `temporal_workflow_completed_total` and
-`temporal_*_latency_seconds_bucket`, which the current bare-name queries won't match. Handle it **once at
-the edge** — e.g. `metric_relabel_configs` to strip `_total`/`_seconds` at scrape time, or `<query> or
-<query-with-suffixes>` fallbacks — rather than forking the dashboards per language. *(Not implemented now;
-Python is the only worker today.)*
+SDK metric *families and semantic names* line up across languages (ADR-0027).
+Histogram panels are portable: Python (`unit_suffix=True`), Java (Micrometer), and Go
+(`NewPrometheusNamingScope`) all emit `*_seconds_bucket`.
+Counter panels diverge today — Java `_total`, Python bare — until the coupled upstream change in
+ADR-0027 lands.
+Do **not** reconcile with scrape-time `metric_relabel_configs`; upgrade each SDK's exporter and
+migrate dashboard queries instead.
+*(Java/Go counter suffix behaviour expected per SDK docs; runtime-verified on Python only here.)*
 
 ---
 
@@ -283,8 +287,8 @@ explicit):
 > — no `temporal_` prefix, matching this repo's server config. Notes from verification:
 > - **No `cluster` label** is emitted locally, so these dashboards do **not** filter by cluster. There
 >   is no `temporal_service_type` label on the history `lock`/`cache` metrics either — only `operation`.
-> - Worker Tuning panels use `temporal_`-prefixed SDK names with **no `_total`** on counters and bare
->   `*_latency_bucket` (no `_seconds` — sdk-core default `unit_suffix` is off; see the SDK-metrics section above).
+> - Worker Tuning panels use `temporal_`-prefixed SDK names: histograms query `*_latency_seconds_bucket`
+>   (`unit_suffix=True`, ADR-0027); counters use bare names until the coupled `_total` migration.
 > - Error panels use `OR on() vector(0)` so they render a flat **0** line in a healthy system rather than
 >   "No data" (`service_errors` series only appear once an error fires).
 >
