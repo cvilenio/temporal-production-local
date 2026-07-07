@@ -1,0 +1,160 @@
+# Connection to the Temporal frontend.
+#
+# For kind+Cloud the account-bearing values (hostPort = regional endpoint,
+# temporalNamespace = <ns>.<account>) are injected at deploy time by the cluster
+# layer (Terraform reads them from cloud state into the ArgoCD Application's
+# valuesObject) — they are NOT committed here (account id stays out of git;
+# see .githooks/pre-commit). The placeholders below keep `helm template` runnable.
+connection:
+  # API keys REQUIRE the regional endpoint, e.g. us-east-1.aws.api.temporal.io:7233.
+  # The namespace endpoint (<ns>.<acct>.tmprl.cloud:7233) rejects API keys.
+  # Placeholder kept schema-valid (CRD pattern ^[a-zA-Z0-9.-]+:[0-9]+$) so
+  # `helm template` + kubeconform pass; the cluster layer overrides it at apply.
+  hostPort: "regional-endpoint.example:7233"
+  temporalNamespace: "{{DOMAIN}}.<account-id>"
+  tls: true
+  # API-key auth (default for this repo's Cloud namespaces — api_key_auth=true).
+  # apiKeySecret is the k8s Secret created by the cluster layer; key holds the token.
+  apiKeySecret: {{DOMAIN}}-cloud-apikey
+  apiKeySecretKey: api-key
+  # mtlsSecret: orders-temporal-tls   # (alternative) mTLS Connection instead of API key
+
+# orders-api is co-located in the orders namespace (orders-app chart, Service
+# `orders-service`). The kernel's default is the host-dev localhost:8002, so the
+# in-cluster URL MUST be set explicitly or activities dial localhost in-pod and
+# fail "All connection attempts failed".
+ordersServiceUrl: "http://orders-service:8000"
+
+# Demo domains (HelloWorkflow) have no orders-api dependency — disable the
+# downstream-reachability startup gate so Worker-Controller promotion is not blocked.
+startupProbe:
+  enabled: false
+  periodSeconds: 5
+  failureThreshold: 60
+
+# mock-api (the simulated external dependency / "the internet") stays on the host
+# while the workers run on kind. Workers reach it via the cluster's host gateway —
+# host.docker.internal — which correctly models cluster egress to an outside
+# service rather than an in-cluster hop. Validate kind pods can resolve this name
+# (deploy/terraform/kind-config.yaml notes the CoreDNS/host-gateway fallback).
+mockApiUrl: "http://host.docker.internal:8001"
+
+# OTLP push endpoint for TRACES → lgtm/Tempo. gRPC, so it MUST be the 4317 port
+# (4318 is OTLP/HTTP). lgtm publishes 4317 on the host (docker-compose.yml); workers
+# reach it via the cluster host gateway. NOTE: logs do NOT use this (they go
+# stdout→Alloy, LOG_OTLP_PUSH=false). Business metrics go to metricsOtelEndpoint.
+otelEndpoint: "http://host.docker.internal:4317"
+
+# OTLP push endpoint for BUSINESS METRICS → standalone OTel Collector → ClickHouse
+# (ADR-0024). Distinct from traces so business metrics warehouse in ClickHouse, not
+# lgtm's bundled Prometheus. gRPC, host-published 4319. Only the activity worker
+# emits business metrics today (business_meter() in activities/external.py); the
+# workflow worker's business metrics ride the PULL pipeline via metric_meter().
+metricsOtelEndpoint: "http://host.docker.internal:4319"
+
+# Logging (obslog / ADR-0018). On Kubernetes the Grafana Alloy DaemonSet tails
+# pod stdout and ships to the observability backend, so workers log JSON to
+# stdout only (otlpPush=false — no direct app→backend log push). serviceNamespace
+# is the domain (OTel service.namespace), used as a log/trace dimension.
+logging:
+  level: INFO
+  format: json
+  otlpPush: false
+  serviceNamespace: {{DOMAIN}}
+
+# Rollout strategy for every WorkerDeployment (see ADR-0004):
+#   AllAtOnce   — controller promotes a healthy version to Current at 100%. The
+#                 first version of a fresh deployment becomes Current immediately,
+#                 so `platform-up` yields a routable cluster with no manual step.
+#   Progressive — controller ramps by `steps:` (+ optional gate workflow); on a
+#                 cold start the steps are skipped and v1 goes Current at once.
+#                 (Requires adding a `steps:` block to the chart template.)
+#   Manual      — versions register Inactive; a human runs `temporal worker
+#                 deployment set-current-version` for EVERY version, including the
+#                 first. A cold cluster then has no Current version and versioned
+#                 workflows sit pending. Use only when you want to gate promotion
+#                 by hand. NOTE: any manual set-current-version makes the controller
+#                 back off (server ManagerIdentity ≠ controller); hand ownership back
+#                 with `temporal worker deployment manager-identity unset` (the
+#                 controller reclaims the empty identity on the next reconcile).
+#                 See ADR-0004 / docs/runbooks/argocd-stuck-sync.md.
+# Default AllAtOnce: this is a local/non-prod env where the happy path must just
+# work; Progressive is the prod-grade upgrade when demoing safe canary rollouts.
+rollout:
+  strategy: AllAtOnce
+
+# Keep drained versions alive long enough that PINNED in-flight orders finish on
+# the version they started on, then scale the old version down. Right-sized to
+# THIS app's actual workflow length (orders complete in minutes; even the
+# deliberately-hanging ghost/lost scenarios are a few minutes worst case), with
+# headroom. HARD FLOOR: scaledownDelay must exceed the max workflow execution
+# time — below it, a pinned in-flight order loses its only poller and stalls.
+sunset:
+  scaledownDelay: 10m
+  deleteDelay: 30m
+
+# Per-worker autoscaling via the custom temporal-worker-autoscaler controller
+# (ADR-0023). Rendered by templates/workerautoscaler.yaml as one WorkerAutoscaler CR
+# per worker; the controller discovers each worker's per-version Deployments
+# (temporal.io/deployment-name label), reads fresh per-version backlog from Temporal
+# Cloud (one central rate-safe caller), and patches replicas directly for
+# seconds-level actuation. Supersedes the KEDA Temporal-scaler seam (which bottomed
+# out on the HPA sync loop and tripped the Cloud per-API rate limit).
+#
+# Separate top-level key on purpose: the cluster Terraform layer injects the whole
+# `workers:` array (account-bearing image refs), so per-worker autoscaling settings
+# can't live inside it. The template joins this block to each worker by its `name`.
+#
+# minReplicas >= 1 here (always warm). Scale-to-zero (minReplicas: 0) is supported by
+# the controller (the task queue is the durable buffer) but deferred until a
+# safe-to-zero guard against in-flight tasks lands (ADR-0023).
+autoscaling:
+  # Off by default so `helm template` / the host-OSS dev path (no controller) renders
+  # nothing; the kind+Cloud deploy path turns it on (see applications.tf injection).
+  enabled: false
+  # Per-profile bounds + queue scoping, keyed by worker `name` (matches workers[].name).
+  # queueType selects which backlog the controller reads. taskQueue must match
+  # orders.shared.temporal_ids.TaskQueue. targetBacklogPerReplica = backlog tasks/replica.
+  # Optional per-worker `behavior:` overrides the controller's defaults (fast up, damped
+  # down): scaleUpStabilizationSeconds, scaleDownStabilizationSeconds, tolerancePercent,
+  # maxScaleUpStep, maxScaleDownStep, panicThresholdPercent.
+  workers:
+    workflow:
+      taskQueue: {{DOMAIN}}-workflow-task-queue
+      queueType: workflow
+      minReplicas: 1
+      maxReplicas: 6
+      targetBacklogPerReplica: 5
+    activity:
+      taskQueue: {{DOMAIN}}-activity-task-queue
+      queueType: activity
+      minReplicas: 1
+      maxReplicas: 10
+      targetBacklogPerReplica: 5
+
+# One entry per worker profile (mirrors orders.worker.WORKER_PROFILES and
+# apps/temporal/workers/python/<name>/). Each profile is its own image (the entrypoint is
+# baked at build time via APP_PATH), so each gets its own image tag = version.
+# Images live in the local kind registry (localhost:5001), pushed by `just ci`;
+# the cluster layer pins the tag to the freshly-built git SHA at apply time.
+#
+# `replicas` is the fixed count for the NON-autoscaled path only (host-OSS dev:
+# no KEDA, controller owns replicas). When autoscaling is enabled for a worker
+# (see autoscaling.workers above), the WorkerDeployment omits .spec.replicas and
+# the KEDA HPA owns the count between min/maxReplicaCount — `replicas` is ignored
+# there on purpose (ADR-0023 §2; setting it would fight the HPA and cycle pods).
+workers:
+  - name: workflow
+    deploymentName: {{DOMAIN}}-workflow
+    replicas: 1
+    image:
+      repository: localhost:5001/{{DOMAIN}}-worker-workflow
+      tag: "latest" # cluster layer overrides with the git-SHA tag from `just ci`
+    command: ["python", "main.py"]
+  - name: activity
+    deploymentName: {{DOMAIN}}-activity
+    replicas: 2
+    image:
+      repository: localhost:5001/{{DOMAIN}}-worker-activity
+      tag: "latest"
+    command: ["python", "main.py"]

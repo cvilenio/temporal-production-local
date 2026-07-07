@@ -109,6 +109,7 @@ dependencies = [
     { name = "opentelemetry-exporter-otlp-proto-grpc" },
     { name = "opentelemetry-sdk" },
     { name = "pydantic-settings" },
+    { name = "pyyaml" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "temporalio" },
 ]
@@ -120,6 +121,7 @@ requires-dist = [
     { name = "opentelemetry-exporter-otlp-proto-grpc", specifier = ">=1.25" },
     { name = "opentelemetry-sdk", specifier = ">=1.25" },
     { name = "pydantic-settings", specifier = ">=2.14.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.30,<3" },
     { name = "temporalio", specifier = ">=1.30,<1.31" },
 ]

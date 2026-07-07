@@ -130,7 +130,7 @@ PY
 typeCheckingMode = "standard"
 pythonVersion = "3.12"
 include = ["libs", "apps"]
-exclude = ["**/.venv", "**/__pycache__", "archive", "**/orders/_pb"]
+exclude = ["**/.venv", "**/__pycache__", "archive", "**/orders/_pb", "templates"]
 # The kernel is an installable package (import `orders`); thin apps run
 # from their own directory and import the kernel. Console keeps its `from app...`
 # layout, so its root is its own app dir.
@@ -148,6 +148,7 @@ executionEnvironments = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+testpaths = ["libs", "compose/scripts/tests"]
 # Stuck workflows/activities hang forever; fail fast instead.
 timeout = 60
 filterwarnings = [
@@ -160,7 +161,7 @@ filterwarnings = [
 [tool.ruff]
 target-version = "py312"
 # Generated protobuf code is committed but never hand-edited or linted.
-extend-exclude = ["libs/orders/python/orders/_pb"]
+extend-exclude = ["libs/orders/python/orders/_pb", "templates"]
 
 [tool.ruff.lint]
 # E/F = pyflakes + pycodestyle (defaults), I = import sorting,

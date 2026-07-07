@@ -1,0 +1,143 @@
+# One WorkerDeployment per worker profile. The controller injects
+# TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE, TEMPORAL_API_KEY (from the Connection's
+# apiKeySecretRef), TEMPORAL_DEPLOYMENT_NAME and TEMPORAL_WORKER_BUILD_ID (Build
+# ID = pod-template hash) into every pod — do NOT set those here. Shipping a new
+# version = bump the image tag. Field names match temporal.io/v1alpha1.
+{{- range .Values.workers }}
+---
+apiVersion: temporal.io/v1alpha1
+kind: WorkerDeployment
+metadata:
+  name: {{ .deploymentName }}
+  labels:
+    app.kubernetes.io/name: {{ .deploymentName }}
+    app.kubernetes.io/component: worker
+spec:
+  workerOptions:
+    connectionRef:
+      name: {{DOMAIN}}                      # -> Connection above
+    temporalNamespace: {{ $.Values.connection.temporalNamespace | quote }}
+  # Replica ownership (ADR-0023 §2). When this worker is autoscaled, its
+  # WorkerResourceTemplate renders a KEDA ScaledObject/HPA that owns the
+  # per-version Deployment's .spec.replicas. Setting replicas here too makes the
+  # controller re-assert a fixed count, fighting the HPA over the same field —
+  # pods cycle (spawned by the controller, killed by the HPA mid-startup). So
+  # omit replicas for autoscaled workers and let the HPA be sole owner (the CRD
+  # field is optional). `.replicas` remains the count for the non-autoscaled
+  # path (host-OSS dev: no KEDA, controller owns replicas).
+  {{- if not (and $.Values.autoscaling.enabled (hasKey $.Values.autoscaling.workers .name)) }}
+  replicas: {{ .replicas }}
+  {{- end }}
+  rollout:
+    strategy: {{ $.Values.rollout.strategy }}
+  sunset:
+    scaledownDelay: {{ $.Values.sunset.scaledownDelay | quote }}
+    deleteDelay: {{ $.Values.sunset.deleteDelay | quote }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .deploymentName }}
+      annotations:
+        # In-cluster Prometheus scrape discovery (ADR-0021). The worker binds the
+        # Core SDK PrometheusConfig /metrics endpoint on :9000 (appkit/telemetry.py);
+        # the chart's default kubernetes-pods job reads these annotations to scrape it.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9000"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Dedicated per-profile KSA (templates/serviceaccount.yaml), token not
+      # mounted — workers reach only the Temporal frontend, never the k8s API.
+      serviceAccountName: {{ .deploymentName }}
+      automountServiceAccountToken: false
+      containers:
+        - name: worker
+          # Prefer an immutable digest (content-addressed → Build ID changes iff
+          # image content changes); fall back to a tag when no digest is pinned.
+          image: "{{ .image.repository }}{{ if .image.digest }}@{{ .image.digest }}{{ else }}:{{ .image.tag }}{{ end }}"
+          command: {{ .command | toJson }}
+          # The controller injects the TEMPORAL_* envs (address/namespace/api-key/
+          # version), but not these. Both MUST be set explicitly: the kernel's
+          # defaults are the host-dev values (localhost:8001/:8002), so without an
+          # override the activities dial localhost inside the pod and fail with
+          # "All connection attempts failed". orders-api is co-located in this
+          # namespace (Service `orders-service`); mock-api stays on the host (the
+          # simulated external dependency), reached via the cluster's host gateway.
+          env:
+            - name: ORDERS_SERVICE_URL
+              value: {{ $.Values.ordersServiceUrl | quote }}
+            - name: MOCK_API_URL
+              value: {{ $.Values.mockApiUrl | quote }}
+            # OTLP push: traces → lgtm/Tempo (4317); business metrics → standalone
+            # collector → ClickHouse (4319, ADR-0024). gRPC, host-published.
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ $.Values.otelEndpoint | quote }}
+            - name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
+              value: {{ $.Values.metricsOtelEndpoint | quote }}
+            {{- if $.Values.connection.tls }}
+            # API-key AND mTLS connections require TLS (the controller doesn't set it).
+            - name: TEMPORAL_TLS
+              value: "true"
+            {{- end }}
+            {{- if $.Values.connection.mtlsSecret }}
+            # OSS mTLS: the Worker Controller (from the Connection's mutualTLSSecretRef)
+            # already mounts the client cert at /etc/temporal/tls and injects
+            # TEMPORAL_TLS_CLIENT_CERT_PATH / _KEY_PATH into the worker pods — so we set
+            # ONLY the server-CA path (which the controller does NOT set), needed so the
+            # worker process (appkit) trusts the self-signed OSS frontend. Re-setting the
+            # cert/key paths here would just duplicate the controller's env.
+            - name: TEMPORAL_TLS_SERVER_CA_CERT_PATH
+              value: /etc/temporal/tls/ca.crt
+            {{- end }}
+            # --- Logging (obslog / ADR-0018) ---
+            # On kind the Alloy DaemonSet tails pod stdout, so workers emit JSON
+            # to stdout only — LOG_OTLP_PUSH=false (no direct app→backend push).
+            - name: LOG_LEVEL
+              value: {{ $.Values.logging.level | quote }}
+            - name: LOG_FORMAT
+              value: {{ $.Values.logging.format | quote }}
+            - name: LOG_OTLP_PUSH
+              value: {{ $.Values.logging.otlpPush | quote }}
+            - name: SERVICE_NAMESPACE
+              value: {{ $.Values.logging.serviceNamespace | quote }}
+          # NOTE: no mTLS volumeMount/volume here. The Worker Controller ALREADY mounts
+          # the Connection's mutualTLSSecretRef cert at /etc/temporal/tls on every worker
+          # pod; adding our own mount there is a duplicate mountPath (rejected as
+          # "must be unique"). The cert-path env above points at the controller's mount.
+          {{- if $.Values.startupProbe.enabled }}
+          # Downstream-reachability gate, STARTUP-ONLY (not a periodic readiness
+          # probe — that would re-ping downstream forever and couple failure
+          # domains into a cascade; see ADR-0016). A lightweight TCP connect to the
+          # worker's configured ORDERS_SERVICE_URL + MOCK_API_URL: until both are
+          # reachable the pod stays NotReady, so the Worker Controller does NOT
+          # promote this version to Current (Build-ID routing gate) and the old
+          # version keeps serving. A permanently-misconfigured version (e.g. the
+          # localhost bug) lands in CrashLoopBackOff and simply never takes traffic
+          # — instead of every workflow failing. Reads the env so the probe always
+          # matches the actual endpoints (single source of truth).
+          startupProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - |
+                  import os, socket, sys
+                  from urllib.parse import urlparse
+                  ok = True
+                  for var in ("ORDERS_SERVICE_URL", "MOCK_API_URL"):
+                      u = urlparse(os.environ.get(var, ""))
+                      if not u.hostname:
+                          continue
+                      port = u.port or (443 if u.scheme == "https" else 80)
+                      s = socket.socket()
+                      s.settimeout(2)
+                      try:
+                          s.connect((u.hostname, port))
+                      except OSError:
+                          ok = False
+                      finally:
+                          s.close()
+                  sys.exit(0 if ok else 1)
+            periodSeconds: {{ $.Values.startupProbe.periodSeconds }}
+            failureThreshold: {{ $.Values.startupProbe.failureThreshold }}
+          {{- end }}
+{{- end }}

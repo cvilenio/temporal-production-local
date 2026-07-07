@@ -8,6 +8,12 @@ domain — that lives in `libs/<domain>`; assembly lives in `/apps`.
 """
 
 from appkit.db import Database
+from appkit.domains import (
+    data_converter_for_domain,
+    data_converter_for_namespace,
+    load_domain_descriptor,
+    resolve_data_converter,
+)
 from appkit.settings import (
     TelemetrySettings,
     TemporalConnectionSettings,
@@ -32,6 +38,10 @@ __all__ = [
     "WorkerTuningSettings",
     "build_deployment_config",
     "build_temporal_client",
+    "data_converter_for_domain",
+    "data_converter_for_namespace",
+    "load_domain_descriptor",
+    "resolve_data_converter",
     "init_observability",
     "run_worker",
     "telemetry_resource",

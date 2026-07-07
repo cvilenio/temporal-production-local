@@ -75,13 +75,23 @@ proto-breaking:
 proto-check: proto-gen
     git diff --exit-code -- libs/orders/python/orders/_pb
 
+# Verify config/domains/*.yaml against namespaces.yaml and kernel task-queue constants.
+verify-domains:
+    uv run python compose/scripts/verify-domains.py
+
+# Scaffold a new domain from templates/domain/<lang>/ (Python today; Java in M6).
+scaffold-domain NAME LANG="python":
+    uv run python compose/scripts/scaffold_domain.py --name {{NAME}} --lang {{LANG}}
+
 # All static checks: python (poe) + k8s manifests (helm/kubeconform) + proto lint
-# + dependency-version drift (versions-audit vs config/dependencies.yaml).
+# + dependency-version drift (versions-audit vs config/dependencies.yaml)
+# + domain descriptor consistency (verify-domains).
 lint:
     uv run poe lint
     just lint-manifests
     just proto-lint
     just versions-audit
+    just verify-domains
 
 # Run tests (python leaf).
 test:
