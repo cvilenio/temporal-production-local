@@ -185,24 +185,19 @@ def init_observability(
     # PrometheusConfig binds /metrics on 0.0.0.0:<port>, scraped by Prometheus
     # inside the lgtm container.
     #
-    # durations_as_seconds=True → latency histogram VALUES are in seconds (not the
-    # SDK default of milliseconds). It does NOT add a `_seconds` name suffix — that
-    # is a separate exporter option (unit_suffix, default off, left unset here), so
-    # histograms are exposed as bare `temporal_*_latency_bucket` with second-scale
-    # values. (counters_total_suffix is likewise unset → counters carry no `_total`.)
-    # The bundled sdk.json + critical-flows dashboards query these bare names.
-    #
-    # NOTE: the Python SDK's Prometheus exporter exposes counters WITHOUT a
-    # `_total` suffix (e.g. `temporal_workflow_completed`, not
-    # `..._completed_total`). counters_total_suffix is a no-op in this SDK build,
-    # so we don't set it — and the bundled sdk.json has been aligned to the
-    # no-`_total` names. (Counters pushed via OTLP, e.g. business metrics, DO get
-    # `_total` added by the collector's Prometheus exporter — a separate path.)
+    # OpenMetrics naming is the repo's cross-SDK metric contract (ADR-0027):
+    # counters carry `_total`, duration histograms carry `_seconds`, values in seconds.
+    # Java (Micrometer default) and Go (`NewPrometheusNamingScope`) emit the same
+    # suffixed names natively; Python opts in via these PrometheusConfig toggles.
+    # Gauges are unchanged. Business metrics pushed via OTLP get `_total` from the
+    # collector's Prometheus exporter — a separate path (ADR-0024).
     runtime = Runtime(
         telemetry=TelemetryConfig(
             metrics=PrometheusConfig(
                 bind_address=f"0.0.0.0:{sdk_metrics_port}",
                 durations_as_seconds=True,
+                counters_total_suffix=True,
+                unit_suffix=True,
             )
         )
     )

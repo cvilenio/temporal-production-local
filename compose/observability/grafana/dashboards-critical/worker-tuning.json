@@ -66,7 +66,7 @@
     {
       "type": "timeseries",
       "title": "Workflow Task Schedule-to-Start p99",
-      "description": "The single best worker-saturation canary. Rising = not enough workflow-task-queue capacity for the load. metric: temporal_workflow_task_schedule_to_start_latency (seconds — durations_as_seconds=True)",
+      "description": "The single best worker-saturation canary. Rising = not enough workflow-task-queue capacity for the load. metric: temporal_workflow_task_schedule_to_start_latency_seconds (OpenMetrics unit suffix; values in seconds)",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus-kind"
@@ -126,7 +126,7 @@
             "type": "prometheus",
             "uid": "prometheus-kind"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, task_queue) (rate(temporal_workflow_task_schedule_to_start_latency_bucket[$rate])))",
+          "expr": "histogram_quantile(0.99, sum by (le, task_queue) (rate(temporal_workflow_task_schedule_to_start_latency_seconds_bucket[$rate])))",
           "legendFormat": "{{task_queue}}"
         }
       ]
@@ -134,7 +134,7 @@
     {
       "type": "timeseries",
       "title": "Activity Schedule-to-Start p99",
-      "description": "Same canary, separate task queue/pool. Rising = not enough activity-task-queue capacity for the load. metric: temporal_activity_schedule_to_start_latency (seconds)",
+      "description": "Same canary, separate task queue/pool. Rising = not enough activity-task-queue capacity for the load. metric: temporal_activity_schedule_to_start_latency_seconds (OpenMetrics unit suffix; values in seconds)",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus-kind"
@@ -194,7 +194,7 @@
             "type": "prometheus",
             "uid": "prometheus-kind"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, task_queue) (rate(temporal_activity_schedule_to_start_latency_bucket[$rate])))",
+          "expr": "histogram_quantile(0.99, sum by (le, task_queue) (rate(temporal_activity_schedule_to_start_latency_seconds_bucket[$rate])))",
           "legendFormat": "{{task_queue}}"
         }
       ]
@@ -395,7 +395,7 @@
     {
       "type": "timeseries",
       "title": "Poll Success Rate — Workflow (SDK)",
-      "description": "succeed / (succeed + empty). Drop = pollers can't keep up with delivery. Target: >90% (alert), >95% (healthy). metric: temporal_workflow_task_queue_poll_succeed / _poll_empty (no _total suffix)",
+      "description": "succeed / (succeed + empty). Drop = pollers can't keep up with delivery. Target: >90% (alert), >95% (healthy). metric: temporal_workflow_task_queue_poll_succeed / _poll_empty (bare names until Python SDK honors counters_total_suffix; ADR-0027)",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus-kind"
@@ -680,7 +680,7 @@
     {
       "type": "timeseries",
       "title": "Sticky Cache Hit / Miss rate",
-      "description": "High miss rate = workflows replaying from history (cache evictions). metric: temporal_sticky_cache_hit/_miss (no _total)",
+      "description": "High miss rate = workflows replaying from history (cache evictions). metric: temporal_sticky_cache_hit/_miss (bare names until Python SDK honors counters_total_suffix; ADR-0027)",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus-kind"
