@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+  <springProperty scope="context" name="serviceName" source="appkit.telemetry.otel-service-name"/>
+  <springProperty scope="context" name="serviceNamespace" source="appkit.telemetry.service-namespace"/>
+  <springProperty scope="context" name="serviceInstanceId" source="appkit.telemetry.service-instance-id"/>
+  <springProperty scope="context" name="serviceVersion" source="appkit.telemetry.worker-build-id"/>
+  <springProperty scope="context" name="logFormat" source="appkit.telemetry.log-format" defaultValue="json"/>
+
+  <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder class="net.logstash.logback.encoder.LoggingEventCompositeJsonEncoder">
+      <providers>
+        <timestamp>
+          <fieldName>timestamp</fieldName>
+          <pattern>yyyy-MM-dd'T'HH:mm:ss.SSS'Z'</pattern>
+          <timeZone>UTC</timeZone>
+        </timestamp>
+        <provider class="io.temporal.demo.appkit.AppkitLogLevelJsonProvider"/>
+        <loggerName>
+          <fieldName>logger</fieldName>
+        </loggerName>
+        <message>
+          <fieldName>message</fieldName>
+        </message>
+        <mdc>
+          <excludeMdcKeyName>attempt</excludeMdcKeyName>
+        </mdc>
+        <provider class="io.temporal.demo.appkit.AppkitAttemptJsonProvider"/>
+        <globalCustomFields>{"service.name":"${serviceName}","service.namespace":"${serviceNamespace}","service.instance.id":"${serviceInstanceId}","service.version":"${serviceVersion}"}</globalCustomFields>
+      </providers>
+    </encoder>
+  </appender>
+
+  <appender name="OTEL" class="io.opentelemetry.instrumentation.logback.mdc.v1_0.OpenTelemetryAppender">
+    <appender-ref ref="JSON_CONSOLE"/>
+  </appender>
+
+  <if condition='property("logFormat").equals("console")'>
+    <then>
+      <include resource="org/springframework/boot/logging/logback/base.xml"/>
+    </then>
+    <else>
+      <root level="INFO">
+        <appender-ref ref="OTEL"/>
+      </root>
+    </else>
+  </if>
+</configuration>

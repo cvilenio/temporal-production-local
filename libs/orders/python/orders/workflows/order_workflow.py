@@ -434,7 +434,7 @@ class OrderWorkflow:
             ),
             start_to_close_timeout=timedelta(seconds=5),
             retry_policy=retry.PERSISTENCE,
-            task_queue=TaskQueue.ORDERS_ACTIVITY,
+            task_queue=TaskQueue.ORDERS_JAVA_ACTIVITY,
         )
 
         self._set_status(OrderStatus.COMPLETED)

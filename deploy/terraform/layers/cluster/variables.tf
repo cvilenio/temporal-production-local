@@ -155,7 +155,7 @@ variable "registry_service" {
 variable "orders_workers_chart_version" {
   description = "Published version of the orders-workers OCI chart (matches Chart.yaml / just chart-publish)."
   type        = string
-  default     = "0.1.17"
+  default     = "0.1.18"
 }
 
 variable "autoscaler_chart_version" {

@@ -1,6 +1,8 @@
 spring:
   application:
     name: {{DOMAIN}}-activity-worker
+  config:
+    import: optional:classpath:application-appkit.yaml
   temporal:
     namespace: ${TEMPORAL_NAMESPACE}
     connection:
@@ -14,7 +16,16 @@ spring:
 temporal:
   data-converter: ${TEMPORAL_DATA_CONVERTER:default}
 
+appkit:
+  telemetry:
+    otel-service-name: ${OTEL_SERVICE_NAME:{{DOMAIN}}-worker-activity}
+
+# Readiness probe (chart httpGet /health/readiness) gates Worker-Deployment promotion (ADR-0016).
+# Add each domain downstream HealthIndicator bean name to the readiness group alongside
+# readinessState — appkit defaults to readinessState only (see application-appkit.yaml).
+# Example (orders): management.endpoint.health.group.readiness.include: readinessState,ordersService
+
 logging:
   level:
-    root: INFO
+    root: ${LOG_LEVEL:INFO}
     io.temporal: INFO

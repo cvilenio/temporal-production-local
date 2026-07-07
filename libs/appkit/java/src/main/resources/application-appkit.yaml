@@ -1,0 +1,40 @@
+# Shared appkit defaults — imported by worker apps (ADR-0018 / ADR-0027 parity contract).
+appkit:
+  telemetry:
+    otel-exporter-otlp-endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4317}
+    otel-exporter-otlp-metrics-endpoint: ${OTEL_EXPORTER_OTLP_METRICS_ENDPOINT:}
+    otel-service-name: ${OTEL_SERVICE_NAME:app}
+    sdk-metrics-port: ${SDK_METRICS_PORT:9000}
+    log-level: ${LOG_LEVEL:INFO}
+    log-format: ${LOG_FORMAT:json}
+    log-otlp-push: ${LOG_OTLP_PUSH:true}
+    service-namespace: ${SERVICE_NAMESPACE:}
+    service-instance-id: ${SERVICE_INSTANCE_ID:${HOSTNAME:}}
+    worker-build-id: ${WORKER_BUILD_ID:${TEMPORAL_WORKER_BUILD_ID:}}
+
+# Actuator on :9000/metrics — matches Python SDK Prometheus scrape + chart annotations.
+server:
+  port: -1
+management:
+  server:
+    port: ${SDK_METRICS_PORT:9000}
+  endpoints:
+    web:
+      base-path: /
+      exposure:
+        include: prometheus,health
+      path-mapping:
+        prometheus: metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+      group:
+        readiness:
+          # Domain workers add their downstream-reachability HealthIndicator bean name here
+          # (e.g. ordersService). readinessState alone does not gate ADR-0016 promotion.
+          include: readinessState
+
+logging:
+  config: classpath:logback-spring.xml

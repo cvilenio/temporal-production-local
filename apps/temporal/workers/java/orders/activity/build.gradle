@@ -11,8 +11,7 @@ dependencyManagement {
 
 dependencies {
     implementation project(':appkit-java')
-    implementation project(':{{DOMAIN}}-lib')
-    implementation 'org.springframework.boot:spring-boot-starter'
+    implementation project(':orders-lib-java')
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.boot:spring-boot-starter-web'
 
@@ -20,5 +19,5 @@ dependencies {
 }
 
 bootJar {
-    archiveBaseName = '{{DOMAIN}}-activity-worker'
+    archiveBaseName = 'orders-activity-java-worker'
 }
