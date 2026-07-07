@@ -31,6 +31,10 @@ class TemporalConnectionSettings(BaseSettings):
     # Root CA that signed the SERVER cert — required to trust a self-signed OSS
     # frontend (the OSS mTLS path). Unused on Cloud (public CA) and local plaintext.
     temporal_tls_server_ca_cert_path: str | None = None
+    # Symbolic data-converter ref from config/domains/*.yaml, injected at deploy
+    # time as TEMPORAL_DATA_CONVERTER (ADR-0026). Resolved by appkit at startup;
+    # unknown refs raise — no silent fallback.
+    temporal_data_converter: str = "default"
 
 
 class WorkerTuningSettings(BaseSettings):

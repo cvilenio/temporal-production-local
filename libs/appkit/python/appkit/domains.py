@@ -66,8 +66,16 @@ def data_converter_for_domain(domain: str) -> DataConverter:
 
 
 def data_converter_for_namespace(namespace: str) -> DataConverter:
-    """Resolve the DataConverter for a Temporal namespace via its domain descriptor."""
+    """Resolve the DataConverter for a Temporal namespace via its domain descriptor.
+
+    Intended for Phase B generic console (repo-local dev), NOT for in-cluster workers
+    or starters — those read ``TEMPORAL_DATA_CONVERTER`` from settings (injected by
+    the chart from the descriptor at deploy time). The console will need descriptors
+    mounted or packaged as data before calling this at runtime.
+    """
     domain = domain_for_namespace(namespace)
     if domain is None:
-        return pydantic_data_converter
+        raise FileNotFoundError(
+            f"no domain descriptor for namespace {namespace!r} under {DOMAINS_DIR.relative_to(REPO_ROOT)}/"
+        )
     return data_converter_for_domain(domain)

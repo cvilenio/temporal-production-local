@@ -8,6 +8,13 @@
 locals {
   apps_dir = "${path.module}/../../../argocd/applications"
 
+  # Domain descriptors (config/domains/*.yaml) — consumed at deploy time to inject
+  # contract env vars (e.g. TEMPORAL_DATA_CONVERTER) into charts; not read at runtime
+  # from worker images (ADR-0026).
+  domain_descriptors_dir = "${path.module}/../../../../config/domains"
+  ziggymart_descriptor   = yamldecode(file("${local.domain_descriptors_dir}/ziggymart.yaml"))
+  ziggymart_data_converter = try(local.ziggymart_descriptor.data_converter, "default")
+
   # Secret-free platform add-on Applications (cert-manager, worker-controller[-crds])
   # are defined declaratively as committed YAML under deploy/argocd/applications/ —
   # but SEEDED here (not read from git by a root app-of-apps), so startup has no
@@ -132,6 +139,7 @@ locals {
             # kind+Cloud path enables it; the host/OSS `helm template` path keeps the
             # chart default (enabled: false). Deep-merges, so only `enabled` flips.
             autoscaling = { enabled = true }
+            dataConverter = local.ziggymart_data_converter
             workers = [
               {
                 name           = "workflow"
@@ -222,6 +230,7 @@ locals {
               apiKeySecret      = local.client_apikey_secret # Cloud: set; OSS: ""
               mtlsSecret        = local.client_mtls_secret   # OSS: set; Cloud: ""
             }
+            dataConverter = local.ziggymart_data_converter
           }
         }
       }

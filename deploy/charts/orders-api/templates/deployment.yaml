@@ -60,6 +60,8 @@ spec:
               value: {{ .Values.connection.hostPort | quote }}
             - name: TEMPORAL_NAMESPACE
               value: {{ .Values.connection.temporalNamespace | quote }}
+            - name: TEMPORAL_DATA_CONVERTER
+              value: {{ .Values.dataConverter | quote }}
             - name: TEMPORAL_TLS
               value: {{ .Values.connection.tls | quote }}
             {{- if .Values.connection.apiKeySecret }}

@@ -25,6 +25,10 @@ ordersApi:
   # ClickHouse, not lgtm's bundled Prometheus. gRPC, host-published 4319.
   metricsOtelEndpoint: "http://host.docker.internal:4319"
 
+# Data-converter ref from config/domains/*.yaml — injected at deploy time as
+# TEMPORAL_DATA_CONVERTER (ADR-0026).
+dataConverter: "default"
+
 # Logging (obslog / ADR-0018). On Kubernetes the Grafana Alloy DaemonSet tails
 # pod stdout, so orders-api logs JSON to stdout only (otlpPush=false).
 logging:

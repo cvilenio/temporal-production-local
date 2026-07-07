@@ -8,7 +8,7 @@ from appkit import (
     WorkerTuning,
     build_deployment_config,
     build_temporal_client,
-    data_converter_for_namespace,
+    resolve_data_converter,
     run_worker,
 )
 from {{DOMAIN}}.activities.hello import HelloActivities
@@ -38,7 +38,7 @@ async def main() -> None:
         tls_client_cert_path=settings.temporal_tls_client_cert_path,
         tls_client_key_path=settings.temporal_tls_client_key_path,
         tls_server_ca_cert_path=settings.temporal_tls_server_ca_cert_path,
-        data_converter=data_converter_for_namespace(settings.temporal_namespace),
+        data_converter=resolve_data_converter(settings.temporal_data_converter),
     )
 
     hello = HelloActivities()

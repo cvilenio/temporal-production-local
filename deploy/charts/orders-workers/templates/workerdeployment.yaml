@@ -73,6 +73,8 @@ spec:
               value: {{ $.Values.otelEndpoint | quote }}
             - name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
               value: {{ $.Values.metricsOtelEndpoint | quote }}
+            - name: TEMPORAL_DATA_CONVERTER
+              value: {{ $.Values.dataConverter | quote }}
             {{- if $.Values.connection.tls }}
             # API-key AND mTLS connections require TLS (the controller doesn't set it).
             - name: TEMPORAL_TLS
