@@ -3,8 +3,8 @@
 - **Status:** Accepted (histogram parity landed; counter `_total` coupled upstream)
 - **Date:** 2026-07-07
 - **Related:** ADR-0024 (push/business metrics path — separate pipeline, different naming
-  rules). Temporal features#607 ("Standardize metrics across SDK languages"). ADR-0021
-  (Prometheus pull pipeline for operational metrics).
+  rules). Temporal features#607 ("Standardize metrics across SDK languages").
+  `ai_checkpoints/0021-metrics-and-worker-autoscaling.md` (Prometheus pull pipeline).
 
 ## Context
 
@@ -48,9 +48,9 @@ That does not change SDK pull metrics on `:9000`.
    - **Python (today):** `PrometheusConfig(unit_suffix=True, durations_as_seconds=True)` in
      `appkit.telemetry.init_observability`. `counters_total_suffix` is **not** set — see
      coupled counter adoption below.
-   - **Java:** Micrometer default (no extra config expected) — already emits `_total` on
-     counters.
-   - **Go:** `NewPrometheusNamingScope`.
+   - **Java:** Micrometer default (no extra config expected) — expected to emit `_total` on
+     counters; **runtime-unverified in this repo** (no Java worker telemetry wired yet).
+   - **Go:** `NewPrometheusNamingScope` — expected per SDK docs; runtime-unverified here.
 
 3. **Grafana SDK-metric dashboards** query the names actually emitted on `:9000`.
    Histogram panels use `*_seconds_*` (parity with Java/Go).
@@ -85,5 +85,5 @@ Live `:9000/metrics` after enabling `unit_suffix` + `durations_as_seconds`:
 
 - Polyglot histogram parity is explicit and live; Java/Go/Python share `*_seconds_*` queries.
 - Counter dashboard queries stay on bare Python names until the coupled PR above.
-- Java polyglot workers already emit `_total` on counters — document the divergence in runbooks
-  until Python catches up.
+- Java polyglot workers are **expected** to emit `_total` on counters (Micrometer) — confirm on
+  `:9000` when the Java worker lands.
