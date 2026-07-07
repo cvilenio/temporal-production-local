@@ -170,9 +170,9 @@ build-images:
       -t "$REGISTRY/temporal-worker-autoscaler:$TAG" .
     docker build -f images/java.Dockerfile \
       --build-arg DOMAIN=orders \
-      --build-arg APP_MODULE=:orders-activity-java-worker \
+      --build-arg APP_MODULE=:orders-finalization-java-worker \
       --build-arg WORKER_REL_PATH=apps/temporal/workers/java/orders/activity \
-      --build-arg APP_JAR=orders-activity-java-worker \
+      --build-arg APP_JAR=orders-finalization-java-worker \
       -t "$REGISTRY/orders-worker-finalization-java:$TAG" .
     echo "Built $REGISTRY/orders-worker-{workflow,activity,finalization-java}:$TAG, orders-api:$TAG, temporal-worker-autoscaler:$TAG"
 

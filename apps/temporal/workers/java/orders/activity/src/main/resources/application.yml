@@ -1,6 +1,6 @@
 spring:
   application:
-    name: orders-activity-java-worker
+    name: orders-finalization-java-worker
   config:
     import: optional:classpath:application-appkit.yaml
   temporal:

@@ -73,7 +73,9 @@ async def build_temporal_client(
 
     connect_kwargs: dict = {}
     if default_deployment_name is not None:
-        deployment_name = os.getenv("TEMPORAL_DEPLOYMENT_NAME", default_deployment_name)
+        deployment_name = (
+            os.getenv("TEMPORAL_DEPLOYMENT_NAME") or default_deployment_name
+        )
         host = os.getenv("HOSTNAME") or socket.gethostname()
         connect_kwargs["identity"] = f"{deployment_name}@{host}"
 
