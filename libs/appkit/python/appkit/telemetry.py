@@ -186,17 +186,18 @@ def init_observability(
     # inside the lgtm container.
     #
     # OpenMetrics naming is the repo's cross-SDK metric contract (ADR-0027):
-    # counters carry `_total`, duration histograms carry `_seconds`, values in seconds.
-    # Java (Micrometer default) and Go (`NewPrometheusNamingScope`) emit the same
-    # suffixed names natively; Python opts in via these PrometheusConfig toggles.
-    # Gauges are unchanged. Business metrics pushed via OTLP get `_total` from the
-    # collector's Prometheus exporter — a separate path (ADR-0024).
+    # duration histograms carry `_seconds`, values in seconds. Java (Micrometer)
+    # and Go (`NewPrometheusNamingScope`) emit the same suffixed names natively;
+    # Python opts in via unit_suffix + durations_as_seconds (both honored on
+    # temporalio 1.30.0). counters_total_suffix is intentionally OFF until a
+    # release honors it — flip it and migrate counter dashboard panels together
+    # (ADR-0027). Gauges unchanged. OTLP business metrics get `_total` from the
+    # collector's Prometheus exporter — separate path (ADR-0024).
     runtime = Runtime(
         telemetry=TelemetryConfig(
             metrics=PrometheusConfig(
                 bind_address=f"0.0.0.0:{sdk_metrics_port}",
                 durations_as_seconds=True,
-                counters_total_suffix=True,
                 unit_suffix=True,
             )
         )

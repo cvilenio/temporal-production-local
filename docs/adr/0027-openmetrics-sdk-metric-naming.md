@@ -1,6 +1,6 @@
 # ADR-0027: Adopt OpenMetrics SDK-metric naming as the cross-SDK contract
 
-- **Status:** Accepted (partial — see Python counter suffix gap below)
+- **Status:** Accepted (histogram parity landed; counter `_total` coupled upstream)
 - **Date:** 2026-07-07
 - **Related:** ADR-0024 (push/business metrics path — separate pipeline, different naming
   rules). Temporal features#607 ("Standardize metrics across SDK languages"). ADR-0021
@@ -45,32 +45,45 @@ That does not change SDK pull metrics on `:9000`.
    - Gauges: unchanged (e.g. `temporal_worker_task_slots_available`, `temporal_num_pollers`).
 
 2. **Each SDK configures its own exporter to emit the convention:**
-   - **Python:** `PrometheusConfig(counters_total_suffix=True, unit_suffix=True,
-     durations_as_seconds=True)` in `appkit.telemetry.init_observability`.
-   - **Java:** Micrometer default (no extra config expected).
+   - **Python (today):** `PrometheusConfig(unit_suffix=True, durations_as_seconds=True)` in
+     `appkit.telemetry.init_observability`. `counters_total_suffix` is **not** set — see
+     coupled counter adoption below.
+   - **Java:** Micrometer default (no extra config expected) — already emits `_total` on
+     counters.
    - **Go:** `NewPrometheusNamingScope`.
 
-3. **Grafana SDK-metric dashboards** query the suffixed names emitted on `:9000`.
+3. **Grafana SDK-metric dashboards** query the names actually emitted on `:9000`.
+   Histogram panels use `*_seconds_*` (parity with Java/Go).
+   Counter panels use bare names until the coupled counter change lands.
    Recording rules over gauge inputs (e.g. `temporal_slot_utilization`) are unchanged.
 
-## Verification note (Python 1.30.0)
+4. **Counter `_total` adoption is a COUPLED change, gated on upstream.**
+   On `temporalio==1.30.0`, `counters_total_suffix=True` is a no-op — counters remain bare
+   despite the Python binding passing the flag through to sdk-core.
+   We do **not** set the toggle while it has no effect: a future SDK release that starts
+   honoring it would silently append `_total` and break bare-name counter dashboard panels on
+   an unrelated version bump.
+   When a Python SDK release honors `counters_total_suffix` (or this repo moves SDK metrics
+   to OTLP with OpenMetrics naming), land **in the same PR**:
+   - flip `counters_total_suffix=True` in `telemetry.py`, and
+   - migrate every counter panel in SDK-metric dashboards to `_total` names.
+   Do **not** work around the gap with scrape-time relabeling, and do **not** degrade the Java
+   exporter to bare counter names.
+   Until then, counters **diverge across SDKs by name** (Java `_total`, Python bare) — an
+   upstream limitation we accept deliberately.
+   Histograms (`_seconds`) are at full cross-SDK parity now.
 
-On `temporalio==1.30.0`, live `:9000/metrics` after enabling both toggles shows:
+## Verification (Python 1.30.0)
+
+Live `:9000/metrics` after enabling `unit_suffix` + `durations_as_seconds`:
 
 - `unit_suffix=True` **works** — histograms emit `*_seconds_bucket` / `_sum` / `_count`.
-- `counters_total_suffix=True` **does not** — counters remain bare
-  (e.g. `temporal_workflow_task_queue_poll_succeed`, not `..._succeed_total`).
-
-The Python binding passes the flag through to sdk-core; the exporter does not suffix counters
-in this release.
-No newer patch exists within the pinned `>=1.30,<1.31` range at the time of this ADR.
-Dashboard counter panels keep bare names until a fixed SDK lands; histogram panels use
-`*_seconds_*`.
-Do **not** paper over this with scrape-time relabeling.
+- `counters_total_suffix` **not enabled** — would be a no-op in this release; counters stay
+  bare (e.g. `temporal_workflow_task_queue_poll_succeed`).
 
 ## Consequences
 
-- Polyglot metric parity is explicit and documented; Java/Go workers align with minimal config.
-- Python histogram dashboards and alerts must use `*_seconds_*` series names.
-- Counter `_total` parity is blocked on a Python SDK fix — track upstream and bump the pin when
-  a release honors `counters_total_suffix`.
+- Polyglot histogram parity is explicit and live; Java/Go/Python share `*_seconds_*` queries.
+- Counter dashboard queries stay on bare Python names until the coupled PR above.
+- Java polyglot workers already emit `_total` on counters — document the divergence in runbooks
+  until Python catches up.
