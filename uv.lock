@@ -1161,6 +1161,7 @@ orders-api = [
     { name = "uvicorn" },
 ]
 platform-console = [
+    { name = "appkit" },
     { name = "asyncpg" },
     { name = "docker" },
     { name = "fastapi" },
@@ -1169,6 +1170,7 @@ platform-console = [
     { name = "kubernetes" },
     { name = "obslog" },
     { name = "pydantic-settings" },
+    { name = "pyyaml" },
     { name = "temporalio" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -1215,6 +1217,7 @@ orders-api = [
     { name = "uvicorn", specifier = "==0.29.0" },
 ]
 platform-console = [
+    { name = "appkit", editable = "libs/appkit/python" },
     { name = "asyncpg", specifier = ">=0.29.0" },
     { name = "docker", specifier = ">=7.1.0" },
     { name = "fastapi", specifier = ">=0.111.0" },
@@ -1223,6 +1226,7 @@ platform-console = [
     { name = "kubernetes", specifier = ">=30.1.0" },
     { name = "obslog", editable = "libs/logging/python" },
     { name = "pydantic-settings", specifier = ">=2.2.1" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "temporalio", specifier = ">=1.30,<1.31" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.29.0" },
 ]

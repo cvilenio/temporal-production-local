@@ -33,6 +33,7 @@ async def build_temporal_client(
     tls_client_cert_path: str | None = None,
     tls_client_key_path: str | None = None,
     tls_server_ca_cert_path: str | None = None,
+    tls_domain: str | None = None,
     data_converter: DataConverter | None = None,
 ) -> Client:
     """Connect a Temporal `Client`, baking in the shared data-converter contract.
@@ -42,6 +43,9 @@ async def build_temporal_client(
       Temporal Cloud: tls=True + API key, or mTLS client cert/key (public CA).
       Self-hosted OSS on kind: tls=True + mTLS client cert/key + the server CA
         (tls_server_ca_cert_path), so the self-signed frontend cert is trusted.
+        When dialing via host.docker.internal:7233, set tls_domain to the frontend
+        cert CN (temporal-frontend.temporal.svc.cluster.local) — the connect host
+        differs from the cert SAN.
 
     The TracingInterceptor (passed in via `interceptors`) propagates OTel span context
     across the client → workflow → activity boundary. `data_converter` selects typed
@@ -66,6 +70,7 @@ async def build_temporal_client(
             client_cert=client_cert,
             client_private_key=client_key,
             server_root_ca_cert=server_root_ca_cert,
+            domain=tls_domain or None,
         )
 
     return await Client.connect(

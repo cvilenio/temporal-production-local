@@ -32,12 +32,14 @@ codec-server = [
 ]
 platform-console = [
   "asyncpg>=0.29.0",
+  "appkit",
   "docker>=7.1.0",
   "fastapi>=0.111.0",
   "httpx>=0.27.0",
   "jinja2>=3.1.4",
   "kubernetes>=30.1.0",
   "pydantic-settings>=2.2.1",
+  "pyyaml>=6.0",
   "uvicorn[standard]>=0.29.0",
   # Console-owned Temporal Cloud liveness probe builds its own read-only client.
   "temporalio>=1.30,<1.31",
@@ -148,7 +150,8 @@ executionEnvironments = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["libs", "compose/scripts/tests"]
+pythonpath = ["apps/platform/console/python"]
+testpaths = ["libs", "compose/scripts/tests", "apps/platform/console/python/tests"]
 # Stuck workflows/activities hang forever; fail fast instead.
 timeout = 60
 filterwarnings = [

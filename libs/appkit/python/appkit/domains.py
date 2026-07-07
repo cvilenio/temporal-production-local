@@ -7,6 +7,7 @@ converter from the descriptor rather than re-deciding it.
 
 from __future__ import annotations
 
+import os
 from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -18,35 +19,58 @@ if TYPE_CHECKING:
     from temporalio.converter import DataConverter
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DOMAINS_DIR = REPO_ROOT / "config" / "domains"
+
+
+def domains_dir() -> Path:
+    """Root directory for domain descriptors (config/domains in dev; mounted in console)."""
+    override = os.environ.get("DOMAIN_DESCRIPTORS_DIR", "").strip()
+    if override:
+        return Path(override)
+    return REPO_ROOT / "config" / "domains"
 
 
 @cache
 def load_domain_descriptor(domain: str) -> dict:
     """Load config/domains/<domain>.yaml."""
-    path = DOMAINS_DIR / f"{domain}.yaml"
+    root = domains_dir()
+    path = root / f"{domain}.yaml"
     if not path.is_file():
-        raise FileNotFoundError(
-            f"domain descriptor not found: {path.relative_to(REPO_ROOT)}"
-        )
+        raise FileNotFoundError(f"domain descriptor not found: {path}")
     data = yaml.safe_load(path.read_text()) or {}
     if data.get("domain") != domain:
-        raise ValueError(
-            f"{path.relative_to(REPO_ROOT)}: 'domain' field must match filename ({domain!r})"
-        )
+        raise ValueError(f"{path}: 'domain' field must match filename ({domain!r})")
     return data
 
 
 def domain_for_namespace(namespace: str) -> str | None:
     """Map a Temporal namespace handle to a domain key (bare name before Cloud suffix)."""
     bare = namespace.split(".", 1)[0]
-    if not DOMAINS_DIR.is_dir():
+    root = domains_dir()
+    if not root.is_dir():
         return None
-    for path in DOMAINS_DIR.glob("*.yaml"):
+    for path in root.glob("*.yaml"):
         desc = yaml.safe_load(path.read_text()) or {}
         if desc.get("domain") == bare:
             return bare
     return None
+
+
+def list_domain_descriptors(*, exclude: set[str] | None = None) -> list[dict]:
+    """Load every domain descriptor under domains_dir(), optionally skipping keys."""
+    root = domains_dir()
+    if not root.is_dir():
+        return []
+    skip = exclude or set()
+    out: list[dict] = []
+    for path in sorted(root.glob("*.yaml")):
+        desc = yaml.safe_load(path.read_text()) or {}
+        domain = desc.get("domain") or path.stem
+        if domain in skip:
+            continue
+        if desc.get("domain") != domain:
+            continue
+        out.append(desc)
+    return out
 
 
 def resolve_data_converter(name: str) -> DataConverter:
@@ -76,6 +100,6 @@ def data_converter_for_namespace(namespace: str) -> DataConverter:
     domain = domain_for_namespace(namespace)
     if domain is None:
         raise FileNotFoundError(
-            f"no domain descriptor for namespace {namespace!r} under {DOMAINS_DIR.relative_to(REPO_ROOT)}/"
+            f"no domain descriptor for namespace {namespace!r} under {domains_dir()}/"
         )
     return data_converter_for_domain(domain)

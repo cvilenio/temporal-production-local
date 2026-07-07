@@ -11,6 +11,7 @@ from appkit.db import Database
 from appkit.domains import (
     data_converter_for_domain,
     data_converter_for_namespace,
+    list_domain_descriptors,
     load_domain_descriptor,
     resolve_data_converter,
 )
@@ -40,6 +41,7 @@ __all__ = [
     "build_temporal_client",
     "data_converter_for_domain",
     "data_converter_for_namespace",
+    "list_domain_descriptors",
     "load_domain_descriptor",
     "resolve_data_converter",
     "init_observability",

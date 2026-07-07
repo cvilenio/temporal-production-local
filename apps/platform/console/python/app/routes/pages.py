@@ -30,6 +30,15 @@ async def orders_page(request: Request):
     )
 
 
+@router.get("/domain-trigger", response_class=HTMLResponse)
+async def domain_trigger_page(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="domain_trigger.html",
+        context={"active": "domain-trigger"},
+    )
+
+
 @router.get("/tracking", response_class=HTMLResponse)
 async def tracking_page(request: Request):
     return templates.TemplateResponse(
