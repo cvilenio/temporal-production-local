@@ -1,11 +1,4 @@
-"""Orders workflow worker — the deployable app (ADR-0022).
-
-Standard three-module app layout: settings.py (env mapping), dependencies.py (DI wiring),
-and this main.py (startup/lifecycle). One worker profile per directory; this is the
-workflow worker. It builds the Temporal client via appkit (data-converter contract baked
-in), hosts the OrderWorkflow and no activities, and owns the telemetry lifecycle.
-Run with: python main.py
-"""
+"""{{Domain}} activity worker entrypoint."""
 
 import asyncio
 import os
@@ -18,15 +11,13 @@ from appkit import (
     data_converter_for_namespace,
     run_worker,
 )
+from {{DOMAIN}}.activities.hello import HelloActivities
+from {{DOMAIN}}.shared.temporal_ids import TaskQueue
 from dependencies import container
-from orders.shared.temporal_ids import TaskQueue
-from orders.workflows.order_workflow import OrderWorkflow
 from settings import settings
 
 
 async def main() -> None:
-    # Resource identity for the log/telemetry schema: instance = pod name (HOSTNAME
-    # in k8s), version = Worker Build ID when versioning is on.
     container.config.service_instance_id.override(
         os.getenv("HOSTNAME") or socket.gethostname()
     )
@@ -34,7 +25,6 @@ async def main() -> None:
         container.config.worker_build_id.override(
             os.environ["TEMPORAL_WORKER_BUILD_ID"]
         )
-    # Start telemetry (OTel providers + Prometheus metrics endpoint + obslog).
     container.init_resources()
     telemetry = container.telemetry()
 
@@ -51,11 +41,13 @@ async def main() -> None:
         data_converter=data_converter_for_namespace(settings.temporal_namespace),
     )
 
+    hello = HelloActivities()
+
     await run_worker(
         client,
-        task_queue=TaskQueue.ORDERS_WORKFLOW,
-        workflows=[OrderWorkflow],
-        activities=[],
+        task_queue=TaskQueue.ACTIVITY,
+        workflows=[],
+        activities=[hello.say_hello],
         tuning=WorkerTuning(
             max_concurrent_activities=settings.worker_max_concurrent_activities,
             max_concurrent_workflow_tasks=settings.worker_max_concurrent_workflow_tasks,
@@ -64,7 +56,9 @@ async def main() -> None:
             max_concurrent_workflow_task_polls=settings.worker_max_concurrent_workflow_task_polls,
             max_cached_workflows=settings.worker_max_cached_workflows,
         ),
-        deployment_config=build_deployment_config(default_deployment_name="orders"),
+        deployment_config=build_deployment_config(
+            default_deployment_name="{{DOMAIN}}-activity"
+        ),
         on_shutdown=container.shutdown_resources,
     )
 

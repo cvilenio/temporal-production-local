@@ -12,7 +12,7 @@ import socket
 import uuid
 from contextlib import asynccontextmanager
 
-from appkit import build_temporal_client
+from appkit import build_temporal_client, data_converter_for_namespace
 from dependencies import container
 from fastapi import FastAPI, Request
 from obslog import bound
@@ -52,6 +52,7 @@ async def lifespan(app: FastAPI):
         tls_client_cert_path=settings.temporal_tls_client_cert_path,
         tls_client_key_path=settings.temporal_tls_client_key_path,
         tls_server_ca_cert_path=settings.temporal_tls_server_ca_cert_path,
+        data_converter=data_converter_for_namespace(settings.temporal_namespace),
     )
     app.state.temporal_service = TemporalService(client)
 

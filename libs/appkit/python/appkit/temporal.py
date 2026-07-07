@@ -18,6 +18,7 @@ from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.service import TLSConfig
 
 if TYPE_CHECKING:
+    from temporalio.converter import DataConverter
     from temporalio.runtime import Runtime
 
 
@@ -32,6 +33,7 @@ async def build_temporal_client(
     tls_client_cert_path: str | None = None,
     tls_client_key_path: str | None = None,
     tls_server_ca_cert_path: str | None = None,
+    data_converter: DataConverter | None = None,
 ) -> Client:
     """Connect a Temporal `Client`, baking in the shared data-converter contract.
 
@@ -42,9 +44,14 @@ async def build_temporal_client(
         (tls_server_ca_cert_path), so the self-signed frontend cert is trusted.
 
     The TracingInterceptor (passed in via `interceptors`) propagates OTel span context
-    across the client → workflow → activity boundary; `pydantic_data_converter` handles
-    typed payload serialisation. Both are independent of the transport.
+    across the client → workflow → activity boundary. `data_converter` selects typed
+    payload serialisation (default: pydantic_data_converter). Both are independent of
+    the transport. Per-domain converters are resolved from config/domains/*.yaml and
+    passed in by callers (ADR-0021).
     """
+    converter = (
+        data_converter if data_converter is not None else pydantic_data_converter
+    )
     tls_config: bool | TLSConfig = tls
     if tls_client_cert_path and tls_client_key_path:
         with open(tls_client_cert_path, "rb") as cert_file:
@@ -64,7 +71,7 @@ async def build_temporal_client(
     return await Client.connect(
         address,
         namespace=namespace,
-        data_converter=pydantic_data_converter,
+        data_converter=converter,
         interceptors=interceptors or [],
         runtime=runtime,
         tls=tls_config,

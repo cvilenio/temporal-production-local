@@ -9,6 +9,7 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-grpc>=1.25",
     "opentelemetry-sdk>=1.25",
     "pydantic-settings>=2.14.0",
+    "pyyaml>=6.0",
     "sqlalchemy[asyncio]>=2.0.30,<3",
     "temporalio>=1.30,<1.31",
 ]

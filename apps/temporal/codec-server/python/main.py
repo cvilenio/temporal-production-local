@@ -17,7 +17,9 @@ is demonstrable end-to-end. Before any real use, replace `DemoCodec` with a
 proper AEAD codec (e.g. AES-256-GCM with a per-namespace key from a KMS/secret)
 and lock CORS down to the Temporal UI origin. The same PayloadCodec must also be
 installed in the workers' data converter so payloads are encrypted at the source
-(see ADR-0006 / docs/ARCHITECTURE.md).
+(see ADR-0006 / docs/ARCHITECTURE.md). When wiring a real codec, resolve the
+domain's converter from config/domains/*.yaml via appkit.data_converter_for_domain
+so encode/decode matches workers and starters (ADR-0021).
 """
 
 from __future__ import annotations

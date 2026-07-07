@@ -1,0 +1,103 @@
+# ADR-0026: Domain descriptors, scaffolding, and pluggable data converters
+
+- **Status:** Accepted — Python foundation landed on branch `polyglot-domain-scaffolding`
+  (PR #1); Java appkit + Java template follow in PR #2.
+- **Date:** 2026-07-07
+- **Related:** Extends ADR-0021 (protobuf IDL + activity version in command) and ADR-0022
+  (domain core vs. application composition). Builds on ADR-0007 (shared namespace spec),
+  ADR-0011 (local OCI chart delivery), and ADR-0004 (Worker Deployment / PINNED versioning).
+
+## Context
+
+The repo's first domain (`ziggymart` / `orders`) grew organically: task queues, worker profiles,
+Helm charts, Grafana dashboards, and the Temporal data converter were wired by hand in multiple
+places. Porting additional demos (customer PoCs, conference samples, polyglot stacks) repeated
+that work and risked contract drift — especially the data converter (ADR-0022's cautionary
+example: mismatched converters break payload deserialization across starters and workers).
+
+We need a **repeatable, verifiable path** to land a new domain without copying the entire orders
+tree, while keeping shared contracts (converter, namespace spec, task-queue constants) uniform.
+
+## Decision
+
+### 1. Domain descriptor (`config/domains/<domain>.yaml`)
+
+Each domain gets a YAML descriptor that is the **within-domain wiring contract**:
+
+- `domain` — key that MUST exist in `config/temporal/namespaces.yaml`
+- `kernel` — optional; names the `libs/<kernel>/` package when it differs from the domain key
+  (e.g. `ziggymart` → `orders`)
+- `language` — `python` today; `java` in PR #2
+- `data_converter` — symbolic ref resolved by appkit (default: pydantic/proto converter)
+- `workers` — profile, kind, deployment name, task queue per worker split
+- `workflows` — type, task queue, sample inputs (for future generic console triggers)
+- `observability.dashboard` — whether a Grafana dashboard is provisioned
+
+`compose/scripts/verify-domains.py` (wired into `just lint`) checks every descriptor against
+the namespace spec and kernel `TaskQueue` constants. Drift fails CI offline.
+
+### 2. Scaffolder (`compose/scripts/scaffold_domain.py`)
+
+A Python script copies tokenized templates and patches repo integration points:
+
+| Template | Output |
+|---|---|
+| `templates/domain/python/` | `libs/<domain>/`, `apps/temporal/workers/python/<domain>/` |
+| `templates/charts/domain-workers/` | `deploy/charts/<domain>-workers/` |
+| `templates/grafana/` | dashboard + provisioning under `compose/observability/grafana/` |
+
+It also writes the descriptor, appends `namespaces.yaml`, stubs a Cloud overlay entry,
+adds a chart-version TF variable, and patches `pyproject.toml` (workspace members, dependency
+groups). **Manual follow-ups** remain documented: ArgoCD Application in `applications.tf`,
+Grafana docker-compose mounts, `uv lock`, build/push/deploy.
+
+`--root` and `--template-root` support offline pytest into a temp tree without polluting the repo.
+
+Template defaults encode live-verified fixups: `VersioningBehavior.PINNED` on HelloWorkflow,
+`startupProbe.enabled: false` for demo domains without orders-api, Grafana datasource uid
+`prometheus-kind`.
+
+### 3. Pluggable data converter (`appkit.domains`)
+
+`libs/appkit/python/appkit/domains.py` loads descriptors and resolves `data_converter` to a
+Temporal `DataConverter`. `appkit.temporal.connect()` accepts an optional converter; workers
+and starters call `data_converter_for_namespace()` so every party in a domain shares the same
+codec (ADR-0021 contract).
+
+Today only `default` / `pydantic` / `json` resolve to `pydantic_data_converter`. Custom
+converters register in `resolve_data_converter()` when needed.
+
+### 4. What stays out of PR #1
+
+- **Java appkit + `templates/domain/java/`** — PR #2 (Spring Boot composition kit)
+- **Generic console trigger UI** — reads descriptor `workflows[].sample_inputs`; later milestone
+- **In-image descriptor path** — `domains.py` resolves `config/domains/` from the repo tree;
+  container images without that path silently fall back to pydantic (documented design debt;
+  fix when real custom converters land)
+- **Scaffolder pyproject anchors** — string-replace patches can no-op if anchor text drifts;
+  the pytest scaffolder test guards the happy path; anchor hardening deferred
+
+## Consequences
+
+**Positive**
+
+- New Python domains scaffold in minutes; verifier catches queue/namespace drift before deploy
+- Data converter is descriptor-driven, not re-decided per app
+- Offline pytest (`compose/scripts/tests/test_scaffold_domain.py`) guards templates without
+  committing a proof domain to git
+- Human runbook at `docs/adapting-a-demo.md`
+
+**Negative / trade-offs**
+
+- Scaffolder patches are brittle (pyproject anchors, manual TF/compose steps)
+- Descriptor is not yet baked into container images — namespace→converter lookup fails in-image
+- Chart template copied from orders-workers carries orders-specific comments/keys demo domains
+  do not use (harmless but noisy)
+
+## Verification
+
+- `just verify-domains` + `just lint` pass on `ziggymart` descriptor
+- `pytest compose/scripts/tests/test_scaffold_domain.py` scaffolds + verifies offline
+- Live hello proof (kind+OSS, pre-strip): HelloWorkflow COMPLETED; activity on
+  `hello-activity-task-queue`; Grafana panels resolve with `prometheus-kind` uid
+- Independent Temporal-aware `/code-review` required before merge (PR #1)

@@ -1,0 +1,30 @@
+# Domain descriptor for the existing ziggymart (orders) workload.
+# Schema: domain key MUST exist in config/temporal/namespaces.yaml.
+# kernel names the libs/<kernel>/ package (defaults to domain for scaffolded domains).
+
+domain: ziggymart
+kernel: orders
+language: python
+data_converter: default
+workers:
+  - profile: workflow
+    kind: workflow
+    deployment_name: orders-workflow
+    task_queue: orders-workflow-task-queue
+  - profile: activity
+    kind: activity
+    deployment_name: orders-activity
+    task_queue: orders-activity-task-queue
+workflows:
+  - type: OrderWorkflow
+    task_queue: orders-workflow-task-queue
+    sample_inputs:
+      - label: happy_path
+        input:
+          item_id: ITEM-001
+          quantity: 1
+          user_id: "00000000-0000-0000-0000-000000000001"
+          address: "123 Main St, Springfield"
+          amount: 49.99
+observability:
+  dashboard: true
