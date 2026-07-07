@@ -11,6 +11,8 @@ factory; they never re-decide the converter.
 
 from __future__ import annotations
 
+import os
+import socket
 from typing import TYPE_CHECKING
 
 from temporalio.client import Client
@@ -34,6 +36,7 @@ async def build_temporal_client(
     tls_client_key_path: str | None = None,
     tls_server_ca_cert_path: str | None = None,
     data_converter: DataConverter | None = None,
+    default_deployment_name: str | None = None,
 ) -> Client:
     """Connect a Temporal `Client`, baking in the shared data-converter contract.
 
@@ -68,6 +71,12 @@ async def build_temporal_client(
             server_root_ca_cert=server_root_ca_cert,
         )
 
+    connect_kwargs: dict = {}
+    if default_deployment_name is not None:
+        deployment_name = os.getenv("TEMPORAL_DEPLOYMENT_NAME", default_deployment_name)
+        host = os.getenv("HOSTNAME") or socket.gethostname()
+        connect_kwargs["identity"] = f"{deployment_name}@{host}"
+
     return await Client.connect(
         address,
         namespace=namespace,
@@ -76,4 +85,5 @@ async def build_temporal_client(
         runtime=runtime,
         tls=tls_config,
         api_key=api_key or None,
+        **connect_kwargs,
     )

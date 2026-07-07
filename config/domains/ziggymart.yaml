@@ -10,16 +10,16 @@ data_converter: default
 workers:
   - profile: workflow
     kind: workflow
-    deployment_name: orders-workflow
+    deployment_name: orders-workflow-python
     task_queue: orders-workflow-task-queue
   - profile: activity
     kind: activity
-    deployment_name: orders-activity
+    deployment_name: orders-activity-python
     task_queue: orders-activity-task-queue
-  - profile: activity-java
+  - profile: finalization-java
     kind: activity
-    deployment_name: orders-activity-java
-    task_queue: orders-java-activity-task-queue
+    deployment_name: orders-finalization-java
+    task_queue: orders-finalization-task-queue
 workflows:
   - type: OrderWorkflow
     task_queue: orders-workflow-task-queue

@@ -149,14 +149,14 @@ autoscaling:
 # there on purpose (ADR-0023 §2; setting it would fight the HPA and cycle pods).
 workers:
   - name: workflow
-    deploymentName: {{DOMAIN}}-workflow
+    deploymentName: {{DOMAIN}}-workflow-{{LANG}}
     replicas: 1
     image:
       repository: localhost:5001/{{DOMAIN}}-worker-workflow
       tag: "latest" # cluster layer overrides with the git-SHA tag from `just ci`
     command: ["python", "main.py"]
   - name: activity
-    deploymentName: {{DOMAIN}}-activity
+    deploymentName: {{DOMAIN}}-activity-{{LANG}}
     replicas: 2
     image:
       repository: localhost:5001/{{DOMAIN}}-worker-activity

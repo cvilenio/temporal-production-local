@@ -15,6 +15,10 @@ spring:
 temporal:
   data-converter: ${TEMPORAL_DATA_CONVERTER:default}
 
+appkit:
+  worker:
+    default-deployment-name: {{DOMAIN}}-workflow-java
+
 logging:
   level:
     root: INFO

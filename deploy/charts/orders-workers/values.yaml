@@ -137,8 +137,8 @@ autoscaling:
       minReplicas: 1
       maxReplicas: 10
       targetBacklogPerReplica: 5
-    activity-java:
-      taskQueue: orders-java-activity-task-queue
+    finalization-java:
+      taskQueue: orders-finalization-task-queue
       queueType: activity
       minReplicas: 1
       maxReplicas: 10
@@ -157,30 +157,30 @@ autoscaling:
 # there on purpose (ADR-0023 §2; setting it would fight the HPA and cycle pods).
 workers:
   - name: workflow
-    deploymentName: orders-workflow
+    deploymentName: orders-workflow-python
     replicas: 1
     image:
       repository: localhost:5001/orders-worker-workflow
       tag: "latest" # cluster layer overrides with the git-SHA tag from `just ci`
     command: ["python", "main.py"]
   - name: activity
-    deploymentName: orders-activity
+    deploymentName: orders-activity-python
     replicas: 2
     image:
       repository: localhost:5001/orders-worker-activity
       tag: "latest"
     command: ["python", "main.py"]
-  - name: activity-java
-    deploymentName: orders-activity-java
+  - name: finalization-java
+    deploymentName: orders-finalization-java
     replicas: 1
     language: java
     image:
-      repository: localhost:5001/orders-worker-activity-java
+      repository: localhost:5001/orders-worker-finalization-java
       tag: "latest"
     startupProbe:
       type: httpGet
       path: /health/readiness
       port: 9000
     extraEnv:
-      OTEL_SERVICE_NAME: orders-worker-activity-java
+      OTEL_SERVICE_NAME: orders-worker-finalization-java
       SDK_METRICS_PORT: "9000"

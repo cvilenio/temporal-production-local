@@ -173,8 +173,8 @@ build-images:
       --build-arg APP_MODULE=:orders-activity-java-worker \
       --build-arg WORKER_REL_PATH=apps/temporal/workers/java/orders/activity \
       --build-arg APP_JAR=orders-activity-java-worker \
-      -t "$REGISTRY/orders-worker-activity-java:$TAG" .
-    echo "Built $REGISTRY/orders-worker-{workflow,activity,activity-java}:$TAG, orders-api:$TAG, temporal-worker-autoscaler:$TAG"
+      -t "$REGISTRY/orders-worker-finalization-java:$TAG" .
+    echo "Built $REGISTRY/orders-worker-{workflow,activity,finalization-java}:$TAG, orders-api:$TAG, temporal-worker-autoscaler:$TAG"
 
 # Push the worker images + orders-api to the local registry.
 push-images:
@@ -187,8 +187,8 @@ push-images:
     done
     docker push "$REGISTRY/orders-api:$TAG"
     docker push "$REGISTRY/temporal-worker-autoscaler:$TAG"
-    docker push "$REGISTRY/orders-worker-activity-java:$TAG"
-    echo "Pushed $REGISTRY/orders-worker-{workflow,activity,activity-java}:$TAG, orders-api:$TAG, temporal-worker-autoscaler:$TAG"
+    docker push "$REGISTRY/orders-worker-finalization-java:$TAG"
+    echo "Pushed $REGISTRY/orders-worker-{workflow,activity,finalization-java}:$TAG, orders-api:$TAG, temporal-worker-autoscaler:$TAG"
 
 # Print the image tag (git-describe) for the current tree.
 image-tag:
@@ -205,7 +205,7 @@ image-digests:
     done
     echo "orders-api=$(crane digest "$REGISTRY/orders-api:$TAG" --insecure)"
     echo "temporal-worker-autoscaler=$(crane digest "$REGISTRY/temporal-worker-autoscaler:$TAG" --insecure)"
-    echo "activity-java=$(crane digest "$REGISTRY/orders-worker-activity-java:$TAG" --insecure)"
+    echo "finalization-java=$(crane digest "$REGISTRY/orders-worker-finalization-java:$TAG" --insecure)"
 
 # --- Local cluster (kind + local registry) -----------------------------------
 
@@ -232,7 +232,7 @@ release-worker-deployments:
     set -a; . "$env"; set +a
     [ -n "${TEMPORAL_API_KEY:-}" ] || { echo "no TEMPORAL_API_KEY — skipping release"; exit 0; }
     A=(--address "$TEMPORAL_ADDRESS" --namespace "$TEMPORAL_NAMESPACE" --api-key "$TEMPORAL_API_KEY" --tls --yes)
-    for wd in orders/orders-workflow orders/orders-activity; do
+    for wd in orders/orders-workflow-python orders/orders-activity-python orders/orders-finalization-java; do
       echo "releasing ManagerIdentity: $wd"
       temporal worker deployment manager-identity unset "${A[@]}" --deployment-name "$wd" 2>/dev/null \
         || echo "  (skip: $wd not found or already released)"
@@ -396,7 +396,7 @@ switch-backend target *FLAGS:
     # switching TO oss; keep whatever it was when switching to cloud.
     new_srv="$srv"; [ "{{target}}" = "oss" ] && new_srv=true
     tag="$(git describe --tags --always --dirty --abbrev=12)"
-    export TF_VAR_worker_image_digests="{\"workflow\":\"$(crane digest localhost:{{registry_port}}/orders-worker-workflow:$tag --insecure)\",\"activity\":\"$(crane digest localhost:{{registry_port}}/orders-worker-activity:$tag --insecure)\",\"activity-java\":\"$(crane digest localhost:{{registry_port}}/orders-worker-activity-java:$tag --insecure)\"}"
+    export TF_VAR_worker_image_digests="{\"workflow\":\"$(crane digest localhost:{{registry_port}}/orders-worker-workflow:$tag --insecure)\",\"activity\":\"$(crane digest localhost:{{registry_port}}/orders-worker-activity:$tag --insecure)\",\"finalization-java\":\"$(crane digest localhost:{{registry_port}}/orders-worker-finalization-java:$tag --insecure)\"}"
     export TF_VAR_orders_api_image_digest="$(crane digest localhost:{{registry_port}}/orders-api:$tag --insecure)"
     export TF_VAR_autoscaler_image_digest="$(crane digest localhost:{{registry_port}}/temporal-worker-autoscaler:$tag --insecure)"
     export TF_VAR_temporal_backend="{{target}}"
@@ -425,7 +425,7 @@ temporal-server-down:
     read -r -p "Remove the OSS temporal-server + its Postgres (ALL OSS workflow state lost)? Type 'yes': " ans
     [ "$ans" = "yes" ] || { echo "aborted."; exit 1; }
     tag="$(git describe --tags --always --dirty --abbrev=12)"
-    export TF_VAR_worker_image_digests="{\"workflow\":\"$(crane digest localhost:{{registry_port}}/orders-worker-workflow:$tag --insecure)\",\"activity\":\"$(crane digest localhost:{{registry_port}}/orders-worker-activity:$tag --insecure)\",\"activity-java\":\"$(crane digest localhost:{{registry_port}}/orders-worker-activity-java:$tag --insecure)\"}"
+    export TF_VAR_worker_image_digests="{\"workflow\":\"$(crane digest localhost:{{registry_port}}/orders-worker-workflow:$tag --insecure)\",\"activity\":\"$(crane digest localhost:{{registry_port}}/orders-worker-activity:$tag --insecure)\",\"finalization-java\":\"$(crane digest localhost:{{registry_port}}/orders-worker-finalization-java:$tag --insecure)\"}"
     export TF_VAR_orders_api_image_digest="$(crane digest localhost:{{registry_port}}/orders-api:$tag --insecure)"
     export TF_VAR_autoscaler_image_digest="$(crane digest localhost:{{registry_port}}/temporal-worker-autoscaler:$tag --insecure)"
     export TF_VAR_temporal_backend=cloud
@@ -496,10 +496,10 @@ platform-up backend="cloud":
     tag="$(git describe --tags --always --dirty --abbrev=12)"
     wf="$(crane digest localhost:{{registry_port}}/orders-worker-workflow:$tag --insecure)"
     ac="$(crane digest localhost:{{registry_port}}/orders-worker-activity:$tag --insecure)"
-    ja="$(crane digest localhost:{{registry_port}}/orders-worker-activity-java:$tag --insecure)"
+    ja="$(crane digest localhost:{{registry_port}}/orders-worker-finalization-java:$tag --insecure)"
     api="$(crane digest localhost:{{registry_port}}/orders-api:$tag --insecure)"
     aut="$(crane digest localhost:{{registry_port}}/temporal-worker-autoscaler:$tag --insecure)"
-    export TF_VAR_worker_image_digests="{\"workflow\":\"$wf\",\"activity\":\"$ac\",\"activity-java\":\"$ja\"}"
+    export TF_VAR_worker_image_digests="{\"workflow\":\"$wf\",\"activity\":\"$ac\",\"finalization-java\":\"$ja\"}"
     export TF_VAR_orders_api_image_digest="$api"
     export TF_VAR_autoscaler_image_digest="$aut"
     export TF_VAR_temporal_backend="{{backend}}"

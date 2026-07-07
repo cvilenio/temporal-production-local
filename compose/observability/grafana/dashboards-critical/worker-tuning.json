@@ -659,7 +659,7 @@
             "type": "prometheus",
             "uid": "prometheus-kind"
           },
-          "expr": "count by (temporal_io_deployment_name, temporal_io_build_id) (up{job=\"kubernetes-pods\", temporal_io_deployment_name=~\"orders-workflow|orders-activity\"})",
+          "expr": "count by (temporal_io_deployment_name, temporal_io_build_id) (up{job=\"kubernetes-pods\", temporal_io_deployment_name=~\"orders-workflow-python|orders-activity-python|orders-finalization-java\"})",
           "legendFormat": "{{temporal_io_deployment_name}} ({{temporal_io_build_id}})"
         }
       ]

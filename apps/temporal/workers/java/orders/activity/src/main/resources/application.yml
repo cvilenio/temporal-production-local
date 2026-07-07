@@ -11,14 +11,16 @@ spring:
     workers-auto-discovery:
       packages: io.temporal.demo.orders.activity
     workers:
-      - task-queue: orders-java-activity-task-queue
+      - task-queue: orders-finalization-task-queue
 
 temporal:
   data-converter: ${TEMPORAL_DATA_CONVERTER:default}
 
 appkit:
+  worker:
+    default-deployment-name: orders-finalization-java
   telemetry:
-    otel-service-name: ${OTEL_SERVICE_NAME:orders-worker-activity-java}
+    otel-service-name: ${OTEL_SERVICE_NAME:orders-worker-finalization-java}
 
 orders:
   service-url: ${ORDERS_SERVICE_URL:http://localhost:8002}

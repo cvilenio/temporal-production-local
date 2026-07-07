@@ -69,12 +69,13 @@ def die(msg: str) -> None:
     sys.exit(1)
 
 
-def tokens(domain: str) -> dict[str, str]:
+def tokens(domain: str, lang: str = "python") -> dict[str, str]:
     return {
         "{{DOMAIN}}": domain,
         "{{Domain}}": domain.replace("-", " ").title().replace(" ", ""),
         "{{DOMAIN_UPPER}}": domain.upper().replace("-", "_"),
         "{{DOMAIN_PKG}}": domain.replace("-", ""),
+        "{{LANG}}": lang,
     }
 
 
@@ -141,13 +142,13 @@ def write_domain_descriptor(ctx: ScaffoldCtx, domain: str, lang: str) -> None:
             {
                 "profile": "workflow",
                 "kind": "workflow",
-                "deployment_name": f"{domain}-workflow",
+                "deployment_name": f"{domain}-workflow-{lang}",
                 "task_queue": f"{domain}-workflow-task-queue",
             },
             {
                 "profile": "activity",
                 "kind": "activity",
-                "deployment_name": f"{domain}-activity",
+                "deployment_name": f"{domain}-activity-{lang}",
                 "task_queue": f"{domain}-activity-task-queue",
             },
         ],
@@ -487,7 +488,7 @@ def main() -> None:
     if not template_root.is_dir():
         die(f"missing template tree: {template_root}")
 
-    mapping = tokens(domain)
+    mapping = tokens(domain, lang)
 
     for template_rel, dest_rel in domain_copy_paths(lang, domain):
         src = template_root / template_rel

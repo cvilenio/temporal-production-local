@@ -17,6 +17,8 @@ temporal:
   data-converter: ${TEMPORAL_DATA_CONVERTER:default}
 
 appkit:
+  worker:
+    default-deployment-name: {{DOMAIN}}-activity-java
   telemetry:
     otel-service-name: ${OTEL_SERVICE_NAME:{{DOMAIN}}-worker-activity}
 

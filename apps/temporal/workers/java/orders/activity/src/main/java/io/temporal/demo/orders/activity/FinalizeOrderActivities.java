@@ -19,7 +19,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 @Component
-@ActivityImpl(taskQueues = TemporalIds.ORDERS_JAVA_ACTIVITY_TASK_QUEUE)
+@ActivityImpl(taskQueues = TemporalIds.ORDERS_FINALIZATION_TASK_QUEUE)
 public class FinalizeOrderActivities implements FinalizeOrderActivity {
 
   private static final Logger log = LoggerFactory.getLogger(FinalizeOrderActivities.class);
