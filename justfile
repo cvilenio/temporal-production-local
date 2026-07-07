@@ -104,6 +104,10 @@ fix:
 # Full gate: lint (python + manifests) + test.
 check: lint test
 
+# Compile appkit + all Java apps (Gradle leaf).
+java-build:
+    ./gradlew build
+
 # Local CI gate: gate + build + push worker/api images.
 ci: check build-images push-images
 
