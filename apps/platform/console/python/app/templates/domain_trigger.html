@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="h-full overflow-y-auto p-6" x-data="domainTriggerApp()" x-init="init()">
+    <div class="max-w-4xl mx-auto space-y-6">
+        <div>
+            <h2 class="text-2xl font-semibold text-textPrimary tracking-tight">Trigger any domain workflow</h2>
+            <p class="text-textMuted text-sm mt-1">
+                Descriptor-driven starts via the console Temporal client. Orders scenarios stay on the
+                <a href="/orders" class="text-accent hover:underline">Orders</a> panel.
+            </p>
+        </div>
+
+        <template x-if="loadError">
+            <div class="rounded-lg border border-error/40 bg-error/10 px-4 py-3 text-sm text-error" x-text="loadError"></div>
+        </template>
+
+        <div class="grid gap-4 md:grid-cols-2">
+            <label class="block">
+                <span class="text-xs uppercase tracking-wider text-textMuted">Domain</span>
+                <select x-model="selectedDomain" @change="onDomainChange()"
+                        class="mt-1 w-full rounded-md bg-bgPanel border border-borderSubtle px-3 py-2 text-sm">
+                    <option value="">Select domain…</option>
+                    <template x-for="d in domains" :key="d.domain">
+                        <option :value="d.domain" x-text="d.domain"></option>
+                    </template>
+                </select>
+            </label>
+
+            <label class="block">
+                <span class="text-xs uppercase tracking-wider text-textMuted">Workflow type</span>
+                <select x-model="selectedWorkflow" @change="onWorkflowChange()"
+                        class="mt-1 w-full rounded-md bg-bgPanel border border-borderSubtle px-3 py-2 text-sm"
+                        :disabled="!selectedDomain">
+                    <option value="">Select workflow…</option>
+                    <template x-for="w in workflows" :key="w.type">
+                        <option :value="w.type" x-text="w.type"></option>
+                    </template>
+                </select>
+            </label>
+
+            <label class="block">
+                <span class="text-xs uppercase tracking-wider text-textMuted">Sample input</span>
+                <select x-model="selectedSample"
+                        class="mt-1 w-full rounded-md bg-bgPanel border border-borderSubtle px-3 py-2 text-sm"
+                        :disabled="!selectedWorkflow">
+                    <option value="">Select sample…</option>
+                    <template x-for="s in samples" :key="s.label">
+                        <option :value="s.label" x-text="s.label"></option>
+                    </template>
+                </select>
+            </label>
+
+            <label class="block">
+                <span class="text-xs uppercase tracking-wider text-textMuted">Count</span>
+                <input type="number" min="1" max="5" x-model.number="count"
+                       class="mt-1 w-full rounded-md bg-bgPanel border border-borderSubtle px-3 py-2 text-sm"/>
+            </label>
+        </div>
+
+        <div class="flex items-center gap-3">
+            <button @click="trigger()"
+                    :disabled="isTriggering || !canTrigger"
+                    class="px-4 py-2 rounded-md bg-accent hover:bg-accentHover disabled:opacity-50 text-sm font-medium">
+                <span x-text="isTriggering ? 'Starting…' : 'Trigger'"></span>
+            </button>
+            <button @click="refreshStatus()" class="px-3 py-2 rounded-md border border-borderSubtle text-sm text-textMuted hover:text-textPrimary">
+                Refresh queue status
+            </button>
+        </div>
+
+        <template x-if="triggerError">
+            <div class="rounded-lg border border-error/40 bg-error/10 px-4 py-3 text-sm text-error" x-text="triggerError"></div>
+        </template>
+
+        <template x-if="results.length">
+            <div class="rounded-lg border border-borderSubtle bg-bgPanel p-4 space-y-3">
+                <h3 class="text-sm font-semibold text-textPrimary">Started workflows</h3>
+                <template x-for="r in results" :key="r.workflow_id">
+                    <div class="text-sm font-mono border border-borderSubtle/60 rounded px-3 py-2 flex flex-col gap-1">
+                        <div><span class="text-textMuted">ID:</span> <span x-text="r.workflow_id"></span></div>
+                        <div><span class="text-textMuted">Run:</span> <span x-text="r.run_id"></span></div>
+                        <template x-if="r.temporal_ui_url">
+                            <a :href="r.temporal_ui_url" target="_blank" rel="noopener noreferrer"
+                               class="text-accent hover:underline text-xs">Open in Temporal UI ↗</a>
+                        </template>
+                    </div>
+                </template>
+            </div>
+        </template>
+
+        <template x-if="statusRows.length">
+            <div class="rounded-lg border border-borderSubtle bg-bgPanel p-4 space-y-2">
+                <h3 class="text-sm font-semibold text-textPrimary">Domain / queue liveness</h3>
+                <template x-for="row in statusRows" :key="row.domain">
+                    <div class="text-xs font-mono text-textMuted border-t border-borderSubtle/40 pt-2 first:border-0 first:pt-0">
+                        <span class="text-textPrimary" x-text="row.domain"></span>:
+                        <span x-text="row.connected ? 'client ok' : ('client down: ' + (row.error || 'unknown'))"></span>
+                        <template x-if="row.workflow_queue">
+                            · wf pollers <span x-text="row.workflow_queue.pollers"></span>
+                        </template>
+                        <template x-if="row.activity_queue">
+                            · act pollers <span x-text="row.activity_queue.pollers"></span>
+                        </template>
+                    </div>
+                </template>
+            </div>
+        </template>
+    </div>
+</div>
+
+<script>
+function domainTriggerApp() {
+    return {
+        domains: [],
+        workflows: [],
+        samples: [],
+        selectedDomain: '',
+        selectedWorkflow: '',
+        selectedSample: '',
+        count: 1,
+        isTriggering: false,
+        loadError: '',
+        triggerError: '',
+        results: [],
+        statusRows: [],
+        get canTrigger() {
+            return this.selectedDomain && this.selectedWorkflow && this.selectedSample && this.count >= 1;
+        },
+        async init() {
+            try {
+                const resp = await fetch('/api/domain-trigger/catalog');
+                const data = await resp.json();
+                this.domains = data.domains || [];
+                await this.refreshStatus();
+            } catch (e) {
+                this.loadError = 'Failed to load domain catalog: ' + e;
+            }
+        },
+        onDomainChange() {
+            const d = this.domains.find(x => x.domain === this.selectedDomain);
+            this.workflows = d ? d.workflows : [];
+            this.selectedWorkflow = '';
+            this.selectedSample = '';
+            this.samples = [];
+        },
+        onWorkflowChange() {
+            const w = this.workflows.find(x => x.type === this.selectedWorkflow);
+            this.samples = w ? w.samples : [];
+            this.selectedSample = this.samples.length ? this.samples[0].label : '';
+        },
+        async refreshStatus() {
+            try {
+                const resp = await fetch('/api/domain-trigger/status');
+                const data = await resp.json();
+                this.statusRows = data.domains || [];
+            } catch (_) { /* degrade quietly */ }
+        },
+        async trigger() {
+            this.isTriggering = true;
+            this.triggerError = '';
+            this.results = [];
+            try {
+                const resp = await fetch('/api/domain-trigger/trigger', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        domain: this.selectedDomain,
+                        workflow_type: this.selectedWorkflow,
+                        sample_label: this.selectedSample,
+                        count: this.count,
+                    }),
+                });
+                const data = await resp.json();
+                if (!data.ok) {
+                    this.triggerError = data.error || (data.errors || []).join('; ') || 'Trigger failed';
+                }
+                this.results = data.started || [];
+                await this.refreshStatus();
+            } catch (e) {
+                this.triggerError = String(e);
+            } finally {
+                this.isTriggering = false;
+            }
+        },
+    };
+}
+</script>
+{% endblock %}

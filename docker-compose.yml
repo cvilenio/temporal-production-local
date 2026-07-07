@@ -310,6 +310,18 @@ services:
       # (GetNamespaces/GetRegions) for the multi-region/namespace status block.
       # Empty → that block is hidden; the single-namespace probe still works.
       - TEMPORAL_CLOUD_OPS_API_KEY=${TEMPORAL_CLOUD_OPS_API_KEY:-}
+      # Generic descriptor-driven workflow trigger (Phase B). Address empty → feature
+      # disabled gracefully. On kind+OSS set TEMPORAL_TRIGGER_TLS=true and mount
+      # client mTLS under /etc/temporal/tls (see .secrets/README).
+      - DOMAIN_DESCRIPTORS_DIR=/config/domains
+      - TEMPORAL_TRIGGER_ADDRESS=${TEMPORAL_TRIGGER_ADDRESS:-host.docker.internal:7233}
+      - TEMPORAL_TRIGGER_TLS=${TEMPORAL_TRIGGER_TLS:-false}
+      - TEMPORAL_TRIGGER_API_KEY=${TEMPORAL_TRIGGER_API_KEY:-}
+      - TEMPORAL_TLS_CLIENT_CERT_PATH=${TEMPORAL_TLS_CLIENT_CERT_PATH:-/etc/temporal/tls/tls.crt}
+      - TEMPORAL_TLS_CLIENT_KEY_PATH=${TEMPORAL_TLS_CLIENT_KEY_PATH:-/etc/temporal/tls/tls.key}
+      - TEMPORAL_TLS_SERVER_CA_CERT_PATH=${TEMPORAL_TLS_SERVER_CA_CERT_PATH:-/etc/temporal/tls/ca.crt}
+      - TEMPORAL_TRIGGER_TLS_DOMAIN=${TEMPORAL_TRIGGER_TLS_DOMAIN:-temporal-frontend.temporal.svc.cluster.local}
+      - GENERIC_TRIGGER_EXCLUDE_DOMAINS=${GENERIC_TRIGGER_EXCLUDE_DOMAINS:-ziggymart}
       - GRAFANA_EMBED_URL=http://localhost:3000
       - PGWEB_EMBED_URL=http://localhost:8083
       # Cluster-visibility UIs, fronted by viz-proxy (frame headers stripped).
@@ -326,6 +338,10 @@ services:
       - "8086:8086"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Domain descriptors for the generic trigger catalog (Phase B).
+      - ./config/domains:/config/domains:ro
+      # Optional client mTLS for kind+OSS trigger (populate .secrets/temporal-client-mtls).
+      - ./.secrets/temporal-client-mtls:/etc/temporal/tls:ro
       # Read-only console kubeconfig (kind substrate) — same dir Headlamp mounts.
       # Present only after `just cluster-up`; the KubeProvider connects lazily and
       # degrades to "down" for cluster services until it appears.

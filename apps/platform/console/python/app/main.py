@@ -4,8 +4,9 @@ import socket
 from contextlib import asynccontextmanager
 
 from app import db
-from app.routes import orders_api, pages, status_api, tracking_api
+from app.routes import domain_trigger_api, orders_api, pages, status_api, tracking_api
 from app.services.status import poll_status_loop
+from app.settings import settings
 from app.sse import poll_order_updates
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -24,7 +25,10 @@ async def lifespan(app: FastAPI):
         instance_id=os.getenv("HOSTNAME") or socket.gethostname(),
     )
 
-    # Best-effort DB connect — never fatal. The console must boot and serve even
+    if settings.domain_descriptors_dir:
+        os.environ["DOMAIN_DESCRIPTORS_DIR"] = settings.domain_descriptors_dir
+
+    # Best-effort DB connect — never fatal.
     # with the whole kind side (orders-db, orders-api) unreachable; it's expected
     # to be running before the cluster exists. The maintainer establishes the
     # pool when the DB appears and re-establishes it if the DB goes away.
@@ -58,6 +62,7 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 # Include routers
 app.include_router(pages.router)
 app.include_router(orders_api.router)
+app.include_router(domain_trigger_api.router)
 app.include_router(tracking_api.router)
 app.include_router(status_api.router)
 
