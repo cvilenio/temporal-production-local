@@ -150,22 +150,62 @@ follow along in real time.
 - **Off-path agents:** if you mutate the cluster outside those recipes (e.g. raw `kubectl`,
   `terraform apply` on the cluster layer), run `just preflight` yourself first.
 
-**Waiting for `host-plane-up-cloud` / `platform-up` to actually be ready.** These recipes shell out
-to `docker compose`, `kind`, and Terraform steps that can buffer or go quiet for long stretches
-— tailing their stdout (or a backgrounded task's `.output` file) is not a reliable readiness
-signal; it can sit empty for minutes while work is genuinely happening, and "still running"
-looks identical to "stuck." Don't poll a quiet log and don't guess from elapsed time. Instead:
+**Local is low-latency - never blind-wait; verify progress out-of-band and fail fast (MUST).**
+Everything on the kind + Docker + Terraform side runs on this machine, so real work shows
+observable movement within *seconds*, not minutes: `docker compose up` transitions containers
+to `Created`/`Up` within ~10-15s, kind pods start almost immediately, and a Terraform step
+either advances or errors. The failure mode this rule exists to kill: firing a bring-up, then
+sitting on a static sleep or a blind `curl :8086/healthz` loop "waiting longer" for something
+that is already dead. If nothing is moving, the step is stuck or the process died - diagnose it,
+do not extend the wait.
 
-- If the tool call auto-backgrounds the command, wait for its own completion notification
-  (or `TaskOutput` with `block: true`) rather than repeatedly `tail`-ing the output file —
-  that only tells you what's printed so far, not whether the recipe is done.
-- Once it returns (or if you want an earlier signal it's *usably* up), validate against the
-  same health signals a human would trust, not the command's exit alone:
-  `curl :8086/healthz` (console), `curl :3000/api/health` (Grafana), `docker ps` for
-  `Up ... (healthy)` on the containers you need, and `kubectl get pods -A` for zero
-  non-Running/Completed pods on kind.
-- Prefer `just preflight` where it exists (console gate) over hand-rolled checks — it's the
+The distinction that matters: a recipe's **stdout** is a bad readiness signal (it goes quiet
+for long stretches while work genuinely happens, and "still running" looks identical to
+"stuck"), but the **system's observable state** is an excellent, near-instant progress signal.
+So:
+
+- **Confirm liveness first, within the first ~10-15s.** Right after kicking off a bring-up,
+  check that it is actually doing something out-of-band - `docker ps` / `docker ps -a` for
+  containers appearing and transitioning state, `pgrep -fl 'just|docker compose'` for the
+  process still being alive, `kubectl get pods -A` for pods being created. Seeing containers
+  come online is the proof the command works at all; an empty `docker ps` seconds in means the
+  command never got to `docker compose up` (a dead background process), not "still building."
+- **Poll observable STATE on a tight cadence - that is not the same as tailing a log.** Re-run
+  the cheap state probes (`docker ps`, `kubectl get pods`, health endpoints) every few seconds
+  until they satisfy or a short, aggressive timeout trips. Do NOT `tail` the recipe's stdout /
+  a backgrounded task's `.output` file, and do NOT guess readiness from elapsed time - those are
+  the banned blind signals. If the tool call auto-backgrounds the command, still probe state
+  yourself for early liveness rather than only awaiting its completion notification.
+- **On zero progress, stop and diagnose - do not wait longer.** No container movement in the
+  first window => inspect immediately: `docker ps -a` for `Exited`/`Created`-stuck, `docker logs
+  <svc> --tail 50`, the process exit code. Default suspicion is a dead/orphaned background
+  process or a genuine error, not patience owed.
+- **Validate final readiness against the signals a human would trust,** not the command's exit
+  alone: `curl :8086/healthz` (console), `curl :3000/api/health` (Grafana), `docker ps` for
+  `Up ... (healthy)` on the containers you need, `kubectl get pods -A` for zero
+  non-Running/Completed pods. Prefer `just preflight` where it exists (console gate) - it is the
   same probe `platform-up` already trusts.
+- **The one exception is the network to Temporal Cloud.** Anything crossing the internet -
+  starting Cloud workflows, `tcld`, scraping the Cloud metrics endpoint - has real, non-local
+  latency, so a patient wait there is legitimate. This whole low-latency assumption applies to
+  the local kind / Docker / Terraform substrate only; do not carry the aggressive timeouts onto
+  Cloud calls.
+
+This generalizes beyond `host-plane-up-cloud` / `platform-up`: any local `docker`, `kubectl`,
+or `terraform` step follows the same discipline - verify it is progressing via observable state,
+fast, and fail fast when it is not.
+
+**Known cold-build trap (pre-build to sidestep it).** On a cold `docker compose up --build`,
+Docker Desktop's parallel bake can hang exporting the `platform-console` image, and a
+backgrounded `just host-plane-up-cloud` can die at that point *before* `docker compose up` ever
+runs - so no containers are created and healthz never comes up (the exact "waiting on a corpse"
+trap above). If a bring-up shows no containers within the first window on a cold build,
+pre-build the images as their own step first - `docker compose build platform-console mock-api
+codec-server` - then re-run the recipe; containers then come up in ~30s. Relatedly, a detached
+compose that dies before its `depends_on: <svc> service_healthy` chain clears can leave a
+late-ordered service (e.g. `otel-collector`, gated on `clickhouse` healthy) stale/`Exited`
+while the rest are `Up` - prefer a foreground bring-up in a dedicated terminal, or verify the
+*full* expected container set with `docker ps`, not just the console.
 
 **Get the environment to known-good BEFORE improvising around it.**
 Live testing assumes a running, healthy kind cluster.
