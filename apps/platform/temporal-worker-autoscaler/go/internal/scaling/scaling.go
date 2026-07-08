@@ -3,6 +3,9 @@
 // HPA algorithm (ratio + tolerance deadband + max-over-window downscale
 // stabilization + step clamp) and adds Knative's panic/stable idea for bursts.
 //
+// Slot utilization (when enabled) combines asymmetrically: OR on scale-up,
+// AND-veto on scale-down. See ADR-0023.
+//
 // Deliberately NOT importing k8s.io/kubernetes (un-vendorable) or Knative
 // serving (not standalone) — the algorithm is small enough to own and test.
 // The Algorithm interface follows AIBrix's swappable-scaler shape so alternative
@@ -35,14 +38,24 @@ type Input struct {
 	Max              int32
 	Now              time.Time
 	Behavior         Behavior
+
+	// Slot hints from Prometheus (NaN = unavailable → fail open to backlog-only).
+	SlotUpHint     float64
+	SlotIdleHint   float64
+	SlotUpOn       bool
+	SlotDownGateOn bool
+	TargetSlotUtil float64 // fraction, e.g. 0.75
+	IdleSlotUtil   float64 // fraction, e.g. 0.25
 }
 
 // Decision is the result: the replica count to set, plus why.
 type Decision struct {
-	Desired int32
-	Reason  string
-	Panic   bool
-	Changed bool // Desired != Current
+	Desired      int32
+	Reason       string
+	Panic        bool
+	Changed      bool // Desired != Current
+	SlotDrivenUp bool
+	SlotDownVeto bool
 }
 
 // Algorithm computes desired replicas. Keyed per version so stabilization
@@ -113,10 +126,16 @@ func (s *HPAScaler) Decide(key string, in Input) Decision {
 		target = 1
 	}
 
-	// Raw recommendation from the metric: ceil(backlog / target).
+	// Raw recommendation from backlog: ceil(backlog / target).
 	raw := int32(math.Ceil(float64(in.Backlog) / float64(target)))
 	if in.Backlog > 0 && raw < 1 {
 		raw = 1 // scale-from-zero needs at least one worker to make progress
+	}
+
+	// Slot-driven OR-up (independent of backlog deadband).
+	desiredSlots, slotWantsUp := slotDrivenDesired(in)
+	if slotWantsUp && desiredSlots > raw {
+		raw = desiredSlots
 	}
 	raw = clamp(raw, in.Min, in.Max)
 
@@ -125,8 +144,9 @@ func (s *HPAScaler) Decide(key string, in Input) Decision {
 	panic := false
 	if in.Current > 0 {
 		ratio := (float64(in.Backlog) / float64(in.Current)) / float64(target)
-		if math.Abs(ratio-1.0) <= tol && raw >= in.Min && raw <= in.Max {
-			// Within deadband: hold, but still record so stabilization sees it.
+		withinDeadband := math.Abs(ratio-1.0) <= tol && raw >= in.Min && raw <= in.Max
+		if withinDeadband && !slotWantsUp {
+			// Within deadband and slots not saturated: hold, but still record.
 			s.histFor(key).record(in.Now, in.Current, s.keep(in.Behavior))
 			return Decision{Desired: in.Current, Reason: fmt.Sprintf(
 				"within tolerance (ratio=%.2f, backlog=%d, target=%d)", ratio, in.Backlog, target)}
@@ -141,6 +161,7 @@ func (s *HPAScaler) Decide(key string, in Input) Decision {
 
 	desired := raw
 	reason := fmt.Sprintf("backlog=%d target=%d -> %d", in.Backlog, target, raw)
+	slotDrivenUp := slotWantsUp && desired > in.Current
 
 	// Downscale stabilization: don't drop below the MAX recommendation over the
 	// window — the primary anti-flap lever.
@@ -149,6 +170,16 @@ func (s *HPAScaler) Decide(key string, in Input) Decision {
 			desired = clamp(maxRec, in.Min, in.Max)
 			reason = fmt.Sprintf("down-stabilized to %d (raw=%d)", desired, raw)
 		}
+	}
+
+	// AND-down slot veto: backlog says shrink, but slots still busy → hold.
+	// Composable slotsIdle predicate - future safe-to-zero will AND pollersAlive.
+	slotDownVeto := false
+	if desired < in.Current && slotsBusy(in) {
+		desired = in.Current
+		slotDownVeto = true
+		reason = fmt.Sprintf("slot-down-veto hold at %d (idle_hint=%.2f)", desired, in.SlotIdleHint)
+		h.record(in.Now, desired, s.keep(in.Behavior))
 	}
 
 	// Upscale stabilization: don't exceed the MIN recommendation over the window,
@@ -161,6 +192,9 @@ func (s *HPAScaler) Decide(key string, in Input) Decision {
 	}
 	if panic {
 		reason = fmt.Sprintf("panic: scale up to %d (backlog=%d target=%d)", desired, in.Backlog, target)
+	}
+	if slotDrivenUp && !slotDownVeto {
+		reason = fmt.Sprintf("slot-up: %s", reason)
 	}
 
 	// Step clamp: bound the delta per decision.
@@ -178,7 +212,33 @@ func (s *HPAScaler) Decide(key string, in Input) Decision {
 	}
 
 	desired = clamp(desired, in.Min, in.Max)
-	return Decision{Desired: desired, Reason: reason, Panic: panic, Changed: desired != in.Current}
+	return Decision{
+		Desired:      desired,
+		Reason:       reason,
+		Panic:        panic,
+		Changed:      desired != in.Current,
+		SlotDrivenUp: slotDrivenUp && desired > in.Current,
+		SlotDownVeto: slotDownVeto,
+	}
+}
+
+// slotDrivenDesired computes replicas needed to bring slot util down to target.
+func slotDrivenDesired(in Input) (desired int32, wantsUp bool) {
+	if !in.SlotUpOn || math.IsNaN(in.SlotUpHint) || in.Current <= 0 || in.TargetSlotUtil <= 0 {
+		return 0, false
+	}
+	d := int32(math.Ceil(float64(in.Current) * in.SlotUpHint / in.TargetSlotUtil))
+	d = clamp(d, in.Min, in.Max)
+	return d, d > in.Current
+}
+
+// slotsBusy is true when the down-gate is on and avg slot util is at/above the
+// idle threshold (workers still have in-flight work).
+func slotsBusy(in Input) bool {
+	if !in.SlotDownGateOn || math.IsNaN(in.SlotIdleHint) {
+		return false
+	}
+	return in.SlotIdleHint >= in.IdleSlotUtil
 }
 
 func (s *HPAScaler) histFor(key string) *history {

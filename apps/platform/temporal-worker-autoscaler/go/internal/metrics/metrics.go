@@ -53,11 +53,50 @@ var (
 		Subsystem: subsystem, Name: "reconcile_errors_total",
 		Help: "Reconcile errors, per worker deployment.",
 	}, []string{"deployment"})
+
+	// SlotUpHint is the last max_over_time slot-util reading per version.
+	SlotUpHint = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Subsystem: subsystem, Name: "slot_up_hint",
+		Help: "Last slot utilization up hint (max_over_time), per version. NaN omitted.",
+	}, []string{"deployment", "build_id"})
+
+	// SlotIdleHint is the last avg_over_time slot-util reading per version.
+	SlotIdleHint = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Subsystem: subsystem, Name: "slot_idle_hint",
+		Help: "Last slot utilization idle hint (avg_over_time), per version. NaN omitted.",
+	}, []string{"deployment", "build_id"})
+
+	// SlotQueryFailures counts Prometheus slot hint transport/query errors.
+	SlotQueryFailures = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Subsystem: subsystem, Name: "slot_query_failures_total",
+		Help: "Prometheus slot hint query transport/API failures, per deployment.",
+	}, []string{"deployment"})
+
+	// SlotSeriesMissing counts reconciles where the slot hint query succeeded but
+	// returned no series for the version (distinct from query failures).
+	SlotSeriesMissing = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Subsystem: subsystem, Name: "slot_series_missing_total",
+		Help: "Slot hint queries that returned no matching series, per deployment.",
+	}, []string{"deployment"})
+
+	// SlotDrivenUpEvents counts scale-up decisions where the slot OR term fired.
+	SlotDrivenUpEvents = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Subsystem: subsystem, Name: "slot_driven_up_events_total",
+		Help: "Scale-up decisions where slot saturation drove the OR-up term.",
+	}, []string{"deployment"})
+
+	// SlotDownVetoEvents counts scale-down vetoes from busy slots.
+	SlotDownVetoEvents = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Subsystem: subsystem, Name: "slot_down_veto_events_total",
+		Help: "Scale-down vetoes because slots were still busy.",
+	}, []string{"deployment"})
 )
 
 func init() {
 	crmetrics.Registry.MustRegister(
 		DesiredReplicas, CurrentReplicas, Backlog,
 		ScaleEvents, PanicEvents, CloudCalls, ReconcileErrors,
+		SlotUpHint, SlotIdleHint, SlotQueryFailures, SlotSeriesMissing,
+		SlotDrivenUpEvents, SlotDownVetoEvents,
 	)
 }

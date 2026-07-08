@@ -34,6 +34,9 @@ type Config struct {
 	HealthProbeAddr      string
 	EnableLeaderElection bool
 	LeaderElectionID     string
+
+	// PrometheusURL is the in-cluster Prometheus HTTP API base (slot hints).
+	PrometheusURL string
 }
 
 // Load reads Config from the environment, applying defaults.
@@ -54,6 +57,7 @@ func Load() (*Config, error) {
 		HealthProbeAddr:      getenv("HEALTH_PROBE_ADDR", ":8081"),
 		EnableLeaderElection: getbool("ENABLE_LEADER_ELECTION", true),
 		LeaderElectionID:     getenv("LEADER_ELECTION_ID", "temporal-worker-autoscaler.autoscaling.ziggymart.io"),
+		PrometheusURL:        getenv("PROMETHEUS_URL", "http://prometheus-server.observability.svc.cluster.local:80"),
 	}
 	if c.TemporalHostPort == "" || c.TemporalNamespace == "" {
 		return nil, fmt.Errorf("TEMPORAL_HOSTPORT and TEMPORAL_NAMESPACE are required")

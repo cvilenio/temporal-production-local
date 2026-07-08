@@ -155,13 +155,13 @@ variable "registry_service" {
 variable "orders_workers_chart_version" {
   description = "Published version of the orders-workers OCI chart (matches Chart.yaml / just chart-publish)."
   type        = string
-  default     = "0.1.19"
+  default     = "0.1.20"
 }
 
 variable "autoscaler_chart_version" {
   description = "Published version of the temporal-worker-autoscaler OCI chart (matches Chart.yaml / just chart-publish)."
   type        = string
-  default     = "0.1.4"
+  default     = "0.1.5"
 }
 
 variable "autoscaler_image_tag" {

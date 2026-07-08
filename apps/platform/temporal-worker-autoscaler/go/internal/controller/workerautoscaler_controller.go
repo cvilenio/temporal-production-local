@@ -13,8 +13,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
+	"golang.org/x/time/rate"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -22,7 +24,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/record"
-	"golang.org/x/time/rate"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	crcontroller "sigs.k8s.io/controller-runtime/pkg/controller"
@@ -30,6 +31,7 @@ import (
 
 	autoscalingv1alpha1 "github.com/cvilenio/temporal-production-local/apps/platform/temporal-worker-autoscaler/go/api/v1alpha1"
 	"github.com/cvilenio/temporal-production-local/apps/platform/temporal-worker-autoscaler/go/internal/metrics"
+	"github.com/cvilenio/temporal-production-local/apps/platform/temporal-worker-autoscaler/go/internal/promsource"
 	"github.com/cvilenio/temporal-production-local/apps/platform/temporal-worker-autoscaler/go/internal/scaling"
 	temporalpkg "github.com/cvilenio/temporal-production-local/apps/platform/temporal-worker-autoscaler/go/internal/temporal"
 )
@@ -58,13 +60,23 @@ type BacklogReader interface {
 	VersionBacklog(ctx context.Context, deploymentName, buildID, taskQueue, queueType string) (int64, error)
 }
 
+// SlotHintReader returns smoothed slot-util hints from Prometheus.
+type SlotHintReader interface {
+	SlotHints(ctx context.Context, namespace, taskQueue, buildID, workerType string, upWindow, downWindow time.Duration) (promsource.Hints, error)
+}
+
 // WorkerAutoscalerReconciler reconciles a WorkerAutoscaler.
 type WorkerAutoscalerReconciler struct {
 	client.Client
 	Recorder record.EventRecorder
 	Temporal BacklogReader
+	Prom     SlotHintReader
 	Algo     scaling.Algorithm
 	Limiter  *rate.Limiter // bounds Temporal Cloud describe QPS across all CRs
+
+	// TemporalNamespace is the Temporal namespace (SDK metric label), used for
+	// slot-util PromQL - distinct from the k8s namespace on WorkerAutoscaler CRs.
+	TemporalNamespace string
 
 	// RequeueInterval is the fast actuation cadence (seconds) — direct patch, so
 	// it does not wait on the HPA sync loop.
@@ -120,12 +132,12 @@ func (r *WorkerAutoscalerReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	drained := r.drainedBuildIDs(ctx, wa.Namespace, wa.Spec.DeploymentName)
 
 	var (
-		versions          []autoscalingv1alpha1.VersionStatus
+		versions           []autoscalingv1alpha1.VersionStatus
 		sumCurrent, sumDes int32
-		anyErr            bool
-		lastReason        string
-		scaled            bool
-		skipped           []string
+		anyErr             bool
+		lastReason         string
+		scaled             bool
+		skipped            []string
 	)
 
 	for i := range deps.Items {
@@ -177,6 +189,40 @@ func (r *WorkerAutoscalerReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		metrics.CloudCalls.WithLabelValues("ok").Inc()
 		metrics.Backlog.WithLabelValues(wa.Spec.DeploymentName, buildID, wa.Spec.TaskQueue).Set(float64(backlog))
 
+		slotIn := slotInputFromSpec(&wa.Spec)
+		if r.Prom != nil && (slotIn.SlotUpOn || slotIn.SlotDownGateOn) {
+			workerType := promsource.WorkerTypeForQueueType(queueType)
+			upWin := slotUpWindow(&wa.Spec)
+			downWin := slotDownWindow(&wa.Spec)
+			hints, err := r.Prom.SlotHints(ctx, r.TemporalNamespace, wa.Spec.TaskQueue, buildID, workerType, upWin, downWin)
+			if err != nil {
+				metrics.SlotQueryFailures.WithLabelValues(wa.Spec.DeploymentName).Inc()
+				l.Info("slot hint query failed; falling back to backlog-only",
+					"deployment", wa.Spec.DeploymentName, "buildID", buildID, "err", err.Error())
+				slotIn.SlotUpHint = math.NaN()
+				slotIn.SlotIdleHint = math.NaN()
+			} else {
+				slotIn.SlotUpHint = hints.UpHint
+				slotIn.SlotIdleHint = hints.IdleHint
+				if math.IsNaN(hints.UpHint) && math.IsNaN(hints.IdleHint) {
+					metrics.SlotSeriesMissing.WithLabelValues(wa.Spec.DeploymentName).Inc()
+					l.Info("slot hint series missing; falling back to backlog-only",
+						"deployment", wa.Spec.DeploymentName, "buildID", buildID, "workerType", workerType,
+						"temporalNamespace", r.TemporalNamespace)
+				}
+			}
+			if !math.IsNaN(slotIn.SlotUpHint) {
+				metrics.SlotUpHint.WithLabelValues(wa.Spec.DeploymentName, buildID).Set(slotIn.SlotUpHint)
+			}
+			if !math.IsNaN(slotIn.SlotIdleHint) {
+				metrics.SlotIdleHint.WithLabelValues(wa.Spec.DeploymentName, buildID).Set(slotIn.SlotIdleHint)
+			}
+			l.Info("slot hints",
+				"deployment", wa.Spec.DeploymentName, "buildID", buildID,
+				"temporalNamespace", r.TemporalNamespace,
+				"up", slotIn.SlotUpHint, "idle", slotIn.SlotIdleHint)
+		}
+
 		dec := r.Algo.Decide(cacheKey(&wa, buildID), scaling.Input{
 			Current:          current,
 			Backlog:          backlog,
@@ -185,10 +231,20 @@ func (r *WorkerAutoscalerReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			Max:              wa.Spec.MaxReplicas,
 			Now:              time.Now(),
 			Behavior:         beh,
+			SlotUpHint:       slotIn.SlotUpHint,
+			SlotIdleHint:     slotIn.SlotIdleHint,
+			SlotUpOn:         slotIn.SlotUpOn,
+			SlotDownGateOn:   slotIn.SlotDownGateOn,
+			TargetSlotUtil:   slotIn.TargetSlotUtil,
+			IdleSlotUtil:     slotIn.IdleSlotUtil,
 		})
 
 		metrics.CurrentReplicas.WithLabelValues(wa.Spec.DeploymentName, buildID).Set(float64(current))
 		metrics.DesiredReplicas.WithLabelValues(wa.Spec.DeploymentName, buildID).Set(float64(dec.Desired))
+
+		if dec.SlotDownVeto {
+			metrics.SlotDownVetoEvents.WithLabelValues(wa.Spec.DeploymentName).Inc()
+		}
 
 		if dec.Changed {
 			if err := r.applyScale(ctx, dep, &wa, dec); err != nil {
@@ -205,6 +261,9 @@ func (r *WorkerAutoscalerReconciler) Reconcile(ctx context.Context, req ctrl.Req
 				metrics.ScaleEvents.WithLabelValues(wa.Spec.DeploymentName, dir).Inc()
 				if dec.Panic {
 					metrics.PanicEvents.WithLabelValues(wa.Spec.DeploymentName).Inc()
+				}
+				if dec.SlotDrivenUp {
+					metrics.SlotDrivenUpEvents.WithLabelValues(wa.Spec.DeploymentName).Inc()
 				}
 				r.Recorder.Eventf(dep, corev1.EventTypeNormal, "Scaled",
 					"temporal-worker-autoscaler scaled %s from %d to %d (%s)",
@@ -328,7 +387,7 @@ func (r *WorkerAutoscalerReconciler) updateStatus(ctx context.Context, wa *autos
 	})
 	meta.SetStatusCondition(&wa.Status.Conditions, metav1.Condition{
 		Type: "Active", Status: boolCond(des > wa.Spec.MinReplicas), Reason: "Evaluated",
-		Message: fmt.Sprintf("desired=%d min=%d", des, wa.Spec.MinReplicas),
+		Message:            fmt.Sprintf("desired=%d min=%d", des, wa.Spec.MinReplicas),
 		ObservedGeneration: wa.Generation,
 	})
 	if err := r.Status().Update(ctx, wa); err != nil {
@@ -381,9 +440,9 @@ func boolCond(b bool) metav1.ConditionStatus {
 
 func behaviorFromSpec(spec *autoscalingv1alpha1.WorkerAutoscalerSpec) scaling.Behavior {
 	b := scaling.Behavior{
-		TolerancePercent:      10,
-		MaxScaleDownStep:      1,
-		PanicThresholdPercent: 200,
+		TolerancePercent:       10,
+		MaxScaleDownStep:       1,
+		PanicThresholdPercent:  200,
 		ScaleDownStabilization: 120 * time.Second,
 	}
 	if sb := spec.Behavior; sb != nil {
@@ -395,4 +454,43 @@ func behaviorFromSpec(spec *autoscalingv1alpha1.WorkerAutoscalerSpec) scaling.Be
 		b.PanicThresholdPercent = sb.PanicThresholdPercent
 	}
 	return b
+}
+
+type slotInputFields struct {
+	SlotUpHint     float64
+	SlotIdleHint   float64
+	SlotUpOn       bool
+	SlotDownGateOn bool
+	TargetSlotUtil float64
+	IdleSlotUtil   float64
+}
+
+func slotInputFromSpec(spec *autoscalingv1alpha1.WorkerAutoscalerSpec) slotInputFields {
+	targetPct := spec.TargetSlotUtilizationPercent
+	if targetPct <= 0 {
+		targetPct = 75
+	}
+	idlePct := spec.ScaleDownSlotUtilizationPercent
+	return slotInputFields{
+		SlotUpHint:     math.NaN(),
+		SlotIdleHint:   math.NaN(),
+		SlotUpOn:       spec.SlotScaleUpEnabled,
+		SlotDownGateOn: spec.SlotScaleDownGateEnabled,
+		TargetSlotUtil: float64(targetPct) / 100.0,
+		IdleSlotUtil:   float64(idlePct) / 100.0,
+	}
+}
+
+func slotUpWindow(spec *autoscalingv1alpha1.WorkerAutoscalerSpec) time.Duration {
+	if spec.SlotUpWindowSeconds > 0 {
+		return time.Duration(spec.SlotUpWindowSeconds) * time.Second
+	}
+	return time.Minute
+}
+
+func slotDownWindow(spec *autoscalingv1alpha1.WorkerAutoscalerSpec) time.Duration {
+	if spec.SlotDownWindowSeconds > 0 {
+		return time.Duration(spec.SlotDownWindowSeconds) * time.Second
+	}
+	return 2 * time.Minute
 }

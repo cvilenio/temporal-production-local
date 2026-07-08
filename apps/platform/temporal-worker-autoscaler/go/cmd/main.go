@@ -27,6 +27,7 @@ import (
 	autoscalingv1alpha1 "github.com/cvilenio/temporal-production-local/apps/platform/temporal-worker-autoscaler/go/api/v1alpha1"
 	"github.com/cvilenio/temporal-production-local/apps/platform/temporal-worker-autoscaler/go/internal/config"
 	"github.com/cvilenio/temporal-production-local/apps/platform/temporal-worker-autoscaler/go/internal/controller"
+	"github.com/cvilenio/temporal-production-local/apps/platform/temporal-worker-autoscaler/go/internal/promsource"
 	"github.com/cvilenio/temporal-production-local/apps/platform/temporal-worker-autoscaler/go/internal/scaling"
 	temporalpkg "github.com/cvilenio/temporal-production-local/apps/platform/temporal-worker-autoscaler/go/internal/temporal"
 )
@@ -74,10 +75,12 @@ func main() {
 	defer tc.Close()
 
 	if err := (&controller.WorkerAutoscalerReconciler{
-		Client:   mgr.GetClient(),
-		Recorder: mgr.GetEventRecorderFor("temporal-worker-autoscaler"),
-		Temporal: tc,
-		Algo:     scaling.NewHPAScaler(),
+		Client:            mgr.GetClient(),
+		Recorder:          mgr.GetEventRecorderFor("temporal-worker-autoscaler"),
+		Temporal:          tc,
+		Prom:              promsource.New(cfg.PrometheusURL),
+		TemporalNamespace: cfg.TemporalNamespace,
+		Algo:              scaling.NewHPAScaler(),
 		// Gentle + spaced (burst 1): the Cloud Worker-Deployment-Read API trips at a
 		// low RPS, so never burst describe calls. ~1.3/s max, one at a time.
 		Limiter:         rate.NewLimiter(rate.Every(750*time.Millisecond), 1),

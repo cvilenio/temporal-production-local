@@ -64,6 +64,42 @@ type WorkerAutoscalerSpec struct {
 	// "overscale-briefly beats flap" posture (fast up, damped down).
 	// +optional
 	Behavior *ScalingBehavior `json:"behavior,omitempty"`
+
+	// SlotScaleUpEnabled turns on the OR-up slot term: scale up when slot
+	// utilization exceeds target even if backlog is within tolerance.
+	// +kubebuilder:default=false
+	SlotScaleUpEnabled bool `json:"slotScaleUpEnabled,omitempty"`
+
+	// SlotScaleDownGateEnabled turns on the AND-down veto: only shrink when slots
+	// are idle (avg utilization below scaleDownSlotUtilizationPercent).
+	// +kubebuilder:default=false
+	SlotScaleDownGateEnabled bool `json:"slotScaleDownGateEnabled,omitempty"`
+
+	// TargetSlotUtilizationPercent is the slot-util target for scale-up (relieve
+	// pressure above this). Default 75.
+	// +kubebuilder:default=75
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100
+	TargetSlotUtilizationPercent int32 `json:"targetSlotUtilizationPercent,omitempty"`
+
+	// ScaleDownSlotUtilizationPercent is the idle gate for scale-down: veto shrink
+	// while avg slot util is at or above this. Default 25.
+	// +kubebuilder:default=25
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
+	ScaleDownSlotUtilizationPercent int32 `json:"scaleDownSlotUtilizationPercent,omitempty"`
+
+	// SlotUpWindowSeconds is the Prometheus max_over_time window for the up hint.
+	// Default 60 (1m).
+	// +kubebuilder:default=60
+	// +kubebuilder:validation:Minimum=1
+	SlotUpWindowSeconds int32 `json:"slotUpWindowSeconds,omitempty"`
+
+	// SlotDownWindowSeconds is the Prometheus avg_over_time window for the down
+	// idle hint. Default 120 (2m).
+	// +kubebuilder:default=120
+	// +kubebuilder:validation:Minimum=1
+	SlotDownWindowSeconds int32 `json:"slotDownWindowSeconds,omitempty"`
 }
 
 // ScalingBehavior mirrors the useful parts of HPA behavior + Knative's

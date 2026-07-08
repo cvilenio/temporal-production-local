@@ -159,12 +159,58 @@ spec:
                 - activity
                 - nexus
                 type: string
+              scaleDownSlotUtilizationPercent:
+                default: 25
+                description: |-
+                  ScaleDownSlotUtilizationPercent is the idle gate for scale-down: veto shrink
+                  while avg slot util is at or above this. Default 25.
+                format: int32
+                maximum: 100
+                minimum: 0
+                type: integer
+              slotDownWindowSeconds:
+                default: 120
+                description: |-
+                  SlotDownWindowSeconds is the Prometheus avg_over_time window for the down
+                  idle hint. Default 120 (2m).
+                format: int32
+                minimum: 1
+                type: integer
+              slotScaleDownGateEnabled:
+                default: false
+                description: |-
+                  SlotScaleDownGateEnabled turns on the AND-down veto: only shrink when slots
+                  are idle (avg utilization below scaleDownSlotUtilizationPercent).
+                type: boolean
+              slotScaleUpEnabled:
+                default: false
+                description: |-
+                  SlotScaleUpEnabled turns on the OR-up slot term: scale up when slot
+                  utilization exceeds target even if backlog is within tolerance.
+                type: boolean
+              slotUpWindowSeconds:
+                default: 60
+                description: |-
+                  SlotUpWindowSeconds is the Prometheus max_over_time window for the up hint.
+                  Default 60 (1m).
+                format: int32
+                minimum: 1
+                type: integer
               targetBacklogPerReplica:
                 default: 5
                 description: |-
                   TargetBacklogPerReplica is the desired backlog tasks per replica; desired
                   replicas = ceil(backlog / target) subject to the deadband + bounds.
                 format: int32
+                minimum: 1
+                type: integer
+              targetSlotUtilizationPercent:
+                default: 75
+                description: |-
+                  TargetSlotUtilizationPercent is the slot-util target for scale-up (relieve
+                  pressure above this). Default 75.
+                format: int32
+                maximum: 100
                 minimum: 1
                 type: integer
               taskQueue:

@@ -47,6 +47,12 @@ spec:
         prometheus-node-exporter:
           enabled: false
         server:
+          # Pin scrape + rule eval to 30s so worker SDK :9000 metrics and the
+          # temporal_slot_utilization:by_build recording rule stay fresh enough for
+          # the custom worker-autoscaler's secondary slot signal (ADR-0023).
+          global:
+            scrape_interval: 30s
+            evaluation_interval: 30s
           # Short hot buffer only — the host store is the durable tier (remoteWrite).
           retention: "2h"
           remoteWrite:
@@ -67,6 +73,7 @@ spec:
           recording_rules.yml:
             groups:
               - name: temporal-worker
+                interval: 30s
                 rules:
                   # slot_utilization is NOT an SDK metric — it is a recording rule over
                   # the slot gauges the Core SDK emits (ADR-0021). Kept as a
@@ -102,6 +109,18 @@ spec:
                       clamp_min(
                         sum by (namespace, worker_type, task_queue) (temporal_worker_task_slots_used)
                         + sum by (namespace, worker_type, task_queue) (temporal_worker_task_slots_available),
+                        1
+                      )
+                  # Per-build_id variant for the custom worker-autoscaler (ADR-0023).
+                  # Colon name marks it as wiring-coupled to the controller; the
+                  # underscore rule above stays fleet-blended for dashboards.
+                  - record: temporal_slot_utilization:by_build
+                    expr: |
+                      sum by (namespace, worker_type, task_queue, temporal_io_build_id) (temporal_worker_task_slots_used)
+                      /
+                      clamp_min(
+                        sum by (namespace, worker_type, task_queue, temporal_io_build_id) (temporal_worker_task_slots_used)
+                        + sum by (namespace, worker_type, task_queue, temporal_io_build_id) (temporal_worker_task_slots_available),
                         1
                       )
   destination:

@@ -131,6 +131,8 @@ autoscaling:
       minReplicas: 1
       maxReplicas: 6
       targetBacklogPerReplica: 5
+      slotScaleUpEnabled: true
+      slotScaleDownGateEnabled: true
     activity:
       taskQueue: orders-activity-task-queue
       queueType: activity

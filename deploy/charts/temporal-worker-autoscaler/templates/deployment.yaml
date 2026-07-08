@@ -55,6 +55,8 @@ spec:
             {{- end }}
             - name: POLL_INTERVAL
               value: {{ .Values.pollInterval | quote }}
+            - name: PROMETHEUS_URL
+              value: {{ .Values.prometheusUrl | quote }}
             - name: ENABLE_LEADER_ELECTION
               value: {{ .Values.leaderElection | quote }}
             - name: METRICS_ADDR
