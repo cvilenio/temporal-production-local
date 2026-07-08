@@ -9,7 +9,9 @@ spring:
       target: ${TEMPORAL_ADDRESS:localhost:7233}
     start-workers: true
     workers-auto-discovery:
-      packages: io.temporal.demo.orders.activity
+      # SDK 1.35+ requires explicit activity-bean registration (legacy `packages` still
+      # works but is deprecated). This worker hosts @ActivityImpl beans only.
+      register-activity-beans: true
     workers:
       - task-queue: orders-finalization-task-queue
 
