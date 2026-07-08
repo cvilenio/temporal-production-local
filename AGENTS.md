@@ -167,6 +167,22 @@ looks identical to "stuck." Don't poll a quiet log and don't guess from elapsed 
 - Prefer `just preflight` where it exists (console gate) over hand-rolled checks — it's the
   same probe `platform-up` already trusts.
 
+**Get the environment to known-good BEFORE improvising around it.**
+Live testing assumes a running, healthy kind cluster.
+After a host or Docker restart the cluster is often stopped or half-broken, and the failure looks like something else (e.g. ArgoCD 502 pulling charts because the registry EndpointSlice went stale; see [`docs/runbooks/kind-restart-registry-recovery.md`](docs/runbooks/kind-restart-registry-recovery.md)).
+Do not reverse-engineer a fix by hand-patching cluster resources.
+This is a local sandbox with no production load: reconciling to a known-good state is cheap and always safe, so prefer the deterministic recovery recipe over clever surgery.
+
+- If the cluster is stopped, resume it with `just cluster-start` (it restarts the registry + nodes and self-heals the registry EndpointSlice); if it does not exist, `just cluster-up`.
+- For any other stale or unknown cluster state (including a running cluster with a stale registry EndpointSlice), run `just kind-ready` first — it repairs in place without restarting when nodes are already up.
+- Only after the cluster is Healthy (ArgoCD Applications Synced/Healthy, zero non-Running pods) proceed with the test.
+
+**Preserve the current backend and image digests on a surgical redeploy.**
+When redeploying one component (per the chart discipline below), do not fight the environment's current state:
+
+- Read and preserve the backend with `terraform -chdir=deploy/terraform/layers/cluster output -raw temporal_backend`, and do NOT export `TF_VAR_temporal_backend` / `TF_VAR_oss_server_enabled` unless you are *intentionally* switching. Forcing a backend flips OSS to Cloud (or back) and churns every worker version as a side effect.
+- Capture the CURRENT worker/api image digests from the live deployments and pin them through the apply, so only the one component you changed moves. Do not hand-assemble digests from a fresh build unless you rebuilt that image.
+
 See `docs/RUNMODES.md` for the full run-mode matrix.
 
 # Chart + redeploy discipline — bump the version, publish before apply (MUST)
