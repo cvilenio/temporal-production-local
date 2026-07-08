@@ -89,16 +89,16 @@ vision above:
 
 | Apps/workers run on | Temporal backend | Command                              | Status |
 |---------------------|------------------|--------------------------------------|--------|
-| **kind**            | **Temporal Cloud** | `just up-cloud-kind` + `just platform-up` | ✅ **the supported path (default)** |
-| **kind**            | **Local OSS server** | `just up-oss-kind` + `just platform-up oss` | ✅ working — in-cluster `temporal-server` chart (ADR-0003) |
-| Compose             | Local OSS server  | `just up` (server + app, **no workers**) | ⚠️ legacy fallback; see caveat |
+| **kind**            | **Temporal Cloud** | `just host-plane-up-cloud` + `just platform-up` | ✅ **the supported path (default)** |
+| **kind**            | **Local OSS server** | `just host-plane-up-oss` + `just platform-up oss` | ✅ working — in-cluster `temporal-server` chart (ADR-0003) |
+| Compose             | Local OSS server  | `just legacy-up` (server + app, **no workers**) | ⚠️ legacy fallback; see caveat |
 
 > **Compose caveat (important).** Compose is **no longer a workflow-execution runtime**.
 > Temporal workers run on kind (Worker Deployment); running workers — or the full app tier
 > against Cloud — on Compose is no longer a goal, and those modes (`up-cloud`,
 > `up-cloud-prod`, `compose/workers.yml`) have been removed. What remains: Compose runs the
 > **host visibility/console plane** for the kind paths, and a **legacy local self-hosted
-> Temporal server + app tier** (`just up`) with **no workers** — so it boots a server you
+> Temporal server + app tier** (`just legacy-up`) with **no workers** — so it boots a server you
 > can poke but won't *execute* workflows until OSS-on-kind lands. The supported end-to-end
 > path is **kind + Cloud**.
 
@@ -205,7 +205,7 @@ just k get pods -n orders                    # workflow + activity worker pods R
 On the kind path the **app tier runs in-cluster** (orders-api + orders-db via CNPG, part
 of `just platform-up`). What runs on the host is the **visibility plane**: the demo
 console, pgweb, the LGTM stack, mock-api, and the cluster observers (Headlamp, ArgoCD via
-viz-proxy). Bring it up with `just up-cloud-kind`, which sources the Cloud connection
+viz-proxy). Bring it up with `just host-plane-up-cloud`, which sources the Cloud connection
 profile — the console uses it for a read-only Temporal Cloud liveness probe, and pgweb +
 the console reach the in-cluster app tier through the host ports kind maps.
 
@@ -234,7 +234,7 @@ export TEMPORAL_CLOUD_OPS_API_KEY=$(terraform output -raw observer_api_key_token
 EOF
 cd -
 
-just up-cloud-kind     # host visibility plane + console + pgweb + mock-api (start FIRST)
+just host-plane-up-cloud     # host visibility plane + console + pgweb + mock-api (start FIRST)
 just headlamp-reload   # nudge the cluster explorer to pick up the kubeconfig (optional)
 ```
 
@@ -278,8 +278,8 @@ A legacy, no-Kubernetes fallback: a self-hosted Temporal **server + app tier** i
 until OSS-on-kind lands:
 
 ```bash
-just up        # local OSS Temporal server + app tier + LGTM observability (no workers)
-just down      # stop and drop volumes
+just legacy-up        # local OSS Temporal server + app tier + LGTM observability (no workers)
+just legacy-down      # stop and drop volumes
 ```
 
 The full backend × topology matrix, the connection-profile contract, and the direnv

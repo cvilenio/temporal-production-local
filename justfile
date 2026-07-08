@@ -9,7 +9,7 @@
 #     leaf runners) in; no language's runner owns shared infra.
 #
 #   just            list all recipes
-#   just up         local OSS app stack
+#   just legacy-up  local OSS app stack (all-on-host fallback)
 #   just ci         python gate + image build/push
 #   just cluster-up kind + local registry          (see deploy/terraform/kind-config.yaml)
 # =============================================================================
@@ -113,31 +113,37 @@ ci: check build-images push-images
 
 # --- Local OSS app stack (compose orchestration — cross-language) -------------
 
-# Local OSS server + app tier (no workers — those run on kind).
-up: render-oss-bootstrap grafana-plugins
+# Legacy Compose-only OSS fallback: server + app tier on the host (no workers).
+# NEITHER plane in the ADR-0014 sense — it folds app-tier/OSS-server duties that
+# normally live on kind onto the host instead. Prefer host-plane-up-* + kind.
+legacy-up: render-oss-bootstrap grafana-plugins
     set -a; . config/local-oss.env; set +a; docker compose -f docker-compose.yml -f compose/host-apptier.yml -f compose/oss-server.yml up --build
 
-# Stop the local-OSS stack and drop volumes (also sweeps a stray default-project + the shared net).
-down:
+# Stop the legacy Compose-only OSS stack and drop volumes (also sweeps a stray
+# default-project + the shared net).
+legacy-down:
     docker compose -f docker-compose.yml -f compose/host-apptier.yml -f compose/oss-server.yml down -v --remove-orphans; docker compose -p "${PWD##*/}" -f docker-compose.yml -f compose/host-apptier.yml -f compose/oss-server.yml down -v --remove-orphans || true; docker network rm temporal-network 2>/dev/null || true
 
-# Recreate the local-OSS stack.
-fresh: down up
+# Recreate the legacy Compose-only OSS stack.
+legacy-fresh: legacy-down legacy-up
 
-# Host visibility + console + mock-api for the kind+Cloud path (kind owns the
-# workers AND the app tier). Bring this up FIRST before any live kind testing.
-up-cloud-kind: headlamp-plugins grafana-plugins
+# Host plane (ADR-0014): visibility + console + mock-api for the kind+Cloud path
+# (kind owns the workers AND the app tier). Bring this up FIRST before any live
+# kind testing. Runs in the foreground (streams compose logs) — keep it in a
+# dedicated terminal; `just platform-up` only gates on it via `just preflight`,
+# it does not start it.
+host-plane-up-cloud: headlamp-plugins grafana-plugins
     set -a; . .secrets/keys/cloud.env; set +a; docker compose -f docker-compose.yml up --build
 
-# Host visibility + console + mock-api for the kind + self-hosted OSS path
-# (ADR-0003). Same host stack as up-cloud-kind, but sourcing the OSS connection
-# profile (CONSOLE_BACKEND=oss, empty Cloud vars). Bring this up FIRST before any
-# live kind testing, then `just platform-up oss`.
-up-oss-kind: headlamp-plugins grafana-plugins
+# Host plane (ADR-0014) for the kind + self-hosted OSS path (ADR-0003). Same
+# host stack as host-plane-up-cloud, but sourcing the OSS connection profile
+# (CONSOLE_BACKEND=oss, empty Cloud vars). Bring this up FIRST before any live
+# kind testing, then `just platform-up oss`. Foreground, like host-plane-up-cloud.
+host-plane-up-oss: headlamp-plugins grafana-plugins
     set -a; . config/local-oss-kind.env; set +a; docker compose -f docker-compose.yml up --build
 
-# Stop the Cloud-backed host stack and drop volumes.
-down-cloud:
+# Stop the host plane (Cloud- or OSS-profile) and drop volumes.
+host-plane-down:
     docker compose -f docker-compose.yml -f compose/host-apptier.yml down -v --remove-orphans; docker compose -p "${PWD##*/}" -f docker-compose.yml -f compose/host-apptier.yml down -v --remove-orphans || true; docker network rm temporal-network 2>/dev/null || true
 
 # --- Worker/API images (docker — cross-language artifact build) ---------------
@@ -557,7 +563,7 @@ headlamp-reload:
 # `grafana.plugins`) into the bind-mounted compose/deployment/grafana/plugins/.
 # GF_INSTALL_PLUGINS is a no-op on the otel-lgtm image and GF_PLUGINS_PREINSTALL
 # hangs on boot (air-gap, ADR-0013) — this is the offline substitute. Idempotent
-# once fetched — `up` and `up-cloud-kind` run it first so the ClickHouse
+# once fetched — `legacy-up` and `host-plane-up-cloud` run it first so the ClickHouse
 # datasource plugin is present on boot. Bump a version/sha in the manifest to
 # re-fetch, then `docker restart lgtm` to load it.
 grafana-plugins:
@@ -605,5 +611,5 @@ platform-up backend="cloud":
     just headlamp-reload 2>/dev/null || true
     echo "platform up (backend={{backend}})."
     echo "  Console (all UIs): http://localhost:8086   ArgoCD: http://localhost:8088   Headlamp: http://localhost:8087"
-    echo "  (If the host stack wasn't running, start it with 'just up-cloud-kind' then 'just headlamp-reload'."
-    echo "   up-cloud-kind runs the app tier + visibility WITHOUT workers — the cluster runs those.)"
+    echo "  (If the host plane wasn't running, start it with 'just host-plane-up-cloud' then 'just headlamp-reload'."
+    echo "   host-plane-up-cloud runs the app tier + visibility WITHOUT workers — the cluster runs those.)"

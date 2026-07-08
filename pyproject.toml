@@ -119,7 +119,7 @@ except Exception:
 sys.stderr.write(
     "platform-console is NOT up. Live kind testing requires it so the operator "
     "can follow along in real time.\\n"
-    "Start it with 'just up-cloud-kind' (then 'just headlamp-reload'), then retry.\\n"
+    "Start it with 'just host-plane-up-cloud' (then 'just headlamp-reload'), then retry.\\n"
 )
 sys.exit(1)
 PY

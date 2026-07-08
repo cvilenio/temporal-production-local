@@ -2,9 +2,9 @@
 # Host APP TIER overlay — orders-db + orders-service (+ pgweb) on the HOST.
 # =============================================================================
 #
-# Layered on top of docker-compose.yml for the legacy local-OSS run mode (poe up),
+# Layered on top of docker-compose.yml for the legacy local-OSS run mode (just legacy-up),
 # where the application tier runs on the host alongside the local Temporal server.
-# On the kind path this overlay is OMITTED (poe up-cloud-kind): the cluster runs
+# On the kind path this overlay is OMITTED (just host-plane-up-cloud): the cluster runs
 # orders-db (CNPG) and orders-service (orders-app chart), and the base console +
 # pgweb reach them via host.docker.internal. See docs/RUNMODES.md and the base
 # file's header.

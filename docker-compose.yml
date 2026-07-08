@@ -20,12 +20,12 @@
 # reach the in-cluster app tier via the host ports kind maps
 # (host.docker.internal:8002 / :5433 — see kind-config.yaml).
 #
-# Run modes (prefer the `poe` wrappers, which encode these):
+# Run modes (prefer the `just` wrappers, which encode these):
 #
-#   kind + Cloud : base ONLY                                  (poe up-cloud-kind)
+#   kind + Cloud : base ONLY                                  (just host-plane-up-cloud)
 #                  (kind runs the workers AND the app tier; host runs visibility +
 #                   console + pgweb + mock-api only. CONSOLE_BACKEND=cloud.)
-#   Local OSS    : base + host-apptier.yml + oss-server.yml   (poe up)
+#   Local OSS    : base + host-apptier.yml + oss-server.yml   (just legacy-up)
 #                  (oss-server.yml adds the local Temporal server + its deps and sets
 #                   CONSOLE_BACKEND=oss. NO workers — workflows don't execute locally
 #                   until OSS-on-kind lands; this is a server+app fallback.)
@@ -297,7 +297,7 @@ services:
       # target.
       - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-}
       - TEMPORAL_UI_EXTERNAL_URL=${TEMPORAL_UI_EXTERNAL_URL:-}
-      # Cloud connection profile (sourced by `poe up-cloud-kind` from
+      # Cloud connection profile (sourced by `just host-plane-up-cloud` from
       # .secrets/keys/cloud.env) — the console builds its OWN read-only client for
       # the Temporal Cloud liveness probe. Empty on the OSS path, so the probe stays
       # off there. The dedicated read-only observer key (TEMPORAL_CLOUD_OPS_API_KEY,
@@ -415,7 +415,7 @@ services:
   # immediate refresh.)
   #
   # UI plugins (e.g. the KEDA explorer) load from /headlamp/plugins, one subdir
-  # per plugin. `just headlamp-plugins` (run by `up-cloud-kind`) fetches the
+  # per plugin. `just headlamp-plugins` (run by `host-plane-up-cloud`) fetches the
   # pinned, sha256-verified tarballs from config/dependencies.yaml into the
   # bind-mounted dir below; loaded on (re)start, so `just headlamp-reload` after
   # a fresh fetch. Mount is read-only and does not shadow the image's official

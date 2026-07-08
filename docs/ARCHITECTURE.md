@@ -223,7 +223,7 @@ Two ways to run, by intent:
   workers (and the app tier) on k8s against Temporal Cloud (self-hosted-on-kind planned),
   GitOps delivery, worker versioning, autoscaling. Compose runs the host visibility/console
   plane alongside it. This is the end-to-end path.
-- **`docker-compose.yml`** (`poe up`) — a legacy, no-Kubernetes fallback: a self-hosted
+- **`docker-compose.yml`** (`just legacy-up`) — a legacy, no-Kubernetes fallback: a self-hosted
   Temporal **server + app tier + LGTM**, with **no workers** (workers are a kind concern
   now). Boots a local server you can poke; it does not execute workflows end-to-end until
   OSS-on-kind lands.

@@ -7,7 +7,7 @@ renders config/temporal/namespaces.yaml down to a tiny env file the container
 just sources and loops over. This keeps Cloud (Terraform reads the YAML
 directly) and OSS reading the SAME source of truth — no drift.
 
-Run by `poe up`/`poe fresh` before `docker compose up`. Output is git-ignored.
+Run by `just legacy-up`/`just legacy-fresh` before `docker compose up`. Output is git-ignored.
 """
 
 from __future__ import annotations

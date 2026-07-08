@@ -140,7 +140,7 @@ run. Before doing **any** live testing on the kind cluster — `just platform-up
 resetting orders, mutating cluster state — the console MUST already be up so a human can
 follow along in real time.
 
-- **Start it first:** `just up-cloud-kind` (host visibility + console + mock-api), then
+- **Start it first:** `just host-plane-up-cloud` (host visibility + console + mock-api), then
   `just headlamp-reload`. The console is boot-resilient (ADR-0015 / `console/.../db.py`): it
   boots Healthy with the entire kind side absent and self-heals as the cluster appears, so it
   is always safe to start before `just platform-up`.
@@ -150,7 +150,7 @@ follow along in real time.
 - **Off-path agents:** if you mutate the cluster outside those recipes (e.g. raw `kubectl`,
   `terraform apply` on the cluster layer), run `just preflight` yourself first.
 
-**Waiting for `up-cloud-kind` / `platform-up` to actually be ready.** These recipes shell out
+**Waiting for `host-plane-up-cloud` / `platform-up` to actually be ready.** These recipes shell out
 to `docker compose`, `kind`, and Terraform steps that can buffer or go quiet for long stretches
 — tailing their stdout (or a backgrounded task's `.output` file) is not a reliable readiness
 signal; it can sit empty for minutes while work is genuinely happening, and "still running"
@@ -217,7 +217,7 @@ work.
 A project-scoped `.mcp.json` gives agents read-mostly MCP access to the three systems they
 inspect most — the ClickHouse warehouse (`otel_logs` / `otel_metrics_*`), the durable Prometheus
 store, and the kind cluster. All run via `uvx` (no Node/Go), point at the local **kind + Cloud**
-endpoints, and need the stack up (`just up-cloud-kind` → `just platform-up`) to return data.
+endpoints, and need the stack up (`just host-plane-up-cloud` → `just platform-up`) to return data.
 Docker/Terraform/Grafana/ArgoCD were deliberately left out as net baggage for this repo. See
 `docs/MCP.md` for the rationale, smoke tests, and how to add more later.
 

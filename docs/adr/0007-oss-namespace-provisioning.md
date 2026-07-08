@@ -57,7 +57,7 @@ pretending the *provisioning mechanism* is the same.
 ## Consequences
 
 - Search attributes (and retention) are defined once; a change surfaces in both the Cloud
-  `terraform plan` and the next OSS `poe up`. Drift is structurally prevented.
+  `terraform plan` and the next OSS `just legacy-up`. Drift is structurally prevented.
 - The Cloud layer's input model changed from a full `namespaces` map to spec + `cloud_overlay`.
   The derived `for_each` keys/values are byte-identical to before, so `terraform plan` shows
   no changes (namespaces are `prevent_destroy`).

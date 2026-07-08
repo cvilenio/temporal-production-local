@@ -12,18 +12,18 @@ Two axes. **Where the apps run** (local laptop) × **where Temporal lives** (the
 
 | Apps/workers run on | Backend          | How                                              | Status |
 |---------------------|------------------|--------------------------------------------------|--------|
-| **kind**            | **Temporal Cloud** | `just up-cloud-kind` + `just platform-up` (ArgoCD + Cloud API-key Secrets; kind runs workers + app tier) | ✅ **the supported path (default)** |
-| **kind**            | **Local OSS server** | `just up-oss-kind` + `just platform-up oss` (ArgoCD + `charts/temporal-server`: official Temporal chart + CNPG Postgres + cert-manager frontend mTLS + bootstrap Job) | ✅ **supported** (ADR-0003) |
-| Compose             | Local OSS server | `poe up` (server + app tier, **no workers**)     | ⚠️ legacy fallback — see below |
+| **kind**            | **Temporal Cloud** | `just host-plane-up-cloud` + `just platform-up` (ArgoCD + Cloud API-key Secrets; kind runs workers + app tier) | ✅ **the supported path (default)** |
+| **kind**            | **Local OSS server** | `just host-plane-up-oss` + `just platform-up oss` (ArgoCD + `charts/temporal-server`: official Temporal chart + CNPG Postgres + cert-manager frontend mTLS + bootstrap Job) | ✅ **supported** (ADR-0003) |
+| Compose             | Local OSS server | `just legacy-up` (server + app tier, **no workers**)     | ⚠️ legacy fallback — see below |
 
 **The pivot (this is the important part).** Temporal **workers run on kind** (Worker
 Deployment), not in Compose. Compose's role is now narrowed to two things: (1) the host
-visibility/console plane for the kind paths (`up-cloud-kind`), and (2) a **legacy local
-self-hosted OSS server + app tier** fallback (`up`). Running workers, or the full app
+visibility/console plane for the kind paths (`host-plane-up-cloud`), and (2) a **legacy local
+self-hosted OSS server + app tier** fallback (`legacy-up`). Running workers, or the full app
 tier against Cloud, on Compose is **no longer a goal** — those modes (`up-cloud`,
 `up-cloud-prod`, `compose/workers.yml`) have been removed.
 
-The legacy `poe up` brings up a local Temporal **server + app tier with no workers**, so
+The legacy `just legacy-up` brings up a local Temporal **server + app tier with no workers**, so
 workflows don't *execute* there until OSS-on-kind lands; it's useful for SDK/server
 poking and as the place metrics were historically exercised, not an end-to-end demo. The
 supported end-to-end path is **kind + Cloud**.
@@ -35,20 +35,20 @@ any `--env-file`. Because `.envrc`/direnv exports `TEMPORAL_*` for host-direct S
 (`localhost:7233`), relying on `--env-file` alone is unsafe — the shell value wins and
 breaks both Cloud mode and in-container OSS mode.
 
-So each `poe` task **sources its connection profile into the compose process**, making the
+So each `just` recipe **sources its connection profile into the compose process**, making the
 backend deterministic regardless of the host shell:
 
 | Task              | Sources                          | Compose files                              |
 |-------------------|----------------------------------|--------------------------------------------|
-| `up-cloud-kind`   | `.secrets/keys/cloud.env`        | base only (kind runs the workers AND the app tier) |
-| `up` / `fresh`    | `config/local-oss.env`           | base + `host-apptier.yml` + `oss-server.yml` (no workers) |
-| `down` / `down-cloud` | —                            | (matching set; `-v` drops volumes)         |
+| `host-plane-up-cloud`   | `.secrets/keys/cloud.env`        | base only (kind runs the workers AND the app tier) |
+| `legacy-up` / `legacy-fresh` | `config/local-oss.env`      | base + `host-apptier.yml` + `oss-server.yml` (no workers) |
+| `legacy-down` / `host-plane-down` | —                      | (matching set; `-v` drops volumes)         |
 
-`down` must use the same `-f` set as its `up`. **Bring the stack down before switching
+`legacy-down` must use the same `-f` set as its `legacy-up`. **Bring the stack down before switching
 modes** (they share host ports and one Compose project).
 
 On the **kind path, the cluster runs both the workers AND the app tier** (orders-db via
-CloudNativePG + orders-service), so `up-cloud-kind` is base-only: no `host-apptier.yml`.
+CloudNativePG + orders-service), so `host-plane-up-cloud` is base-only: no `host-apptier.yml`.
 The still-on-host console + pgweb reach the in-cluster app tier through the host ports kind
 maps — `host.docker.internal:8002` (orders-service) and `:5433` (orders-db). The sourced
 Cloud profile also gives the console its read-only Temporal Cloud liveness credentials.
@@ -107,13 +107,13 @@ Namespace identity, custom **search attributes**, and retention live once in
 
 - **Cloud:** `deploy/terraform/layers/cloud` reads the spec via `yamldecode()` and merges a
   Cloud-only overlay (`cloud_overlay`: service account, API key, regions) on top.
-- **OSS (Compose):** `poe up` runs `compose/scripts/render-oss-bootstrap.py` to render the
+- **OSS (Compose):** `just legacy-up` runs `compose/scripts/render-oss-bootstrap.py` to render the
   spec to a shell file the `temporal-search-attributes` container loops over.
 
 The Compose bootstrap containers are a **non-prod local convenience**. The production-grade
 equivalent on kind is an **Argo-managed Job rendered from the same spec** (ADR-0007), with
 OSS auth (mTLS + JWT) as a follow-on (ADR-0008). Edit a search attribute once in the spec and
-it surfaces in both the Cloud `terraform plan` and the next OSS `poe up`.
+it surfaces in both the Cloud `terraform plan` and the next OSS `just legacy-up`.
 
 ## When kind replaces Compose-OSS
 
@@ -126,13 +126,13 @@ split, one level up. Once OSS-on-kind lands, the kind cluster will run the worke
 ### kind + Cloud — how to run it
 
 **Console first (required).** The `platform-console` (:8086) is the operator's live window;
-bring it up before any live kind testing so a human can follow along. `just up-cloud-kind`
+bring it up before any live kind testing so a human can follow along. `just host-plane-up-cloud`
 then `just headlamp-reload`. This is enforced — `just platform-up` and `just orders-db-reset`
 run `just preflight` (probes `:8086/healthz`) and abort if the console is down. See AGENTS.md
 ("Live kind testing — bring the platform-console up FIRST").
 
 ```sh
-just up-cloud-kind  # host visibility + console + mock-api (start this FIRST; console is the live window)
+just host-plane-up-cloud  # host visibility + console + mock-api (start this FIRST; console is the live window)
 just headlamp-reload
 
 just platform-up    # cluster + local registry, mirror deps, CI (build/push), publish chart,
@@ -204,7 +204,7 @@ standard) and is a tunable chart value — immutable in-place, so `just temporal
 re-pick escape hatch.
 
 ```sh
-just up-oss-kind                 # host visibility + console (CONSOLE_BACKEND=oss) — start FIRST
+just host-plane-up-oss                 # host visibility + console (CONSOLE_BACKEND=oss) — start FIRST
 just platform-up oss     # same bring-up as Cloud, but temporal_backend=oss + the OSS server
 ```
 
