@@ -249,6 +249,98 @@ cluster-down: release-worker-deployments
 # tier-3 bootstrap inputs (kindest/node, argo-cd chart + images) are never needed.
 # Use before going offline; resume with `just cluster-start`. See ADR-0013.
 
+# Re-derive artifact-registry's kind-network IP and repair kube-public EndpointSlice if stale.
+_registry-endpoint-heal:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Ensure the registry is up first so heal is self-sufficient from any state
+    # (kind-ready's in-place branch, or a manually-stopped registry). The IP is
+    # not populated the instant the container starts, so derive it with a short retry.
+    if [ "$(docker inspect -f '{{ "{{" }}.State.Status{{ "}}" }}' {{registry_name}} 2>/dev/null || echo missing)" != "running" ]; then
+      echo "Registry '{{registry_name}}' not running — starting it..."
+      docker start {{registry_name}}
+    fi
+    ip=""
+    for _ in $(seq 1 10); do
+      ip="$(docker inspect -f '{{ "{{" }}.NetworkSettings.Networks.kind.IPAddress{{ "}}" }}' {{registry_name}} 2>/dev/null || true)"
+      [ -n "$ip" ] && break
+      sleep 1
+    done
+    if [ -z "$ip" ]; then
+      echo "ERROR: could not derive '{{registry_name}}' IP on the kind network (does the container exist? run 'just cluster-up')"
+      exit 1
+    fi
+    current="$(KUBECONFIG={{kubeconfig}} kubectl get endpointslice artifact-registry -n kube-public \
+      -o jsonpath='{.endpoints[0].addresses[0]}' 2>/dev/null || true)"
+    if [ "$current" = "$ip" ]; then
+      echo "Registry EndpointSlice already correct ($ip)."
+    else
+      echo "Repairing registry EndpointSlice: ${current:-<missing>} -> $ip"
+      KUBECONFIG={{kubeconfig}} kubectl patch endpointslice artifact-registry -n kube-public --type merge \
+        -p "{\"endpoints\":[{\"addresses\":[\"$ip\"],\"conditions\":{\"ready\":true}}]}"
+    fi
+
+# Poll ArgoCD Applications until all are Synced/Healthy (~180s); warn on timeout, do not fail.
+_wait-argocd:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Waiting for ArgoCD Applications (Synced/Healthy, up to 180s)..."
+    deadline=$((SECONDS + 180))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+      bad="$(KUBECONFIG={{kubeconfig}} kubectl get applications -n argocd \
+        -o custom-columns=NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status \
+        --no-headers 2>/dev/null | awk '$2!="Synced" || $3!="Healthy" {print}' || true)"
+      total="$(KUBECONFIG={{kubeconfig}} kubectl get applications -n argocd --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+      if [ "${total:-0}" -gt 0 ] && [ -z "$bad" ]; then
+        echo "ArgoCD recovered: all $total Applications Synced/Healthy."
+        KUBECONFIG={{kubeconfig}} kubectl get applications -n argocd
+        exit 0
+      fi
+      sleep 5
+    done
+    echo "WARN: ArgoCD not fully Synced/Healthy after 180s."
+    KUBECONFIG={{kubeconfig}} kubectl get applications -n argocd || true
+    echo "Inspect: docs/runbooks/kind-restart-registry-recovery.md"
+
+# Print kind health signals (ArgoCD + non-Running/Completed pods).
+_kind-health-report:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "=== ArgoCD Applications ==="
+    KUBECONFIG={{kubeconfig}} kubectl get applications -n argocd || true
+    echo "=== Pods not Running/Completed ==="
+    bad_pods="$(KUBECONFIG={{kubeconfig}} kubectl get pods -A --no-headers 2>/dev/null \
+      | awk '$4!="Running" && $4!="Completed" {print}' || true)"
+    if [ -z "$bad_pods" ]; then
+      echo "(none — all pods Running or Completed)"
+    else
+      echo "$bad_pods"
+    fi
+
+# Idempotent known-good entry: start stopped cluster or repair stale registry endpoint in place.
+kind-ready:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    nodes="$(kind get nodes --name {{cluster_name}} 2>/dev/null || true)"
+    if [ -z "$nodes" ]; then
+      echo "cluster '{{cluster_name}}' not found — run 'just cluster-up' (needs internet)"
+      exit 1
+    fi
+    stopped=false
+    for node in $nodes; do
+      state="$(docker inspect -f '{{ "{{" }}.State.Status{{ "}}" }}' "$node" 2>/dev/null || echo missing)"
+      if [ "$state" != "running" ]; then stopped=true; break; fi
+    done
+    if $stopped; then
+      echo "Cluster stopped — starting via cluster-start..."
+      just cluster-start
+    else
+      echo "Cluster running — repairing registry endpoint in place..."
+      just _registry-endpoint-heal
+      just _wait-argocd
+    fi
+    just _kind-health-report
+
 # Stop the cluster + registry without deleting (offline-resume friendly).
 cluster-stop:
     #!/usr/bin/env bash
@@ -273,6 +365,8 @@ cluster-start:
       sleep 3
     done
     KUBECONFIG={{kubeconfig}} kubectl wait --for=condition=Ready nodes --all --timeout=120s || true
+    just _registry-endpoint-heal
+    just _wait-argocd
     echo "Up. Check workloads: just k get pods -A"
 
 # Mirror third-party charts (cert-manager, worker-controller) into the local registry.
