@@ -272,3 +272,20 @@ load) + stale Cloud backlog; **no divergence needed**. Tighter/seconds-level or 
 custom direct-patch controller. Worker-sourced signals (slot utilization, schedule-to-start) are
 local → poll as fast as you like; **backlog is server-side** → only fresh via live gRPC, rate-safe
 only when centralized in one poller.
+
+## Update (2026-07-08): slot utilization as a live second signal
+
+The custom `temporal-worker-autoscaler` now optionally combines per-version task-queue backlog
+(primary, live Cloud `DescribeWorkerDeploymentVersion`) with in-cluster Prometheus slot
+utilization (`temporal_slot_utilization:by_build` recording rule) as a **secondary** signal:
+
+- **Scale up: OR.** Backlog-driven scale-up OR slot saturation at the current replica count
+  (catches sustained no-headroom before backlog grows).
+- **Scale down: AND.** Shrink only when backlog is low **and** slots are idle (avg utilization
+  below `scaleDownSlotUtilizationPercent`). Busy slots veto scale-down to protect in-flight work.
+
+This is the expressiveness stock multi-metric HPA cannot provide (HPA takes the max desired across
+metrics - OR-up only, no AND-down). Slot hints are fail-open: missing Prometheus data falls back to
+backlog-only. **Scale-to-zero remains deferred** - the down-gate is the first input of the composite
+safe-to-zero guard (backlog zero AND slots idle AND pollers alive); `minReplicas` defaults stay at
+1 on orders workers until that guard ships.

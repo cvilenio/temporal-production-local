@@ -33,6 +33,24 @@ spec:
   behavior:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+  {{- if $wa.slotScaleUpEnabled }}
+  slotScaleUpEnabled: true
+  {{- end }}
+  {{- if $wa.slotScaleDownGateEnabled }}
+  slotScaleDownGateEnabled: true
+  {{- end }}
+  {{- if $wa.targetSlotUtilizationPercent }}
+  targetSlotUtilizationPercent: {{ $wa.targetSlotUtilizationPercent }}
+  {{- end }}
+  {{- if $wa.scaleDownSlotUtilizationPercent }}
+  scaleDownSlotUtilizationPercent: {{ $wa.scaleDownSlotUtilizationPercent }}
+  {{- end }}
+  {{- if $wa.slotUpWindowSeconds }}
+  slotUpWindowSeconds: {{ $wa.slotUpWindowSeconds }}
+  {{- end }}
+  {{- if $wa.slotDownWindowSeconds }}
+  slotDownWindowSeconds: {{ $wa.slotDownWindowSeconds }}
+  {{- end }}
 {{- end }}
 {{- end }}
 {{- end }}

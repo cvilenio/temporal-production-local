@@ -30,6 +30,9 @@ image:
 # jittered in-process. Actuation stays instant (direct patch) once the signal lands.
 pollInterval: 15s
 
+# In-cluster Prometheus HTTP API for slot-utilization hints (ADR-0023).
+prometheusUrl: http://prometheus-server.observability.svc.cluster.local:80
+
 # Leader election so exactly one replica polls Cloud + patches. Run >1 replica for
 # HA (standby); only the leader is active.
 replicaCount: 1
