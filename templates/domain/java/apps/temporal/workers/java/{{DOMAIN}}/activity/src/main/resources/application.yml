@@ -9,7 +9,8 @@ spring:
       target: ${TEMPORAL_ADDRESS:localhost:7233}
     start-workers: true
     workers-auto-discovery:
-      packages: io.temporal.demo.{{DOMAIN_PKG}}.activity
+      # SDK 1.35+ explicit flags (see orders activity worker application.yml).
+      register-activity-beans: true
     workers:
       - task-queue: {{DOMAIN}}-activity-task-queue
 

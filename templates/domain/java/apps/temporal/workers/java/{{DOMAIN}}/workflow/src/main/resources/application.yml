@@ -7,7 +7,8 @@ spring:
       target: ${TEMPORAL_ADDRESS:localhost:7233}
     start-workers: true
     workers-auto-discovery:
-      packages: io.temporal.demo.{{DOMAIN_PKG}}.workflow
+      workflow-packages:
+        - io.temporal.demo.{{DOMAIN_PKG}}.workflow
     workers:
       - task-queue: {{DOMAIN}}-workflow-task-queue
 
