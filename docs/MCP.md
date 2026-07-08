@@ -27,7 +27,7 @@ These are **live-connection** servers. They connect to the local observability +
 bring it up first (console-first, per the repo rule):
 
 ```
-just up-cloud-kind   # host visibility + console + mock-api
+just host-plane-up-cloud   # host visibility + console + mock-api
 just platform-up     # kind workloads
 ```
 

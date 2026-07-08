@@ -40,7 +40,7 @@ SERVICE_REGISTRY = {
         "description": "Managed Temporal namespace (account/region provisioned by Terraform)",
         "http_probe": None,
     },
-    # The self-hosted OSS server trio. On Compose (`poe up`) these are Docker
+    # The self-hosted OSS server trio. On Compose (`just legacy-up`) these are Docker
     # containers; on kind + OSS (ADR-0003) they are cluster pods — the `kube`
     # locators source them from the `temporal` namespace via KubeProvider (the
     # upstream chart labels every pod app.kubernetes.io/name=temporal, split by

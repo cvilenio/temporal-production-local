@@ -5,7 +5,7 @@
 # Overlay this on the base to run a self-hosted Temporal server locally:
 #
 #   docker compose -f docker-compose.yml -f compose/oss-server.yml up
-#   (or: poe up)
+#   (or: just legacy-up)
 #
 # It adds the Temporal cluster (server + its Postgres + schema/namespace/search-
 # attribute bootstrap + Web UI) and re-attaches the app services' dependency on
@@ -97,7 +97,7 @@ services:
   #
   # NON-PROD CONVENIENCE. These one-shot containers stand in for declarative
   # delivery locally. The search-attribute set is rendered from the shared spec
-  # (config/temporal/namespaces.yaml) by `poe up`, so it stays in lockstep with
+  # (config/temporal/namespaces.yaml) by `just legacy-up`, so it stays in lockstep with
   # the Cloud namespaces. The production-grade equivalent on kind is an
   # Argo-managed bootstrap Job rendered from the SAME spec (see ADR-0007).
   temporal-create-namespace:
