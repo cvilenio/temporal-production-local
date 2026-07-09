@@ -124,6 +124,7 @@ services:
       timeout: 3s
       retries: 24
       start_period: 20s
+    restart: unless-stopped
 
   # ===========================================================================
   # OBSERVABILITY — LOG STORE (ClickHouse) + INGEST GATEWAY (OTel Collector)
@@ -241,6 +242,7 @@ services:
       - temporal-network
     ports:
       - "8001:8000"
+    restart: unless-stopped
 
   # NOTE: the Temporal workers do NOT run in Compose. They run on kind (delivered
   # as a Worker Deployment via the orders-workers chart). On the legacy local-OSS
@@ -378,6 +380,7 @@ services:
       - temporal-network
     ports:
       - "8085:8000"
+    restart: unless-stopped
 
   # ===========================================================================
   # DEV ADMIN UI — pgweb for the orders DB → http://localhost:8083.

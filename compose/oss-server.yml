@@ -41,6 +41,7 @@ services:
       timeout: 5s
       retries: 60
       start_period: 30s
+    restart: unless-stopped
 
   # ── Temporal cluster: schema bootstrap (one-shot) ─────────────────────────
   temporal-admin-tools:
@@ -92,6 +93,7 @@ services:
       timeout: 3s
       retries: 60
       start_period: 30s
+    restart: unless-stopped
 
   # ── Temporal cluster: namespace + search-attribute bootstrap (one-shot) ───
   #
@@ -149,6 +151,7 @@ services:
       - temporal-network
     ports:
       - "8082:8080"
+    restart: unless-stopped
 
   ui-proxy:
     image: nginx:alpine
@@ -161,6 +164,7 @@ services:
       - "8081:8081"
     volumes:
       - ./compose/deployment/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    restart: unless-stopped
 
   # ── Dev admin UI: temporal DB browser ─────────────────────────────────────
   pgweb-temporal:   # http://localhost:8084
@@ -174,7 +178,7 @@ services:
       - temporal-network
     ports:
       - "8084:8081"
-    restart: always
+    restart: unless-stopped
 
   # ── Re-attach orders-service to the local server + point the console at the
   #    embedded Temporal UI and the OSS backend. These fragments MERGE onto the
