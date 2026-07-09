@@ -183,9 +183,15 @@ variable "worker_image_tag" {
 }
 
 variable "worker_image_digests" {
-  description = "Per-profile image digests (sha256:...) from `just ci`. When set, workers are pinned by digest (immutable, content-addressed Build ID) instead of tag."
+  description = "Per-worker image digests keyed <domain>-<profile> (sha256:...) from `just image-digests`. Required for every worker in config/domains/*.yaml — missing keys fail the apply."
   type        = map(string)
-  default     = {} # e.g. { workflow = "sha256:...", activity = "sha256:..." }
+  default     = {} # e.g. { orders-workflow = "sha256:...", orders-activity = "sha256:..." }
+}
+
+variable "domain_workers_chart_versions" {
+  description = "Published OCI chart version per domain (<domain>-workers). Falls back to orders_workers_chart_version for orders when a domain is omitted."
+  type        = map(string)
+  default     = {}
 }
 
 variable "orders_data_chart_version" {

@@ -161,14 +161,7 @@ build-images:
     set -euo pipefail
     REGISTRY="${REGISTRY:-localhost:5001}"
     TAG="$(git describe --tags --always --dirty --abbrev=12)"
-    for profile in workflow activity; do
-      docker build -f images/python.Dockerfile \
-        --build-arg APP_GROUP=workers \
-        --build-arg APP_PATH=apps/temporal/workers/python/orders/$profile \
-        --build-arg APP_MODULE=main \
-        --build-arg APP_CMD=python \
-        -t "$REGISTRY/orders-worker-$profile:$TAG" .
-    done
+    uv run python compose/scripts/build_domain_images.py build --registry "$REGISTRY" --tag "$TAG"
     docker build -f images/python.Dockerfile \
       --build-arg APP_GROUP=orders-api \
       --build-arg APP_PATH=apps/business/orders-api/python \
@@ -178,13 +171,7 @@ build-images:
     docker build -f images/go.Dockerfile \
       --build-arg APP_PATH=apps/platform/temporal-worker-autoscaler/go \
       -t "$REGISTRY/temporal-worker-autoscaler:$TAG" .
-    docker build -f images/java.Dockerfile \
-      --build-arg DOMAIN=orders \
-      --build-arg APP_MODULE=:orders-finalization-java-worker \
-      --build-arg WORKER_REL_PATH=apps/temporal/workers/java/orders/finalization-java \
-      --build-arg APP_JAR=orders-finalization-java-worker \
-      -t "$REGISTRY/orders-worker-finalization-java:$TAG" .
-    echo "Built $REGISTRY/orders-worker-{workflow,activity,finalization-java}:$TAG, orders-api:$TAG, temporal-worker-autoscaler:$TAG"
+    echo "Built worker images from config/domains/*.yaml, orders-api:$TAG, temporal-worker-autoscaler:$TAG"
 
 # Push the worker images + orders-api to the local registry.
 push-images:
@@ -192,13 +179,10 @@ push-images:
     set -euo pipefail
     REGISTRY="${REGISTRY:-localhost:5001}"
     TAG="$(git describe --tags --always --dirty --abbrev=12)"
-    for profile in workflow activity; do
-      docker push "$REGISTRY/orders-worker-$profile:$TAG"
-    done
+    uv run python compose/scripts/build_domain_images.py push --registry "$REGISTRY" --tag "$TAG"
     docker push "$REGISTRY/orders-api:$TAG"
     docker push "$REGISTRY/temporal-worker-autoscaler:$TAG"
-    docker push "$REGISTRY/orders-worker-finalization-java:$TAG"
-    echo "Pushed $REGISTRY/orders-worker-{workflow,activity,finalization-java}:$TAG, orders-api:$TAG, temporal-worker-autoscaler:$TAG"
+    echo "Pushed worker images from config/domains/*.yaml, orders-api:$TAG, temporal-worker-autoscaler:$TAG"
 
 # Print the image tag (git-describe) for the current tree.
 image-tag:
@@ -210,12 +194,18 @@ image-digests:
     set -euo pipefail
     REGISTRY="${REGISTRY:-localhost:5001}"
     TAG="$(git describe --tags --always --dirty --abbrev=12)"
-    for profile in workflow activity; do
-      echo "$profile=$(crane digest "$REGISTRY/orders-worker-$profile:$TAG" --insecure)"
-    done
+    uv run python compose/scripts/build_domain_images.py digests --registry "$REGISTRY" --tag "$TAG"
     echo "orders-api=$(crane digest "$REGISTRY/orders-api:$TAG" --insecure)"
     echo "temporal-worker-autoscaler=$(crane digest "$REGISTRY/temporal-worker-autoscaler:$TAG" --insecure)"
-    echo "finalization-java=$(crane digest "$REGISTRY/orders-worker-finalization-java:$TAG" --insecure)"
+
+# JSON map of worker digests keyed <domain>-<profile> for TF_VAR_worker_image_digests.
+worker-digests-json:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    REGISTRY="${REGISTRY:-localhost:5001}"
+    TAG="$(git describe --tags --always --dirty --abbrev=12)"
+    uv run python compose/scripts/build_domain_images.py digests --registry "$REGISTRY" --tag "$TAG" \
+      | python3 -c 'import sys,json; print(json.dumps(dict(line.strip().split("=",1) for line in sys.stdin if "=" in line)))'
 
 # --- Local cluster (kind + local registry) -----------------------------------
 
@@ -500,7 +490,7 @@ switch-backend target *FLAGS:
     # switching TO oss; keep whatever it was when switching to cloud.
     new_srv="$srv"; [ "{{target}}" = "oss" ] && new_srv=true
     tag="$(git describe --tags --always --dirty --abbrev=12)"
-    export TF_VAR_worker_image_digests="{\"workflow\":\"$(crane digest localhost:{{registry_port}}/orders-worker-workflow:$tag --insecure)\",\"activity\":\"$(crane digest localhost:{{registry_port}}/orders-worker-activity:$tag --insecure)\",\"finalization-java\":\"$(crane digest localhost:{{registry_port}}/orders-worker-finalization-java:$tag --insecure)\"}"
+    export TF_VAR_worker_image_digests="$(just worker-digests-json)"
     export TF_VAR_orders_api_image_digest="$(crane digest localhost:{{registry_port}}/orders-api:$tag --insecure)"
     export TF_VAR_autoscaler_image_digest="$(crane digest localhost:{{registry_port}}/temporal-worker-autoscaler:$tag --insecure)"
     export TF_VAR_temporal_backend="{{target}}"
@@ -529,7 +519,7 @@ temporal-server-down:
     read -r -p "Remove the OSS temporal-server + its Postgres (ALL OSS workflow state lost)? Type 'yes': " ans
     [ "$ans" = "yes" ] || { echo "aborted."; exit 1; }
     tag="$(git describe --tags --always --dirty --abbrev=12)"
-    export TF_VAR_worker_image_digests="{\"workflow\":\"$(crane digest localhost:{{registry_port}}/orders-worker-workflow:$tag --insecure)\",\"activity\":\"$(crane digest localhost:{{registry_port}}/orders-worker-activity:$tag --insecure)\",\"finalization-java\":\"$(crane digest localhost:{{registry_port}}/orders-worker-finalization-java:$tag --insecure)\"}"
+    export TF_VAR_worker_image_digests="$(just worker-digests-json)"
     export TF_VAR_orders_api_image_digest="$(crane digest localhost:{{registry_port}}/orders-api:$tag --insecure)"
     export TF_VAR_autoscaler_image_digest="$(crane digest localhost:{{registry_port}}/temporal-worker-autoscaler:$tag --insecure)"
     export TF_VAR_temporal_backend=cloud
@@ -598,12 +588,9 @@ platform-up backend="cloud":
     just ci
     just chart-publish
     tag="$(git describe --tags --always --dirty --abbrev=12)"
-    wf="$(crane digest localhost:{{registry_port}}/orders-worker-workflow:$tag --insecure)"
-    ac="$(crane digest localhost:{{registry_port}}/orders-worker-activity:$tag --insecure)"
-    ja="$(crane digest localhost:{{registry_port}}/orders-worker-finalization-java:$tag --insecure)"
+    export TF_VAR_worker_image_digests="$(just worker-digests-json)"
     api="$(crane digest localhost:{{registry_port}}/orders-api:$tag --insecure)"
     aut="$(crane digest localhost:{{registry_port}}/temporal-worker-autoscaler:$tag --insecure)"
-    export TF_VAR_worker_image_digests="{\"workflow\":\"$wf\",\"activity\":\"$ac\",\"finalization-java\":\"$ja\"}"
     export TF_VAR_orders_api_image_digest="$api"
     export TF_VAR_autoscaler_image_digest="$aut"
     export TF_VAR_temporal_backend="{{backend}}"
