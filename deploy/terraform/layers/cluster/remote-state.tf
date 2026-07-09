@@ -24,9 +24,18 @@ data "terraform_remote_state" "cloud" {
 locals {
   cloud_out = local.is_oss ? null : data.terraform_remote_state.cloud[0].outputs
 
+  orders_descriptor = yamldecode(
+    file("${path.module}/../../../../config/domains/orders.yaml")
+  )
+  orders_temporal_namespace = coalesce(
+    try(local.orders_descriptor.namespace, null),
+    local.orders_descriptor.domain,
+  )
+  oss_namespace_effective = var.oss_namespace != "" ? var.oss_namespace : local.orders_temporal_namespace
+
   # Per-domain outputs are keyed by the bare `<domain>` name (no env axis).
   worker_api_key   = local.is_oss ? null : local.cloud_out.api_key_tokens[var.cloud_namespace]
-  namespace_handle = local.is_oss ? var.oss_namespace : local.cloud_out.namespace_handles[var.cloud_namespace]
+  namespace_handle = local.is_oss ? local.oss_namespace_effective : local.cloud_out.namespace_handles[var.cloud_namespace]
   # Dedicated client key for orders-api (null if the cloud layer didn't mint one).
   client_api_key = local.is_oss ? null : try(local.cloud_out.client_api_key_tokens[var.cloud_namespace], null)
   # Metrics Read-Only key for the in-cluster Prometheus OpenMetrics scrape (ADR-0021).

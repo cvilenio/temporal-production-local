@@ -108,13 +108,13 @@ services:
         condition: service_healthy
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
-      - DEFAULT_NAMESPACE=ziggymart
     networks:
       - temporal-network
     volumes:
       - ./compose/scripts:/scripts
+      - ./config/temporal:/spec:ro
     entrypoint: ["/bin/sh"]
-    command: /scripts/create-namespace.sh
+    command: /scripts/bootstrap-oss-domains.sh
     restart: on-failure:5
 
   temporal-search-attributes:

@@ -153,6 +153,45 @@ def build_rows(spec: dict) -> list[Row]:
             )
         )
 
+    go_sdk = t.get("go_sdk")
+    if go_sdk:
+        for rel in sorted(REPO_ROOT.glob("templates/domain/go/**/go.mod")):
+            actual, loc = search1(
+                rel.relative_to(REPO_ROOT).as_posix(),
+                r"go\.temporal\.io/sdk v(\S+)",
+            )
+            rows.append(
+                Row(
+                    1,
+                    "temporal Go SDK",
+                    go_sdk,
+                    actual,
+                    f"{rel.relative_to(REPO_ROOT)}",
+                )
+            )
+
+    ts_sdk = t.get("ts_sdk")
+    if ts_sdk:
+        for rel in sorted(
+            REPO_ROOT.glob("templates/domain/typescript/**/package.json")
+        ):
+            text = read(rel.relative_to(REPO_ROOT).as_posix())
+            if not text or "@temporalio/worker" not in text:
+                continue
+            actual, loc = search1(
+                rel.relative_to(REPO_ROOT).as_posix(),
+                r'"@temporalio/worker":\s*"([^"]+)"',
+            )
+            rows.append(
+                Row(
+                    1,
+                    "temporal TypeScript SDK",
+                    ts_sdk,
+                    actual,
+                    f"{rel.relative_to(REPO_ROOT)}",
+                )
+            )
+
     # Server / admin-tools / UI tags live in .env.
     for comp, var in [
         ("temporal server", "TEMPORAL_VERSION"),

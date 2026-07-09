@@ -40,7 +40,7 @@ log = get_logger("codec-server")
 # down per environment; "*" here only because this is a local demo scaffold.
 UI_ORIGIN = os.getenv("CODEC_UI_ORIGIN", "*")
 # Placeholder key. Replace the whole codec with AEAD before real use.
-_DEMO_KEY = os.getenv("CODEC_DEMO_KEY", "ziggymart-demo-key").encode()
+_DEMO_KEY = os.getenv("CODEC_DEMO_KEY", "local-demo-key").encode()
 
 
 def _xor(data: bytes) -> bytes:

@@ -83,9 +83,55 @@ verify-domains:
 verify-domain NAME:
     uv run python compose/scripts/verify-domains.py {{NAME}}
 
-# Scaffold a new domain from templates/domain/<lang>/ (Python today; Java in M6).
-scaffold-domain NAME LANG="python":
-    uv run python compose/scripts/scaffold_domain.py --name {{NAME}} --lang {{LANG}}
+# Write a commented starter config/domains/<domain>.yaml for human editing.
+new-domain NAME:
+    uv run python compose/scripts/new_domain.py --name {{NAME}}
+
+# Idempotent generator — reads config/domains/<name>.yaml (no LANG flag).
+scaffold-domain NAME:
+    uv run python compose/scripts/scaffold_domain.py --name {{NAME}}
+
+# Adopt a domain end-to-end: verify -> lock -> build -> push -> chart-publish -> apply -> bootstrap.
+adopt-domain NAME:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just verify-domain {{NAME}}
+    uv lock
+    just build-domain-images {{NAME}}
+    just push-domain-images {{NAME}}
+    just chart-publish
+    L="deploy/terraform/layers/cluster"
+    tag="$(git describe --tags --always --dirty --abbrev=12)"
+    backend="$(terraform -chdir=$L output -raw temporal_backend 2>/dev/null || echo oss)"
+    oss_enabled="$(terraform -chdir=$L output -raw oss_server_enabled 2>/dev/null || echo true)"
+    export TF_VAR_worker_image_digests="$(just worker-digests-json {{NAME}})"
+    export TF_VAR_orders_api_image_digest="$(KUBECONFIG={{kubeconfig}} kubectl -n orders get deploy orders-api -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null | cut -d@ -f2 || crane digest localhost:{{registry_port}}/orders-api:$tag --insecure)"
+    export TF_VAR_autoscaler_image_digest="$(KUBECONFIG={{kubeconfig}} kubectl -n orders get deploy temporal-worker-autoscaler -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null | cut -d@ -f2 || crane digest localhost:{{registry_port}}/temporal-worker-autoscaler:$tag --insecure)"
+    export TF_VAR_temporal_backend="$backend"
+    export TF_VAR_oss_server_enabled="$oss_enabled"
+    terraform -chdir=$L apply -auto-approve
+    just bootstrap-oss-namespaces
+    echo "adopt-domain {{NAME}} complete (backend=$backend)."
+
+# Ensure every OSS namespace from config/temporal/namespaces.yaml exists on the in-cluster server.
+bootstrap-oss-namespaces:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just render-oss-bootstrap
+    set -a; . config/temporal/.generated/oss-bootstrap.env; set +a
+    ADDR="temporal-internal-frontend:7236"
+    for NS in ${OSS_DOMAINS:-}; do
+      ENV_KEY="$(echo "$NS" | tr '-' '_')"
+      eval "RET=\${OSS_RETENTION_${ENV_KEY}:-30}"
+      if KUBECONFIG={{kubeconfig}} kubectl -n temporal exec deploy/temporal-admintools -- \
+        temporal operator namespace describe -n "$NS" --address "$ADDR" >/dev/null 2>&1; then
+        echo "namespace $NS already exists"
+      else
+        echo "creating namespace $NS (retention ${RET}d)"
+        KUBECONFIG={{kubeconfig}} kubectl -n temporal exec deploy/temporal-admintools -- \
+          temporal operator namespace create -n "$NS" --retention "${RET}d" --address "$ADDR"
+      fi
+    done
 
 # All static checks: python (poe) + k8s manifests (helm/kubeconform) + proto lint
 # + dependency-version drift (versions-audit vs config/dependencies.yaml)
@@ -96,6 +142,11 @@ lint:
     just proto-lint
     just versions-audit
     just verify-domains
+    just lint-domain-templates
+
+# Compile-check Go + typecheck TypeScript domain templates.
+lint-domain-templates:
+    uv run python compose/scripts/lint_domain_templates.py
 
 # Run tests (python leaf).
 test:
@@ -155,6 +206,23 @@ host-plane-down:
 # dirty tree carries a `-dirty` suffix. Deploys pin by DIGEST (image-digests);
 # the tag is for humans. REGISTRY defaults to the local registry from cluster-up.
 
+# Build/push worker images for one domain only (adopt-domain uses this to avoid churn).
+build-domain-images NAME:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    REGISTRY="${REGISTRY:-localhost:5001}"
+    TAG="$(git describe --tags --always --dirty --abbrev=12)"
+    uv run python compose/scripts/build_domain_images.py build \
+      --registry "$REGISTRY" --tag "$TAG" --domain {{NAME}}
+
+push-domain-images NAME:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    REGISTRY="${REGISTRY:-localhost:5001}"
+    TAG="$(git describe --tags --always --dirty --abbrev=12)"
+    uv run python compose/scripts/build_domain_images.py push \
+      --registry "$REGISTRY" --tag "$TAG" --domain {{NAME}}
+
 # Build the worker images + orders-api, tagged <registry>/<name>:<git-describe>.
 build-images:
     #!/usr/bin/env bash
@@ -199,13 +267,20 @@ image-digests:
     echo "temporal-worker-autoscaler=$(crane digest "$REGISTRY/temporal-worker-autoscaler:$TAG" --insecure)"
 
 # JSON map of worker digests keyed <domain>-<profile> for TF_VAR_worker_image_digests.
-worker-digests-json:
+# With ADOPT set, registry digests for that domain + live digests for all others (no churn).
+worker-digests-json ADOPT="":
     #!/usr/bin/env bash
     set -euo pipefail
     REGISTRY="${REGISTRY:-localhost:5001}"
     TAG="$(git describe --tags --always --dirty --abbrev=12)"
-    uv run python compose/scripts/build_domain_images.py digests --registry "$REGISTRY" --tag "$TAG" \
-      | python3 -c 'import sys,json; print(json.dumps(dict(line.strip().split("=",1) for line in sys.stdin if "=" in line)))'
+    if [ -n "{{ADOPT}}" ]; then
+      uv run python compose/scripts/build_domain_images.py digests-json \
+        --registry "$REGISTRY" --tag "$TAG" --adopt {{ADOPT}} \
+        --kubeconfig {{kubeconfig}}
+    else
+      uv run python compose/scripts/build_domain_images.py digests-json \
+        --registry "$REGISTRY" --tag "$TAG"
+    fi
 
 # --- Local cluster (kind + local registry) -----------------------------------
 
@@ -387,7 +462,13 @@ chart-publish: render-oss-bootstrap
     mkdir -p deploy/charts/temporal-server/files
     cp config/temporal/.generated/oss-bootstrap.env deploy/charts/temporal-server/files/oss-bootstrap.env
     helm dependency build deploy/charts/temporal-server >/dev/null
-    for chart in orders-workers orders-data orders-api alloy temporal-worker-autoscaler temporal-server; do
+    charts=()
+    for d in deploy/charts/*-workers; do
+      [ -d "$d" ] || continue
+      charts+=("$(basename "$d")")
+    done
+    charts+=(orders-data orders-api alloy temporal-worker-autoscaler temporal-server)
+    for chart in "${charts[@]}"; do
       helm package "deploy/charts/$chart" -d "$tmp" >/dev/null
       helm push "$tmp/$chart"-*.tgz oci://localhost:{{registry_port}}/charts --plain-http
       ver="$(helm show chart "deploy/charts/$chart" | awk '/^version:/{print $2}')"

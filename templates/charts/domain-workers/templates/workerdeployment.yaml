@@ -75,8 +75,6 @@ spec:
               value: {{ $.Values.metricsOtelEndpoint | quote }}
             - name: TEMPORAL_DATA_CONVERTER
               value: {{ $.Values.dataConverter | quote }}
-            - name: TEMPORAL_NAMESPACE
-              value: {{ $.Values.connection.temporalNamespace | quote }}
             {{- if $.Values.connection.tls }}
             # API-key AND mTLS connections require TLS (the controller doesn't set it).
             - name: TEMPORAL_TLS
@@ -111,7 +109,7 @@ spec:
           # the Connection's mutualTLSSecretRef cert at /etc/temporal/tls on every worker
           # pod; adding our own mount there is a duplicate mountPath (rejected as
           # "must be unique"). The cert-path env above points at the controller's mount.
-          {{- if $.Values.startupProbe.enabled }}
+          {{- if or $.Values.startupProbe.enabled (and .startupProbe (eq .startupProbe.type "httpGet")) }}
           # Downstream-reachability gate, STARTUP-ONLY (ADR-0016). Python workers use
           # a TCP exec probe over downstreamServices env URLs. Java workers use Spring
           # Boot Actuator readiness on :9000 — see per-worker startupProbe in values.yaml.
