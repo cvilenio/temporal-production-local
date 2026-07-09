@@ -6,6 +6,7 @@
 #   namespace:         optional — Temporal namespace; defaults to `domain`. The ONLY identity
 #                        that may differ (e.g. domain: orders, namespace: ziggymart). Must exist
 #                        as a key in config/temporal/namespaces.yaml.
+#   k8s_namespace:     optional — k8s namespace for worker Deployments; defaults to `domain`.
 #   data_converter:    optional — default "default" (pydantic/json).
 #   workers[]:         required — one entry per worker profile/image.
 #     profile:         required — e.g. workflow, activity, finalization-java.
@@ -15,6 +16,10 @@
 #     deployment_name: required — k8s WorkerDeployment name.
 #     dependency_group: optional — Python uv group; default "<domain>-workers".
 #     dockerfile:      optional — default "images/<language>.Dockerfile".
+#     replicas:        optional — default 1 in TF when omitted.
+#     startup_probe:   optional — per-worker startup gate (e.g. Java httpGet readiness).
+#     extra_env:       optional — extra container env vars (map).
+#   autoscaling:       optional — WorkerAutoscaler config (enabled + per-profile workers map).
 #   workflows[]:       optional — console trigger catalog entries.
 #     type, task_queue, sample_inputs (WARN if sample_inputs missing).
 #   observability:
@@ -22,11 +27,35 @@
 #                        compose/observability/grafana/dashboards/<domain>/<domain>.json.
 #
 # Worker code path (deterministic): apps/temporal/workers/<language>/<domain>/<profile>/
-# Image name: <domain>-worker-<profile>   Digest map key: <domain>-<profile> (Phase 4+)
+# Image name: <domain>-worker-<profile>   Digest map key: <domain>-<profile>
 
 domain: orders
 namespace: ziggymart
+k8s_namespace: orders
 data_converter: default
+autoscaling:
+  enabled: true
+  workers:
+    workflow:
+      taskQueue: orders-workflow-task-queue
+      queueType: workflow
+      minReplicas: 1
+      maxReplicas: 6
+      targetBacklogPerReplica: 5
+      slotScaleUpEnabled: true
+      slotScaleDownGateEnabled: true
+    activity:
+      taskQueue: orders-activity-task-queue
+      queueType: activity
+      minReplicas: 1
+      maxReplicas: 10
+      targetBacklogPerReplica: 5
+    finalization-java:
+      taskQueue: orders-finalization-task-queue
+      queueType: activity
+      minReplicas: 1
+      maxReplicas: 10
+      targetBacklogPerReplica: 5
 workers:
   - profile: workflow
     language: python
@@ -34,17 +63,27 @@ workers:
     deployment_name: orders-workflow-python
     task_queue: orders-workflow-task-queue
     dependency_group: workers
+    replicas: 1
   - profile: activity
     language: python
     kind: activity
     deployment_name: orders-activity-python
     task_queue: orders-activity-task-queue
     dependency_group: workers
+    replicas: 2
   - profile: finalization-java
     language: java
     kind: activity
     deployment_name: orders-finalization-java
     task_queue: orders-finalization-task-queue
+    replicas: 1
+    startup_probe:
+      type: httpGet
+      path: /health/readiness
+      port: 9000
+    extra_env:
+      OTEL_SERVICE_NAME: orders-worker-finalization-java
+      SDK_METRICS_PORT: "9000"
 workflows:
   - type: OrderWorkflow
     task_queue: orders-workflow-task-queue

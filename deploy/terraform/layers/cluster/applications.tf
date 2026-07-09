@@ -8,12 +8,134 @@
 locals {
   apps_dir = "${path.module}/../../../argocd/applications"
 
-  # Domain descriptors (config/domains/*.yaml) — consumed at deploy time to inject
-  # contract env vars (e.g. TEMPORAL_DATA_CONVERTER) into charts; not read at runtime
-  # from worker images (ADR-0026).
-  domain_descriptors_dir = "${path.module}/../../../../config/domains"
-  orders_descriptor      = yamldecode(file("${local.domain_descriptors_dir}/orders.yaml"))
-  orders_data_converter = try(local.orders_descriptor.data_converter, "default")
+  # Domain descriptors (config/domains/*.yaml) — single source of truth for worker
+  # topology, data converter, autoscaling, and deploy-time helm values (ADR-0026).
+  domain_descriptors_dir  = "${path.module}/../../../../config/domains"
+  domain_descriptor_files = fileset(local.domain_descriptors_dir, "*.yaml")
+  domain_descriptors = {
+    for f in local.domain_descriptor_files :
+    trimsuffix(f, ".yaml") => yamldecode(file("${local.domain_descriptors_dir}/${f}"))
+  }
+  orders_data_converter = try(local.domain_descriptors["orders"].data_converter, "default")
+
+  # Temporal namespace handle per domain: honor descriptor namespace override but
+  # keep the account-bearing Cloud handle when the bare namespace matches cloud_namespace.
+  domain_temporal_namespace_handles = {
+    for _stem, desc in local.domain_descriptors :
+    desc.domain => (
+      coalesce(try(desc.namespace, null), desc.domain) == var.cloud_namespace
+      ? local.namespace_handle
+      : coalesce(try(desc.namespace, null), desc.domain)
+    )
+  }
+
+  # k8s destination namespace per domain (descriptor k8s_namespace, else domain key).
+  domain_k8s_namespaces = {
+    for _stem, desc in local.domain_descriptors :
+    desc.domain => lookup(desc, "k8s_namespace", desc.domain)
+  }
+
+  # Every worker declared in a domain descriptor must have a digest keyed
+  # <domain>-<profile> (emitted by compose/scripts/build_domain_images.py).
+  required_worker_digest_keys = toset(flatten([
+    for desc in local.domain_descriptors : [
+      for w in try(desc.workers, []) : "${desc.domain}-${w.profile}"
+    ]
+  ]))
+  missing_worker_digest_keys = [
+    for k in local.required_worker_digest_keys : k
+    if !contains(keys(var.worker_image_digests), k) || var.worker_image_digests[k] == ""
+  ]
+
+  # Chart version per domain with workers: explicit map override, else Chart.yaml on disk.
+  domain_workers_chart_version = {
+    for _stem, desc in local.domain_descriptors : desc.domain => coalesce(
+      lookup(var.domain_workers_chart_versions, desc.domain, null),
+      try(
+        yamldecode(file("${path.module}/../../../../deploy/charts/${desc.domain}-workers/Chart.yaml")).version,
+        null,
+      ),
+    )
+    if length(try(desc.workers, [])) > 0
+  }
+
+  # Worker image refs keyed <domain>-<profile> — shared by preconditions and helm values.
+  domain_worker_images = {
+    for item in flatten([
+      for desc in local.domain_descriptors : [
+        for w in try(desc.workers, []) : {
+          key     = "${desc.domain}-${w.profile}"
+          domain  = desc.domain
+          profile = w.profile
+        }
+      ]
+    ]) : item.key => {
+      repository = "localhost:5001/${item.domain}-worker-${item.profile}"
+      tag        = var.worker_image_tag
+      digest     = lookup(var.worker_image_digests, item.key, "")
+    }
+  }
+
+  all_worker_images = values(local.domain_worker_images)
+
+  # One ArgoCD Application per domain descriptor that declares workers[].
+  domain_workers_applications = {
+    for _stem, desc in local.domain_descriptors : "${desc.domain}-workers" => {
+      apiVersion = "argoproj.io/v1alpha1"
+      kind       = "Application"
+      metadata = {
+        name        = "${desc.domain}-workers"
+        namespace   = var.argocd_namespace
+        annotations = { "argocd.argoproj.io/sync-wave" = "0" }
+      }
+      spec = {
+        project = "default"
+        source = {
+          repoURL        = var.oci_charts_repo
+          chart          = "${desc.domain}-workers"
+          targetRevision = local.domain_workers_chart_version[desc.domain]
+          helm = {
+            valuesObject = {
+              # Deferred: hostPort, apiKeySecret, and mtlsSecret are single-Cloud-namespace
+              # today; a cross-namespace domain needs per-descriptor connection wiring.
+              connection = {
+                hostPort          = local.temporal_address
+                temporalNamespace = local.domain_temporal_namespace_handles[desc.domain]
+                tls               = true                       # ON in both modes; credential type differs
+                apiKeySecret      = local.worker_apikey_secret # Cloud: set; OSS: ""
+                mtlsSecret        = local.worker_mtls_secret   # OSS: set; Cloud: ""
+              }
+              autoscaling   = try(desc.autoscaling, { enabled = true })
+              dataConverter = try(desc.data_converter, "default")
+              workers = [
+                for w in try(desc.workers, []) : merge(
+                  {
+                    name           = w.profile
+                    deploymentName = w.deployment_name
+                    replicas       = try(w.replicas, 1)
+                    image          = local.domain_worker_images["${desc.domain}-${w.profile}"]
+                  },
+                  lower(w.language) == "python" ? { command = ["python", "main.py"] } : {},
+                  lower(w.language) != "python" ? { language = lower(w.language) } : {},
+                  lookup(w, "startup_probe", null) != null ? { startupProbe = w.startup_probe } : {},
+                  lookup(w, "extra_env", null) != null ? { extraEnv = w.extra_env } : {},
+                )
+              ]
+            }
+          }
+        }
+        destination = {
+          server    = "https://kubernetes.default.svc"
+          namespace = local.domain_k8s_namespaces[desc.domain]
+        }
+        syncPolicy = {
+          automated   = { prune = true, selfHeal = true }
+          syncOptions = ["CreateNamespace=true"]
+        }
+      }
+    }
+    if length(try(desc.workers, [])) > 0
+  }
 
   # Secret-free platform add-on Applications (cert-manager, worker-controller[-crds])
   # are defined declaratively as committed YAML under deploy/argocd/applications/ —
@@ -94,98 +216,11 @@ locals {
     })
   ]
 
-  # Worker images: pinned by digest when `just ci` supplied one (immutable,
-  # content-addressed Build ID), else by tag. Image bytes live in the local
-  # registry; in-cluster the nodes pull them as localhost:5001/... via certs.d.
-  worker_image = {
-    workflow      = { repository = "localhost:5001/orders-worker-workflow", tag = var.worker_image_tag, digest = lookup(var.worker_image_digests, "workflow", "") }
-    activity      = { repository = "localhost:5001/orders-worker-activity", tag = var.worker_image_tag, digest = lookup(var.worker_image_digests, "activity", "") }
-    finalization_java = { repository = "localhost:5001/orders-worker-finalization-java", tag = var.worker_image_tag, digest = lookup(var.worker_image_digests, "finalization-java", "") }
-  }
-
   # orders-api image: same digest-or-tag pinning as the workers.
   orders_api_image = { repository = "localhost:5001/orders-api", tag = var.orders_api_image_tag, digest = var.orders_api_image_digest }
 
   # temporal-worker-autoscaler controller image: same digest-or-tag pinning.
   autoscaler_image = { repository = "localhost:5001/temporal-worker-autoscaler", tag = var.autoscaler_image_tag, digest = var.autoscaler_image_digest }
-
-  # orders-workers: chart pulled from the local OCI registry; the account-bearing
-  # connection values are injected here from cloud state (never committed to git).
-  # sync-wave 0 keeps it after the wave -2/-1 add-ons.
-  orders_workers_application = {
-    apiVersion = "argoproj.io/v1alpha1"
-    kind       = "Application"
-    metadata = {
-      name        = "orders-workers"
-      namespace   = var.argocd_namespace
-      annotations = { "argocd.argoproj.io/sync-wave" = "0" }
-    }
-    spec = {
-      project = "default"
-      source = {
-        repoURL        = var.oci_charts_repo
-        chart          = "orders-workers"
-        targetRevision = var.orders_workers_chart_version
-        helm = {
-          valuesObject = {
-            connection = {
-              hostPort          = local.temporal_address
-              temporalNamespace = local.namespace_handle
-              tls               = true                       # ON in both modes; credential type differs
-              apiKeySecret      = local.worker_apikey_secret # Cloud: set; OSS: ""
-              mtlsSecret        = local.worker_mtls_secret   # OSS: set; Cloud: ""
-            }
-            # Turn on per-worker autoscaling (ADR-0023): renders the WorkerAutoscaler
-            # CRs consumed by the temporal-worker-autoscaler controller. Only the
-            # kind+Cloud path enables it; the host/OSS `helm template` path keeps the
-            # chart default (enabled: false). Deep-merges, so only `enabled` flips.
-            autoscaling = { enabled = true }
-            dataConverter = local.orders_data_converter
-            workers = [
-              {
-                name           = "workflow"
-                deploymentName = "orders-workflow-python"
-                replicas       = 1
-                image          = local.worker_image.workflow
-                command        = ["python", "main.py"]
-              },
-              {
-                name           = "activity"
-                deploymentName = "orders-activity-python"
-                replicas       = 2
-                image          = local.worker_image.activity
-                command        = ["python", "main.py"]
-              },
-              {
-                name           = "finalization-java"
-                deploymentName = "orders-finalization-java"
-                replicas       = 1
-                language       = "java"
-                image          = local.worker_image.finalization_java
-                startupProbe = {
-                  type = "httpGet"
-                  path = "/health/readiness"
-                  port = 9000
-                }
-                extraEnv = {
-                  OTEL_SERVICE_NAME = "orders-worker-finalization-java"
-                  SDK_METRICS_PORT  = "9000"
-                }
-              },
-            ]
-          }
-        }
-      }
-      destination = {
-        server    = "https://kubernetes.default.svc"
-        namespace = var.orders_namespace
-      }
-      syncPolicy = {
-        automated   = { prune = true, selfHeal = true }
-        syncOptions = ["CreateNamespace=true"]
-      }
-    }
-  }
 
   # orders-data: the CNPG orders-db Cluster + its git-safe credential. Its OWN
   # Application (separate failure domain) so a slow/failed DB bootstrap can never
@@ -396,12 +431,14 @@ locals {
     }
   }
 
-  # Every Application TF seeds: the committed add-ons + the injected orders-workers,
-  # orders-data, orders-api, the autoscaler controller, the alloy log agent, and
-  # (only when oss_server_enabled) the in-cluster OSS temporal-server.
+  # Every Application TF seeds: the committed add-ons + descriptor-driven domain
+  # worker Applications + hand-authored orders-data/orders-api, the autoscaler
+  # controller, the alloy log agent, and (only when oss_server_enabled) the
+  # in-cluster OSS temporal-server.
   all_applications = { for app in concat(
     local.addon_applications,
-    [local.orders_workers_application, local.orders_data_application, local.orders_api_application, local.temporal_worker_autoscaler_application, local.alloy_application],
+    values(local.domain_workers_applications),
+    [local.orders_data_application, local.orders_api_application, local.temporal_worker_autoscaler_application, local.alloy_application],
     var.oss_server_enabled ? [local.temporal_server_application] : [],
   ) : app.metadata.name => app }
 }
@@ -424,8 +461,12 @@ resource "kubectl_manifest" "applications" {
   # exists in the registry is still a valid digest-free fallback.
   lifecycle {
     precondition {
+      condition     = length(local.missing_worker_digest_keys) == 0
+      error_message = "Missing worker image digests (keys <domain>-<profile>): ${join(", ", local.missing_worker_digest_keys)}. Run `just image-digests` and pass TF_VAR_worker_image_digests with every descriptor worker key."
+    }
+    precondition {
       condition = alltrue([
-        for img in concat(values(local.worker_image), [local.orders_api_image, local.autoscaler_image]) :
+        for img in concat(local.all_worker_images, [local.orders_api_image, local.autoscaler_image]) :
         img.digest != "" || (img.tag != "" && img.tag != "latest")
       ])
       error_message = "Unsafe image ref: each worker AND orders-api needs a pinned digest (preferred) or a non-'latest' tag that exists in the local registry. Empty digest + tag='latest' silently deploys :latest and breaks the pod. Use `just platform-up` (it builds + computes digests) rather than a bare `terraform apply`."
