@@ -1,5 +1,5 @@
 #!/bin/sh
-# Register the orders custom search attributes on the local OSS namespace.
+# Register custom search attributes for every domain in the OSS bootstrap spec.
 #
 # NON-PROD CONVENIENCE. The attribute set is NOT hardcoded here — it is rendered
 # from the shared spec (config/temporal/namespaces.yaml) by
@@ -9,6 +9,7 @@
 set -eu
 
 BOOTSTRAP_ENV=${BOOTSTRAP_ENV:-/spec/.generated/oss-bootstrap.env}
+TEMPORAL_ADDRESS=${TEMPORAL_ADDRESS:-temporal:7233}
 
 if [ ! -f "$BOOTSTRAP_ENV" ]; then
   echo "Missing $BOOTSTRAP_ENV — run via 'poe up' so the host renders it first." >&2
@@ -18,18 +19,25 @@ fi
 # shellcheck disable=SC1090
 . "$BOOTSTRAP_ENV"
 
-NAMESPACE=${OSS_NAMESPACE:-ziggymart}
+for NAMESPACE in ${OSS_DOMAINS:-}; do
+  ENV_KEY=$(echo "$NAMESPACE" | tr '-' '_')
+  eval "ATTRS=\${OSS_SEARCH_ATTRIBUTES_${ENV_KEY}:-}"
 
-# Wait until the namespace is queryable before registering attributes.
-until temporal operator search-attribute list --namespace "$NAMESPACE" >/dev/null 2>&1; do
-  echo "Waiting for namespace $NAMESPACE..."
-  sleep 2
+  echo "Waiting for namespace $NAMESPACE to be queryable..."
+  until temporal operator search-attribute list --namespace "$NAMESPACE" --address "$TEMPORAL_ADDRESS" >/dev/null 2>&1; do
+    echo "  waiting on $NAMESPACE..."
+    sleep 2
+  done
+
+  for pair in $ATTRS; do
+    [ -n "$pair" ] || continue
+    name=${pair%%=*}
+    type=${pair#*=}
+    echo "Registering search attribute $name ($type) on $NAMESPACE"
+    temporal operator search-attribute create \
+      --name "$name" --type "$type" --namespace "$NAMESPACE" \
+      --address "$TEMPORAL_ADDRESS" || true
+  done
 done
 
-# OSS_SEARCH_ATTRIBUTES is a space-separated list of NAME=TYPE pairs.
-for pair in $OSS_SEARCH_ATTRIBUTES; do
-  name=${pair%%=*}
-  type=${pair#*=}
-  echo "Registering search attribute $name ($type) on $NAMESPACE"
-  temporal operator search-attribute create --name "$name" --type "$type" --namespace "$NAMESPACE" || true
-done
+echo "Search attribute bootstrap complete."

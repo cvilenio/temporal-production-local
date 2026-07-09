@@ -92,10 +92,8 @@ services:
       - "4318:4318"   # OTLP HTTP
     volumes:
       - ./compose/observability/prometheus/prometheus.yaml:/otel-lgtm/prometheus.yaml:ro
-      - ./compose/observability/grafana/provisioning/dashboards/ziggymart.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/ziggymart.yaml:ro
-      - ./compose/observability/grafana/dashboards:/var/lib/grafana/dashboards/ziggymart:ro
-      - ./compose/observability/grafana/provisioning/dashboards/orders.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/orders.yaml:ro
-      - ./compose/observability/grafana/dashboards/orders:/var/lib/grafana/dashboards/orders:ro
+      - ./compose/observability/grafana/provisioning/dashboards/domains.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/domains.yaml:ro
+      - ./compose/observability/grafana/dashboards:/var/lib/grafana/dashboards/domains:ro
       - ./compose/observability/grafana/provisioning/dashboards/critical.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/critical.yaml:ro
       - ./compose/observability/grafana/dashboards-critical:/var/lib/grafana/dashboards/critical:ro
       # Self-hosted-only server internals (persistence/task-processing/shard/

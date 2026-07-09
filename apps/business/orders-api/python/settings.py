@@ -12,7 +12,7 @@ from pydantic_settings import SettingsConfigDict
 
 class Settings(TemporalConnectionSettings, TelemetrySettings):
     # Domain defaults overriding the neutral appkit mixin defaults.
-    temporal_namespace: str = "ziggymart"
+    temporal_namespace: str = ""
     otel_service_name: str = "orders-service"
 
     database_url: str = "postgresql+asyncpg://admin:password@localhost:5433/orders_db"

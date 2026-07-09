@@ -111,7 +111,7 @@ spec:
           # the Connection's mutualTLSSecretRef cert at /etc/temporal/tls on every worker
           # pod; adding our own mount there is a duplicate mountPath (rejected as
           # "must be unique"). The cert-path env above points at the controller's mount.
-          {{- if $.Values.startupProbe.enabled }}
+          {{- if or $.Values.startupProbe.enabled (and .startupProbe (eq .startupProbe.type "httpGet")) }}
           # Downstream-reachability gate, STARTUP-ONLY (ADR-0016). Python workers use
           # a TCP exec probe (orders-service + mock-api). Java workers use Spring
           # Boot Actuator readiness on :9000 with a custom HealthIndicator for

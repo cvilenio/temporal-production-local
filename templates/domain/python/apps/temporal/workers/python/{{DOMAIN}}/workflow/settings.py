@@ -5,7 +5,7 @@ from pydantic_settings import SettingsConfigDict
 
 
 class Settings(TemporalConnectionSettings, WorkerTuningSettings, TelemetrySettings):
-    temporal_namespace: str = "{{DOMAIN}}"
+    temporal_namespace: str = ""
     otel_service_name: str = "{{DOMAIN}}-worker-workflow"
 
     model_config = SettingsConfigDict(

@@ -9,7 +9,7 @@ from pydantic_settings import SettingsConfigDict
 
 
 class Settings(TemporalConnectionSettings, WorkerTuningSettings, TelemetrySettings):
-    temporal_namespace: str = "ziggymart"
+    temporal_namespace: str = ""
     otel_service_name: str = "orders-worker-activity"
 
     # Ports this worker's activities call.

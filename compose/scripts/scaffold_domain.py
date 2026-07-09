@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Scaffold a new Temporal domain from templates/domain/<lang>/.
+"""Idempotent domain scaffolder — reads config/domains/<name>.yaml and generates missing artifacts.
 
 Usage:
-  uv run python compose/scripts/scaffold_domain.py --name hello --lang python
-  just scaffold-domain NAME=hello LANG=python
+  just new-domain mydomain
+  just scaffold-domain mydomain
 
-Refuses to overwrite an existing domain unless --force.
+Re-running with an unchanged descriptor produces zero diff (skip existing paths/files).
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import re
 import shutil
+import subprocess
 import sys
 import textwrap
 from dataclasses import dataclass
@@ -21,15 +22,35 @@ from pathlib import Path
 import yaml
 
 SCRIPT_REPO = Path(__file__).resolve().parents[2]
-SUPPORTED_LANGS = {"java", "python"}
+SUPPORTED_LANGS = frozenset({"java", "python", "go", "typescript"})
+TEXT_SUFFIXES = {
+    ".py",
+    ".toml",
+    ".yaml",
+    ".yml",
+    ".json",
+    ".md",
+    ".txt",
+    ".tf",
+    ".java",
+    ".gradle",
+    ".go",
+    ".mod",
+    ".sum",
+    ".ts",
+    ".js",
+    ".mjs",
+    ".cjs",
+}
 
 
 @dataclass(frozen=True)
 class ScaffoldCtx:
-    """Target tree (--root) plus template sources (always under SCRIPT_REPO)."""
-
     root: Path
-    template_root: Path
+
+    @property
+    def domains_dir(self) -> Path:
+        return self.root / "config" / "domains"
 
     @property
     def namespaces(self) -> Path:
@@ -41,7 +62,7 @@ class ScaffoldCtx:
 
     @property
     def cluster_vars(self) -> Path:
-        return self.root / "deploy/terraform/layers/cluster/variables.tf"
+        return self.root / "deploy/terraform/layers/cluster" / "variables.tf"
 
     @property
     def pyproject(self) -> Path:
@@ -58,10 +79,6 @@ class ScaffoldCtx:
     @property
     def grafana_dashboard_template(self) -> Path:
         return SCRIPT_REPO / "templates/grafana/dashboard.json"
-
-    @property
-    def grafana_provisioning_template(self) -> Path:
-        return SCRIPT_REPO / "templates/grafana/provisioning.yaml"
 
 
 def die(msg: str) -> None:
@@ -86,7 +103,6 @@ def substitute(text: str, mapping: dict[str, str]) -> str:
 
 
 def require_replace(text: str, old: str, new: str, *, label: str) -> str:
-    """Replace once; die if anchor missing or replace had no effect."""
     if old not in text:
         die(f"scaffold anchor not found ({label}): {old!r}")
     updated = text.replace(old, new, 1)
@@ -95,74 +111,128 @@ def require_replace(text: str, old: str, new: str, *, label: str) -> str:
     return updated
 
 
-def copy_tree(ctx: ScaffoldCtx, src: Path, dst: Path, mapping: dict[str, str]) -> None:
-    if dst.exists():
-        die(f"refusing to overwrite existing path: {dst.relative_to(ctx.root)}")
-    for path in src.rglob("*"):
+def load_descriptor(ctx: ScaffoldCtx, domain: str) -> dict:
+    path = ctx.domains_dir / f"{domain}.yaml"
+    if not path.is_file():
+        die(
+            f"missing {path.relative_to(ctx.root)} - run `just new-domain {domain}` first"
+        )
+    descriptor = yaml.safe_load(path.read_text()) or {}
+    desc_domain = str(descriptor.get("domain") or domain)
+    if desc_domain != domain:
+        die(
+            f"{path.relative_to(ctx.root)}: domain: {desc_domain!r} must match filename {domain!r}"
+        )
+    return descriptor
+
+
+def copy_tree_idempotent(
+    src: Path, dst: Path, mapping: dict[str, str], *, force: bool = False
+) -> bool:
+    """Copy template tree; skip paths that already exist unless force. Returns True if anything written."""
+    if not src.is_dir():
+        die(f"missing template tree: {src}")
+    wrote = False
+    for path in sorted(src.rglob("*")):
         rel = path.relative_to(src)
         rel_str = substitute(str(rel), mapping)
         out = dst / rel_str
         if path.is_dir():
-            out.mkdir(parents=True, exist_ok=True)
+            if not out.exists():
+                out.mkdir(parents=True, exist_ok=True)
+                wrote = True
+            continue
+        if out.exists() and not force:
             continue
         out.parent.mkdir(parents=True, exist_ok=True)
-        if path.suffix in {
-            ".py",
-            ".toml",
-            ".yaml",
-            ".yml",
-            ".json",
-            ".md",
-            ".txt",
-            ".tf",
-            ".java",
-            ".gradle",
-        }:
+        if path.suffix in TEXT_SUFFIXES or path.name in {"Dockerfile", ".npmrc"}:
             out.write_text(substitute(path.read_text(), mapping))
         else:
             shutil.copy2(path, out)
+        wrote = True
+    return wrote
 
 
-def domain_exists(ctx: ScaffoldCtx, domain: str) -> bool:
-    if (ctx.root / "config" / "domains" / f"{domain}.yaml").exists():
-        return True
-    ns = yaml.safe_load(ctx.namespaces.read_text()) or {}
-    return domain in (ns.get("domains") or {})
-
-
-def write_domain_descriptor(ctx: ScaffoldCtx, domain: str, lang: str) -> None:
-    path = ctx.root / "config" / "domains" / f"{domain}.yaml"
-    data = {
-        "domain": domain,
-        "language": lang,
-        "data_converter": "default",
-        "workers": [
-            {
-                "profile": "workflow",
-                "kind": "workflow",
-                "deployment_name": f"{domain}-workflow-{lang}",
-                "task_queue": f"{domain}-workflow-task-queue",
-            },
-            {
-                "profile": "activity",
-                "kind": "activity",
-                "deployment_name": f"{domain}-activity-{lang}",
-                "task_queue": f"{domain}-activity-task-queue",
-            },
-        ],
-        "workflows": [
-            {
-                "type": "HelloWorkflow",
-                "task_queue": f"{domain}-workflow-task-queue",
-                "sample_inputs": [
-                    {"label": "happy_path", "input": {"name": "Temporal"}},
-                ],
-            }
-        ],
-        "observability": {"dashboard": True},
-    }
+def write_if_changed(path: Path, content: str) -> bool:
+    if path.is_file() and path.read_text() == content:
+        return False
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    path.write_text(content)
+    return True
+
+
+def template_root_for_lang(lang: str) -> Path:
+    root = SCRIPT_REPO / "templates/domain" / lang
+    if not root.is_dir():
+        die(f"missing template tree templates/domain/{lang}/")
+    return root
+
+
+def lib_template_rel(lang: str) -> str:
+    if lang == "python":
+        return "libs/{{DOMAIN}}/python"
+    if lang == "java":
+        return "libs/{{DOMAIN}}/java"
+    if lang == "typescript":
+        return "libs/{{DOMAIN}}/typescript"
+    die(f"unsupported language {lang!r} for lib scaffold")
+    return ""
+
+
+def worker_template_rel(lang: str, profile: str) -> str:
+    return f"apps/temporal/workers/{lang}/{{{{DOMAIN}}}}/{profile}"
+
+
+def languages_for_descriptor(descriptor: dict) -> set[str]:
+    langs: set[str] = set()
+    for worker in descriptor.get("workers") or []:
+        if language := worker.get("language"):
+            langs.add(str(language).lower())
+    return langs
+
+
+def scaffold_libs(
+    ctx: ScaffoldCtx,
+    domain: str,
+    languages: set[str],
+    mapping: dict[str, str],
+    force: bool,
+) -> None:
+    for lang in sorted(languages):
+        if lang == "go":
+            continue
+        if lang not in SUPPORTED_LANGS:
+            die(f"unsupported language {lang!r} in descriptor")
+        template_rel = lib_template_rel(lang)
+        src = template_root_for_lang(lang) / template_rel
+        dst = ctx.root / substitute(template_rel, mapping)
+        if src.is_dir():
+            copy_tree_idempotent(src, dst, mapping, force=force)
+
+
+def scaffold_workers(
+    ctx: ScaffoldCtx,
+    descriptor: dict,
+    domain: str,
+    mapping: dict[str, str],
+    force: bool,
+) -> None:
+    for worker in descriptor.get("workers") or []:
+        profile = str(worker.get("profile") or "")
+        language = str(worker.get("language") or "").lower()
+        if not profile or not language:
+            die(f"workers[] entry in {domain}.yaml requires profile and language")
+        if language not in SUPPORTED_LANGS:
+            die(f"unsupported worker language {language!r}")
+        template_rel = worker_template_rel(language, profile)
+        src = template_root_for_lang(language) / template_rel
+        dst = ctx.root / substitute(template_rel, mapping)
+        if not src.is_dir():
+            die(
+                f"missing worker template {template_rel} for language {language!r} - "
+                f"add templates/domain/{language}/.../{profile}/"
+            )
+        copy_tree_idempotent(src, dst, mapping, force=force)
 
 
 def append_namespace(ctx: ScaffoldCtx, domain: str) -> None:
@@ -184,9 +254,7 @@ def append_namespace(ctx: ScaffoldCtx, domain: str) -> None:
 
 def append_cloud_overlay(ctx: ScaffoldCtx, domain: str) -> None:
     if not ctx.tfvars.exists():
-        die(
-            f"missing {ctx.tfvars.relative_to(ctx.root)} — copy from terraform.tfvars.example"
-        )
+        return
     text = ctx.tfvars.read_text()
     if f'"{domain}"' in text:
         return
@@ -202,9 +270,7 @@ def append_cloud_overlay(ctx: ScaffoldCtx, domain: str) -> None:
     text = text.rstrip()
     if text.endswith("}"):
         text = text[:-1].rstrip() + ",\n" + entry + "\n}\n"
-    else:
-        die("cloud_overlay block not found in terraform.tfvars")
-    ctx.tfvars.write_text(text)
+        ctx.tfvars.write_text(text)
 
 
 def add_chart_version_variable(ctx: ScaffoldCtx, domain: str) -> None:
@@ -222,18 +288,24 @@ def add_chart_version_variable(ctx: ScaffoldCtx, domain: str) -> None:
         }}
         """
     )
-    text = text.rstrip() + block
-    ctx.cluster_vars.write_text(text)
+    ctx.cluster_vars.write_text(text.rstrip() + block)
 
 
-def patch_pyproject(ctx: ScaffoldCtx, domain: str) -> None:
+def patch_pyproject(ctx: ScaffoldCtx, domain: str, descriptor: dict) -> None:
     text = ctx.pyproject.read_text()
     member = f'"libs/{domain}/python"'
     if member not in text:
+        match = re.search(r"^members = \[(.*)\]$", text, flags=re.MULTILINE)
+        if not match:
+            die("could not find [tool.uv.workspace] members in pyproject.toml")
+        inner = match.group(1).strip()
+        new_members = (
+            f"members = [{member}, {inner}]" if inner else f"members = [{member}]"
+        )
         text = require_replace(
             text,
-            'members = ["libs/orders/python"',
-            f'members = ["libs/{domain}/python", "libs/orders/python"',
+            match.group(0),
+            new_members,
             label="pyproject workspace members",
         )
     group = f"{domain}-workers"
@@ -246,10 +318,19 @@ def patch_pyproject(ctx: ScaffoldCtx, domain: str) -> None:
             label="pyproject dependency group",
         )
     if group not in text.split("default-groups")[1]:
+        match = re.search(r"^default-groups = \[(.*)\]$", text, flags=re.MULTILINE)
+        if not match:
+            die("could not find [tool.uv] default-groups in pyproject.toml")
+        inner = match.group(1).strip()
+        new_groups = (
+            f'default-groups = ["{group}", {inner}]'
+            if inner
+            else f'default-groups = ["{group}"]'
+        )
         text = require_replace(
             text,
-            'default-groups = ["workers"',
-            f'default-groups = ["{group}", "workers"',
+            match.group(0),
+            new_groups,
             label="pyproject default-groups",
         )
     source_key = f"{domain} = {{ workspace = true }}"
@@ -260,87 +341,230 @@ def patch_pyproject(ctx: ScaffoldCtx, domain: str) -> None:
             f"{source_key}\norders = {{ workspace = true }}",
             label="pyproject workspace sources",
         )
-    pyright_root = f'{{ root = "apps/temporal/workers/python/{domain}/workflow" }}'
-    if pyright_root not in text:
-        text = require_replace(
-            text,
-            '{ root = "apps/temporal/workers/python/workflow" }',
-            pyright_root + ',\n  { root = "apps/temporal/workers/python/workflow" }',
-            label="pyproject pyright workflow root",
-        )
-        text = require_replace(
-            text,
-            '{ root = "apps/temporal/workers/python/activity" }',
-            f'{{ root = "apps/temporal/workers/python/{domain}/activity" }},\n  {{ root = "apps/temporal/workers/python/activity" }}',
-            label="pyproject pyright activity root",
-        )
+    for worker in descriptor.get("workers") or []:
+        if str(worker.get("language", "")).lower() != "python":
+            continue
+        profile = str(worker.get("profile") or "")
+        if profile not in {"workflow", "activity"}:
+            continue
+        pyright_root = f'{{ root = "apps/temporal/workers/python/{domain}/{profile}" }}'
+        if pyright_root not in text:
+            anchor = f'{{ root = "apps/temporal/workers/python/orders/{profile}" }}'
+            text = require_replace(
+                text,
+                anchor,
+                pyright_root + ",\n  " + anchor,
+                label=f"pyproject pyright {profile} root",
+            )
     ctx.pyproject.write_text(text)
 
 
-def patch_settings_gradle(ctx: ScaffoldCtx, domain: str) -> None:
+def patch_settings_gradle(ctx: ScaffoldCtx, domain: str, descriptor: dict) -> None:
     path = ctx.settings_gradle
     if not path.is_file():
         die(
-            "missing settings.gradle — add the M5 Gradle spine before scaffolding Java domains"
+            "missing settings.gradle - add the Gradle spine before scaffolding Java workers"
         )
     text = path.read_text()
     lib_include = f"include '{domain}-lib'"
     if lib_include in text:
         return
     anchor = "project(':appkit-java').projectDir = file('libs/appkit/java')"
-    block = textwrap.dedent(
-        f"""
-
-        include '{domain}-lib'
-        project(':{domain}-lib').projectDir = file('libs/{domain}/java')
-
-        include '{domain}-workflow-worker'
-        project(':{domain}-workflow-worker').projectDir = file('apps/temporal/workers/java/{domain}/workflow')
-
-        include '{domain}-activity-worker'
-        project(':{domain}-activity-worker').projectDir = file('apps/temporal/workers/java/{domain}/activity')
-        """
-    ).rstrip()
-    text = require_replace(
-        text, anchor, anchor + block, label="settings.gradle domain modules"
-    )
+    blocks = [
+        "",
+        f"include '{domain}-lib'",
+        f"project(':{domain}-lib').projectDir = file('libs/{domain}/java')",
+        "",
+    ]
+    for worker in descriptor.get("workers") or []:
+        if str(worker.get("language", "")).lower() != "java":
+            continue
+        profile = str(worker["profile"])
+        module = f"{domain}-{profile}-worker"
+        rel = f"apps/temporal/workers/java/{domain}/{profile}"
+        blocks.extend(
+            [
+                f"include '{module}'",
+                f"project(':{module}').projectDir = file('{rel}')",
+                "",
+            ]
+        )
+    block = "\n".join(blocks).rstrip()
+    text = require_replace(text, anchor, anchor + "\n" + block, label="settings.gradle")
     path.write_text(text)
 
 
-def patch_chart_for_lang(ctx: ScaffoldCtx, domain: str, lang: str) -> None:
-    """Java images use the Dockerfile ENTRYPOINT (JAVA_OPTS + jar); omit chart command."""
-    if lang != "java":
+def finalize_go_modules(ctx: ScaffoldCtx, descriptor: dict, domain: str) -> None:
+    """Generate go.sum for each Go worker module (images/go.Dockerfile requires it)."""
+    for worker in descriptor.get("workers") or []:
+        if str(worker.get("language", "")).lower() != "go":
+            continue
+        profile = str(worker.get("profile") or "")
+        mod_dir = ctx.root / f"apps/temporal/workers/go/{domain}/{profile}"
+        if not (mod_dir / "go.mod").is_file():
+            continue
+        subprocess.run(["go", "mod", "tidy"], cwd=mod_dir, check=True)
+
+
+def patch_go_workspace(ctx: ScaffoldCtx, domain: str, descriptor: dict) -> None:
+    """Ensure root go.work lists Go worker modules when present (optional)."""
+    go_work = ctx.root / "go.work"
+    if not go_work.is_file():
         return
-    values = ctx.root / "deploy/charts" / f"{domain}-workers" / "values.yaml"
-    text = values.read_text()
-    text = text.replace('    command: ["python", "main.py"]\n', "")
-    values.write_text(text)
+    text = go_work.read_text()
+    module_lines = [
+        f"\t./apps/temporal/workers/go/{domain}/{str(worker['profile'])}"
+        for worker in descriptor.get("workers") or []
+        if str(worker.get("language", "")).lower() == "go" and worker.get("profile")
+    ]
+    if not module_lines:
+        return
+    if "use (" not in text:
+        return
+    changed = False
+    for module_line in module_lines:
+        if module_line in text:
+            continue
+        text = require_replace(
+            text,
+            "use (",
+            "use (\n" + module_line,
+            label="go.work use block",
+        )
+        changed = True
+    if changed:
+        go_work.write_text(text)
 
 
-def domain_copy_paths(lang: str, domain: str) -> list[tuple[str, str]]:
-    """Return (template_rel, dest_rel) pairs for the domain tree."""
-    if lang == "python":
-        return [
-            ("libs/{{DOMAIN}}/python", f"libs/{domain}/python"),
-            (
-                "apps/temporal/workers/python/{{DOMAIN}}",
-                f"apps/temporal/workers/python/{domain}",
+def patch_typescript_workspace(ctx: ScaffoldCtx, domain: str) -> None:
+    root_pkg = ctx.root / "package.json"
+    if not root_pkg.is_file():
+        write_if_changed(
+            root_pkg,
+            '{\n  "name": "temporal-demo-node",\n  "private": true,\n  "type": "module"\n}\n',
+        )
+    workspace = ctx.root / "pnpm-workspace.yaml"
+    if not workspace.is_file():
+        pkg = textwrap.dedent(
+            f"""\
+            packages:
+              - "libs/{domain}/typescript"
+              - "apps/temporal/workers/typescript/{domain}/*"
+            """
+        )
+        write_if_changed(workspace, pkg)
+        return
+    text = workspace.read_text()
+    entries = [
+        f'  - "libs/{domain}/typescript"',
+        f'  - "apps/temporal/workers/typescript/{domain}/*"',
+    ]
+    changed = False
+    for entry in entries:
+        if entry.strip("- ") not in text:
+            text = text.rstrip() + "\n" + entry + "\n"
+            changed = True
+    if changed:
+        workspace.write_text(text)
+
+
+def chart_workers_values(descriptor: dict) -> list[dict]:
+    domain = str(descriptor["domain"])
+    values: list[dict] = []
+    for worker in descriptor.get("workers") or []:
+        profile = str(worker["profile"])
+        language = str(worker.get("language") or "python").lower()
+        entry: dict = {
+            "name": profile,
+            "deploymentName": worker["deployment_name"],
+            "replicas": worker.get(
+                "replicas", 2 if worker.get("kind") == "activity" else 1
             ),
-        ]
-    if lang == "java":
-        return [
-            ("libs/{{DOMAIN}}/java", f"libs/{domain}/java"),
-            (
-                "apps/temporal/workers/java/{{DOMAIN}}",
-                f"apps/temporal/workers/java/{domain}",
-            ),
-        ]
-    die(f"unsupported language {lang!r}")
+            "image": {
+                "repository": f"localhost:5001/{domain}-worker-{profile}",
+                "tag": "latest",
+            },
+        }
+        if language == "python":
+            entry["command"] = ["python", "main.py"]
+        values.append(entry)
+    return values
 
 
-def scaffold_chart(ctx: ScaffoldCtx, domain: str, mapping: dict[str, str]) -> None:
+def chart_autoscaling_workers(descriptor: dict) -> dict:
+    domain = str(descriptor["domain"])
+    workers: dict = {}
+    for worker in descriptor.get("workers") or []:
+        profile = str(worker["profile"])
+        kind = str(worker.get("kind") or "activity")
+        queue_type = "workflow" if kind == "workflow" else "activity"
+        entry: dict = {
+            "taskQueue": worker["task_queue"],
+            "queueType": queue_type,
+            "minReplicas": 1,
+            "maxReplicas": 6 if queue_type == "workflow" else 10,
+            "targetBacklogPerReplica": 5,
+        }
+        if queue_type == "workflow":
+            entry["slotScaleUpEnabled"] = True
+            entry["slotScaleDownGateEnabled"] = True
+        workers[profile] = entry
+    if not workers:
+        workers = {
+            "workflow": {
+                "taskQueue": f"{domain}-workflow-task-queue",
+                "queueType": "workflow",
+                "minReplicas": 1,
+                "maxReplicas": 6,
+                "targetBacklogPerReplica": 5,
+                "slotScaleUpEnabled": True,
+                "slotScaleDownGateEnabled": True,
+            },
+            "activity": {
+                "taskQueue": f"{domain}-activity-task-queue",
+                "queueType": "activity",
+                "minReplicas": 1,
+                "maxReplicas": 10,
+                "targetBacklogPerReplica": 5,
+            },
+        }
+    return workers
+
+
+def sync_chart_values(
+    ctx: ScaffoldCtx, descriptor: dict, mapping: dict[str, str]
+) -> None:
+    values_path = (
+        ctx.root / "deploy/charts" / f"{descriptor['domain']}-workers/values.yaml"
+    )
+    if not values_path.is_file():
+        return
+    text = values_path.read_text()
+    data = yaml.safe_load(text) or {}
+    data["workers"] = chart_workers_values(descriptor)
+    autoscaling = descriptor.get("autoscaling") or {}
+    data["autoscaling"] = {
+        "enabled": bool(autoscaling.get("enabled", False)),
+        "workers": chart_autoscaling_workers(descriptor),
+    }
+    rendered = yaml.safe_dump(data, sort_keys=False)
+    write_if_changed(values_path, rendered)
+
+
+def scaffold_chart(
+    ctx: ScaffoldCtx,
+    domain: str,
+    descriptor: dict,
+    mapping: dict[str, str],
+    force: bool,
+) -> None:
     dst = ctx.root / "deploy/charts" / f"{domain}-workers"
-    copy_tree(ctx, ctx.chart_template, dst, mapping)
+    if dst.exists() and not force:
+        sync_chart_values(ctx, descriptor, mapping)
+        return
+    if dst.exists() and force:
+        shutil.rmtree(dst)
+    copy_tree_idempotent(ctx.chart_template, dst, mapping, force=True)
     for path in dst.rglob("*"):
         if path.is_file() and path.suffix in {".yaml", ".yml"}:
             path.write_text(substitute(path.read_text(), mapping))
@@ -365,100 +589,69 @@ def scaffold_chart(ctx: ScaffoldCtx, domain: str, mapping: dict[str, str]) -> No
         flags=re.MULTILINE,
     )
     chart_yaml.write_text(chart_text)
+    for worker in descriptor.get("workers") or []:
+        if str(worker.get("language", "")).lower() == "java":
+            values = dst / "values.yaml"
+            values.write_text(
+                values.read_text().replace('    command: ["python", "main.py"]\n', "")
+            )
+    sync_chart_values(ctx, descriptor, mapping)
 
 
 def scaffold_grafana(ctx: ScaffoldCtx, domain: str, mapping: dict[str, str]) -> None:
     dash_dir = ctx.root / "compose/observability/grafana/dashboards" / domain
-    dash_dir.mkdir(parents=True, exist_ok=True)
     dash_path = dash_dir / f"{domain}.json"
+    if dash_path.is_file():
+        return
+    dash_dir.mkdir(parents=True, exist_ok=True)
     dash_path.write_text(
         substitute(ctx.grafana_dashboard_template.read_text(), mapping)
     )
-    prov_dir = ctx.root / "compose/observability/grafana/provisioning/dashboards"
-    prov_dir.mkdir(parents=True, exist_ok=True)
-    prov_path = prov_dir / f"{domain}.yaml"
-    if prov_path.exists():
-        die(f"grafana provisioning already exists: {prov_path.relative_to(ctx.root)}")
-    prov_path.write_text(
-        substitute(ctx.grafana_provisioning_template.read_text(), mapping)
-    )
 
 
-def print_next_steps(domain: str, lang: str) -> None:
-    chart_var = domain.replace("-", "_")
-    if lang == "java":
-        build_block = textwrap.dedent(
-            f"""
-              TAG=$(git describe --always --dirty)
-              just java-build
-              docker build -f images/java.Dockerfile \\
-                --build-arg DOMAIN={domain} \\
-                --build-arg APP_MODULE=:{domain}-workflow-worker \\
-                --build-arg WORKER_REL_PATH=apps/temporal/workers/java/{domain}/workflow \\
-                --build-arg APP_JAR={domain}-workflow-worker \\
-                -t localhost:5001/{domain}-worker-workflow:$TAG .
-              docker build -f images/java.Dockerfile \\
-                --build-arg DOMAIN={domain} \\
-                --build-arg APP_MODULE=:{domain}-activity-worker \\
-                --build-arg WORKER_REL_PATH=apps/temporal/workers/java/{domain}/activity \\
-                --build-arg APP_JAR={domain}-activity-worker \\
-                -t localhost:5001/{domain}-worker-activity:$TAG .
-              docker push localhost:5001/{domain}-worker-workflow:$TAG
-              docker push localhost:5001/{domain}-worker-activity:$TAG
-            """
-        ).rstrip()
-        extra = ""
-    else:
-        build_block = textwrap.dedent(
-            f"""
-              TAG=$(git describe --always --dirty)
-              docker build -f images/python.Dockerfile \\
-                --build-arg APP_GROUP={domain}-workers \\
-                --build-arg APP_PATH=apps/temporal/workers/python/{domain}/workflow \\
-                --build-arg APP_CMD=python --build-arg APP_MODULE=main \\
-                -t localhost:5001/{domain}-worker-workflow:$TAG .
-              docker build -f images/python.Dockerfile \\
-                --build-arg APP_GROUP={domain}-workers \\
-                --build-arg APP_PATH=apps/temporal/workers/python/{domain}/activity \\
-                --build-arg APP_CMD=python --build-arg APP_MODULE=main \\
-                -t localhost:5001/{domain}-worker-activity:$TAG .
-              docker push localhost:5001/{domain}-worker-workflow:$TAG
-              docker push localhost:5001/{domain}-worker-activity:$TAG
-            """
-        ).rstrip()
-        extra = "              3. Run `uv lock` after pyproject.toml changes.\n"
+def patch_language_manifests(ctx: ScaffoldCtx, domain: str, descriptor: dict) -> None:
+    languages = languages_for_descriptor(descriptor)
+    if "python" in languages:
+        patch_pyproject(ctx, domain, descriptor)
+    if "java" in languages:
+        patch_settings_gradle(ctx, domain, descriptor)
+    if "go" in languages:
+        patch_go_workspace(ctx, domain, descriptor)
+        finalize_go_modules(ctx, descriptor, domain)
+    if "typescript" in languages:
+        patch_typescript_workspace(ctx, domain)
 
-    print(
-        textwrap.dedent(
-            f"""
-            === Scaffold complete: {domain} ({lang}) ===
 
-            Manual follow-ups (not auto-generated):
-              1. Add an ArgoCD Application for {domain}-workers in
-                 deploy/terraform/layers/cluster/applications.tf (copy orders_workers_application).
-              2. Add Grafana volume mounts for {domain} in docker-compose.yml (copy ziggymart block).
-            {extra}
-            Build + deploy (run each step separately — never chain publish && apply):
-            {build_block}
-              just chart-publish   # confirm chart landed before apply
-              # terraform apply with TF_VAR_{chart_var}_workers_chart_version=0.1.0
-              # and worker image digests for {domain}
+def scaffold_domain(ctx: ScaffoldCtx, domain: str, *, force: bool = False) -> None:
+    descriptor = load_descriptor(ctx, domain)
+    mapping = tokens(domain)
+    languages = languages_for_descriptor(descriptor)
 
-            Verify: DescribeTaskQueue on {domain}-workflow-task-queue and
-            {domain}-activity-task-queue; start ONE HelloWorkflow.
+    append_namespace(ctx, domain)
+    append_cloud_overlay(ctx, domain)
+    add_chart_version_variable(ctx, domain)
 
-            See docs/adapting-a-demo.md for the full human runbook.
-            """
-        ).strip()
-    )
+    scaffold_libs(ctx, domain, languages, mapping, force)
+    scaffold_workers(ctx, descriptor, domain, mapping, force)
+    scaffold_chart(ctx, domain, descriptor, mapping, force)
+
+    if (descriptor.get("observability") or {}).get("dashboard"):
+        scaffold_grafana(ctx, domain, mapping)
+
+    patch_language_manifests(ctx, domain, descriptor)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Scaffold a Temporal domain")
-    parser.add_argument("--name", required=True, help="domain key (e.g. hello)")
-    parser.add_argument("--lang", default="python", choices=sorted(SUPPORTED_LANGS))
+    parser = argparse.ArgumentParser(
+        description="Scaffold a Temporal domain from its descriptor"
+    )
     parser.add_argument(
-        "--force", action="store_true", help="overwrite existing domain"
+        "--name", required=True, help="domain key (must match descriptor filename)"
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite existing generated paths (non-idempotent)",
     )
     parser.add_argument(
         "--root",
@@ -466,61 +659,18 @@ def main() -> None:
         default=SCRIPT_REPO,
         help="repository root to write into (default: script repo)",
     )
-    parser.add_argument(
-        "--template-root",
-        type=Path,
-        default=None,
-        help="domain template tree (default: <script-repo>/templates/domain/python)",
-    )
     args = parser.parse_args()
-
-    root = args.root.resolve()
-    lang = args.lang
-    default_template = SCRIPT_REPO / f"templates/domain/{lang}"
-    template_root = (args.template_root or default_template).resolve()
-    ctx = ScaffoldCtx(root=root, template_root=template_root)
 
     domain = args.name.strip().lower()
     if not re.fullmatch(r"[a-z][a-z0-9-]*", domain):
         die("domain name must match [a-z][a-z0-9-]*")
 
-    if domain_exists(ctx, domain) and not args.force:
-        die(f"domain {domain!r} already exists — pass --force to overwrite")
-
-    if lang not in SUPPORTED_LANGS:
-        die(
-            f"language {lang!r} not supported yet (available: {sorted(SUPPORTED_LANGS)})"
-        )
-
-    if not template_root.is_dir():
-        die(f"missing template tree: {template_root}")
-
-    mapping = tokens(domain, lang)
-
-    for template_rel, dest_rel in domain_copy_paths(lang, domain):
-        src = template_root / template_rel
-        dst = root / dest_rel
-        if dst.exists() and args.force:
-            shutil.rmtree(dst)
-        copy_tree(ctx, src, dst, mapping)
-
-    write_domain_descriptor(ctx, domain, lang)
-    append_namespace(ctx, domain)
-    append_cloud_overlay(ctx, domain)
-    add_chart_version_variable(ctx, domain)
-    if lang == "python":
-        patch_pyproject(ctx, domain)
-    elif lang == "java":
-        patch_settings_gradle(ctx, domain)
-
-    chart_dst = root / "deploy/charts" / f"{domain}-workers"
-    if chart_dst.exists() and args.force:
-        shutil.rmtree(chart_dst)
-    scaffold_chart(ctx, domain, mapping)
-    patch_chart_for_lang(ctx, domain, lang)
-    scaffold_grafana(ctx, domain, mapping)
-
-    print_next_steps(domain, lang)
+    ctx = ScaffoldCtx(root=args.root.resolve())
+    scaffold_domain(ctx, domain, force=args.force)
+    print(
+        f"Scaffold complete for {domain!r} (idempotent — existing files left unchanged)."
+    )
+    print(f"Next: just verify-domain {domain}")
 
 
 if __name__ == "__main__":

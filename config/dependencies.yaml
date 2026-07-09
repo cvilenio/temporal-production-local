@@ -43,6 +43,8 @@ temporal:
   cloud_tf_provider: "~> 1.5" # verify: terraform layers/cloud + modules/cloud-namespace required_providers
   proto_plugin: "v33.1" # verify: libs/orders/proto/buf.gen.yaml (protocolbuffers/python + pyi)
   worker_controller_chart: "0.27.0" # MIRROR of charts.temporal-worker-controller.version (audit asserts ==)
+  go_sdk: "1.45.0" # verify: templates/domain/go/**/go.mod (go.temporal.io/sdk)
+  ts_sdk: "^1.20.0" # verify: templates/domain/typescript/**/package.json (@temporalio/*)
 
 # ── Tier 2 — platform tools (hard-gated like Tier 1) ─────────────────────────
 platform:

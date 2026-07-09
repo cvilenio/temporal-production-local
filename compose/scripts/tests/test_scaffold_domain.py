@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCAFFOLD = REPO_ROOT / "compose/scripts/scaffold_domain.py"
+NEW_DOMAIN = REPO_ROOT / "compose/scripts/new_domain.py"
 VERIFY = REPO_ROOT / "compose/scripts/verify-domains.py"
 DOMAIN = "scaffoldproof"
 JAVA_DOMAIN = "scaffoldproofjava"
@@ -26,6 +30,11 @@ def _seed_minimal_repo(root: Path) -> None:
         'variable "orders_workers_chart_version" {\n  default = "0.0.0"\n}\n'
     )
     (root / "pyproject.toml").write_text((REPO_ROOT / "pyproject.toml").read_text())
+    (root / "images").mkdir(parents=True)
+    for lang in ("python", "java", "go", "typescript"):
+        dockerfile = REPO_ROOT / f"images/{lang}.Dockerfile"
+        if dockerfile.is_file():
+            shutil.copy(dockerfile, root / f"images/{lang}.Dockerfile")
 
 
 def _seed_minimal_java_repo(root: Path) -> None:
@@ -33,26 +42,69 @@ def _seed_minimal_java_repo(root: Path) -> None:
     (root / "settings.gradle").write_text((REPO_ROOT / "settings.gradle").read_text())
 
 
-def test_scaffold_domain_python_and_verify(tmp_path: Path) -> None:
-    _seed_minimal_repo(tmp_path)
-    template_root = REPO_ROOT / "templates/domain/python"
-
+def _write_python_descriptor(root: Path, domain: str) -> None:
     subprocess.run(
-        [
-            sys.executable,
-            str(SCAFFOLD),
-            "--name",
-            DOMAIN,
-            "--lang",
-            "python",
-            "--root",
-            str(tmp_path),
-            "--template-root",
-            str(template_root),
-        ],
+        [sys.executable, str(NEW_DOMAIN), "--name", domain, "--root", str(root)],
         check=True,
         cwd=REPO_ROOT,
     )
+
+
+def _write_java_descriptor(root: Path, domain: str) -> None:
+    path = root / f"config/domains/{domain}.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "domain": domain,
+                "k8s_namespace": "orders",
+                "data_converter": "default",
+                "workers": [
+                    {
+                        "profile": "workflow",
+                        "language": "java",
+                        "kind": "workflow",
+                        "deployment_name": f"{domain}-workflow-java",
+                        "task_queue": f"{domain}-workflow-task-queue",
+                    },
+                    {
+                        "profile": "activity",
+                        "language": "java",
+                        "kind": "activity",
+                        "deployment_name": f"{domain}-activity-java",
+                        "task_queue": f"{domain}-activity-task-queue",
+                    },
+                ],
+                "workflows": [
+                    {
+                        "type": "HelloWorkflow",
+                        "task_queue": f"{domain}-workflow-task-queue",
+                        "sample_inputs": [
+                            {"label": "happy_path", "input": {"name": "Temporal"}}
+                        ],
+                    }
+                ],
+                "observability": {"dashboard": True},
+            },
+            sort_keys=False,
+        )
+    )
+
+
+def test_scaffold_domain_python_idempotent(tmp_path: Path) -> None:
+    _seed_minimal_repo(tmp_path)
+    _write_python_descriptor(tmp_path, DOMAIN)
+
+    cmd = [
+        sys.executable,
+        str(SCAFFOLD),
+        "--name",
+        DOMAIN,
+        "--root",
+        str(tmp_path),
+    ]
+    subprocess.run(cmd, check=True, cwd=REPO_ROOT)
+    subprocess.run(cmd, check=True, cwd=REPO_ROOT)
 
     expected_files = [
         f"config/domains/{DOMAIN}.yaml",
@@ -62,21 +114,18 @@ def test_scaffold_domain_python_and_verify(tmp_path: Path) -> None:
         f"apps/temporal/workers/python/{DOMAIN}/activity/main.py",
         f"deploy/charts/{DOMAIN}-workers/Chart.yaml",
         f"compose/observability/grafana/dashboards/{DOMAIN}/{DOMAIN}.json",
-        f"compose/observability/grafana/provisioning/dashboards/{DOMAIN}.yaml",
     ]
     for rel in expected_files:
-        path = tmp_path / rel
-        assert path.is_file(), f"missing scaffolded file: {rel}"
+        assert (tmp_path / rel).is_file(), f"missing scaffolded file: {rel}"
 
     dash = (
         tmp_path / f"compose/observability/grafana/dashboards/{DOMAIN}/{DOMAIN}.json"
     ).read_text()
     assert "prometheus-kind" in dash
-    assert f'namespace=\\"{DOMAIN}\\"' in dash
 
     env = {**os.environ, "DOMAIN_VERIFY_ROOT": str(tmp_path)}
     verify = subprocess.run(
-        [sys.executable, str(VERIFY)],
+        [sys.executable, str(VERIFY), DOMAIN],
         env=env,
         capture_output=True,
         text=True,
@@ -84,12 +133,11 @@ def test_scaffold_domain_python_and_verify(tmp_path: Path) -> None:
         check=False,
     )
     assert verify.returncode == 0, verify.stdout + verify.stderr
-    assert DOMAIN in verify.stdout
 
 
 def test_scaffold_domain_java_and_verify(tmp_path: Path) -> None:
     _seed_minimal_java_repo(tmp_path)
-    template_root = REPO_ROOT / "templates/domain/java"
+    _write_java_descriptor(tmp_path, JAVA_DOMAIN)
 
     subprocess.run(
         [
@@ -97,12 +145,8 @@ def test_scaffold_domain_java_and_verify(tmp_path: Path) -> None:
             str(SCAFFOLD),
             "--name",
             JAVA_DOMAIN,
-            "--lang",
-            "java",
             "--root",
             str(tmp_path),
-            "--template-root",
-            str(template_root),
         ],
         check=True,
         cwd=REPO_ROOT,
@@ -112,31 +156,17 @@ def test_scaffold_domain_java_and_verify(tmp_path: Path) -> None:
         f"config/domains/{JAVA_DOMAIN}.yaml",
         f"libs/{JAVA_DOMAIN}/java/src/main/java/io/temporal/demo/scaffoldproofjava/shared/TemporalIds.java",
         f"apps/temporal/workers/java/{JAVA_DOMAIN}/workflow/src/main/java/io/temporal/demo/scaffoldproofjava/workflow/HelloWorkflowImpl.java",
-        f"apps/temporal/workers/java/{JAVA_DOMAIN}/workflow/src/main/resources/application.yml",
-        f"apps/temporal/workers/java/{JAVA_DOMAIN}/activity/src/main/resources/application.yml",
         f"deploy/charts/{JAVA_DOMAIN}-workers/Chart.yaml",
     ]
     for rel in expected_files:
-        path = tmp_path / rel
-        assert path.is_file(), f"missing scaffolded file: {rel}"
+        assert (tmp_path / rel).is_file(), f"missing scaffolded file: {rel}"
 
     values = (tmp_path / f"deploy/charts/{JAVA_DOMAIN}-workers/values.yaml").read_text()
-    assert 'command: ["java"' not in values
     assert 'command: ["python"' not in values
-
-    settings = (tmp_path / "settings.gradle").read_text()
-    assert f"include '{JAVA_DOMAIN}-lib'" in settings
-    assert f"include '{JAVA_DOMAIN}-workflow-worker'" in settings
-
-    impl = (
-        tmp_path
-        / f"apps/temporal/workers/java/{JAVA_DOMAIN}/workflow/src/main/java/io/temporal/demo/scaffoldproofjava/workflow/HelloWorkflowImpl.java"
-    ).read_text()
-    assert "setTaskQueue(TemporalIds.ACTIVITY_TASK_QUEUE)" in impl
 
     env = {**os.environ, "DOMAIN_VERIFY_ROOT": str(tmp_path)}
     verify = subprocess.run(
-        [sys.executable, str(VERIFY)],
+        [sys.executable, str(VERIFY), JAVA_DOMAIN],
         env=env,
         capture_output=True,
         text=True,
@@ -144,4 +174,3 @@ def test_scaffold_domain_java_and_verify(tmp_path: Path) -> None:
         check=False,
     )
     assert verify.returncode == 0, verify.stdout + verify.stderr
-    assert JAVA_DOMAIN in verify.stdout

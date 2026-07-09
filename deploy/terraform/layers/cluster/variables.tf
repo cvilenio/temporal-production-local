@@ -57,9 +57,9 @@ variable "temporal_k8s_namespace" {
 }
 
 variable "oss_namespace" {
-  description = "Temporal namespace on the OSS backend (matches the bootstrap Job; the bare domain name, no account suffix)."
+  description = "Temporal namespace on the OSS backend when not derived from config/domains/orders.yaml (namespace override or domain). Empty derives from the orders descriptor."
   type        = string
-  default     = "ziggymart"
+  default     = ""
 }
 
 variable "oss_temporal_address" {
@@ -155,7 +155,7 @@ variable "registry_service" {
 variable "orders_workers_chart_version" {
   description = "Published version of the orders-workers OCI chart (matches Chart.yaml / just chart-publish)."
   type        = string
-  default     = "0.1.20"
+  default     = "0.1.21"
 }
 
 variable "autoscaler_chart_version" {
