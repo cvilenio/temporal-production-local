@@ -19,7 +19,7 @@ pinned release zip, verify its sha256, and extract it into the target dir.
 
 Idempotent + offline-friendly: a plugin already extracted at the pinned version
 (recorded in <plugin>/.grafana-plugin-version) is skipped with NO network call,
-so re-running — or `just legacy-up` / `just host-plane-up-cloud` on a machine that's already
+so re-running — or `just legacy-up` / `just host-up` on a machine that's already
 fetched — is free and works offline. Bump the version/sha256 in the manifest to
 force a re-fetch. Run via `just grafana-plugins`; stdlib + pyyaml only.
 """

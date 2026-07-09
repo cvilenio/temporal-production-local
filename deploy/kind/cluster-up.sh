@@ -5,7 +5,7 @@
 # This is the production-faithful local substrate: a real Kubernetes API (kind)
 # plus a real registry with push/pull semantics, so image refs and the
 # ArgoCD/Worker-Controller pull path behave exactly as they would on GKE +
-# Artifact Registry. Driven by `just cluster-up`. Implements the upstream
+# Artifact Registry. Driven by `just kind-up`. Implements the upstream
 # kind+registry recipe (https://kind.sigs.k8s.io/docs/user/local-registry/).
 #
 # Env (set by the justfile; defaults here keep the script standalone):

@@ -12,7 +12,7 @@ pinned release tarball, verify its sha256, and extract it into the target dir.
 
 Idempotent + offline-friendly: a plugin already extracted at the pinned version
 (recorded in <plugin>/.headlamp-plugin-version) is skipped with NO network call,
-so re-running — or `just host-plane-up-cloud` on a machine that's already fetched — is
+so re-running — or `just host-up` on a machine that's already fetched — is
 free and works offline. Bump the version/sha256 in the manifest to force a
 re-fetch. Run via `just headlamp-plugins`; stdlib + pyyaml only.
 """

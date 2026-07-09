@@ -11,7 +11,7 @@ Owns the local **control plane on the cluster side**:
   orders-workers chart consumes (`apiKeySecretRef`).
 
 The kind cluster itself is **CLI-owned** (`deploy/kind/cluster-up.sh`, run via
-`just cluster-up`), not the Terraform kind provider — so the kubernetes/helm
+`just kind-up`), not the Terraform kind provider — so the kubernetes/helm
 providers read a real kubeconfig instead of depending on a not-yet-created
 resource. See the cluster-seam ADR.
 
@@ -34,7 +34,8 @@ cloud layer).
 ## Usage
 
 ```sh
-just platform-up   # full local bring-up (recommended): cluster + registry, mirror deps,
+just platform-up   # full cold start (host + cluster): recommended
+just cluster-up    # kind side only (host must already be up via host-up): mirror deps,
                    # CI (build/push), publish chart, pin digests, terraform apply.
 
 # Reach the ArgoCD UI (plain HTTP, local only):

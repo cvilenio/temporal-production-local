@@ -12,13 +12,41 @@ Two axes. **Where the apps run** (local laptop) × **where Temporal lives** (the
 
 | Apps/workers run on | Backend          | How                                              | Status |
 |---------------------|------------------|--------------------------------------------------|--------|
-| **kind**            | **Temporal Cloud** | `just host-plane-up-cloud` + `just platform-up` (ArgoCD + Cloud API-key Secrets; kind runs workers + app tier) | ✅ **the supported path (default)** |
-| **kind**            | **Local OSS server** | `just host-plane-up-oss` + `just platform-up oss` (ArgoCD + `charts/temporal-server`: official Temporal chart + CNPG Postgres + cert-manager frontend mTLS + bootstrap Job) | ✅ **supported** (ADR-0003) |
+| **kind**            | **Temporal Cloud** | `just host-up` + `just cluster-up` (or `just platform-up`) | ✅ **the supported path (default)** |
+| **kind**            | **Local OSS server** | `just host-up oss` + `just cluster-up oss` (or `just platform-up oss`) | ✅ **supported** (ADR-0003) |
 | Compose             | Local OSS server | `just legacy-up` (server + app tier, **no workers**)     | ⚠️ legacy fallback — see below |
+
+(`just platform-up` is the one-shot cold start: host + cluster in one recipe.)
+
+## Scopes and `just` commands
+
+Lifecycle recipes follow `<scope>-<verb>`. Five scopes; Temporal backend is always
+a `[cloud|oss]` flag where the recipe takes one:
+
+| Scope | What it is | up | down | stop / start | refresh |
+|-------|------------|-----|------|--------------|---------|
+| **host** | Compose: console, Grafana/ClickHouse, mock-api, Headlamp | `host-up` [cloud\|oss] | `host-down` | `host-stop` / `host-start` | `host-refresh` [cloud\|oss] |
+| **kind** | kind nodes + local OCI registry (empty substrate) | `kind-up` | `kind-down` | — | — |
+| **workloads** | ArgoCD apps, workers, orders-api, TF cluster layer | `workloads-up` [cloud\|oss] | `workloads-down` | — | — |
+| **cluster** | kind + workloads (whole kind side) | `cluster-up` [cloud\|oss] | `cluster-down` | `cluster-stop` / `cluster-start` | `cluster-refresh` [cloud\|oss] |
+| **platform** | host + cluster (everything) | `platform-up` [cloud\|oss] | `platform-down` | `platform-stop` / `platform-start` | `platform-refresh` [cloud\|oss] |
+
+Host bring-up is **detached** (`docker compose up -d`); tail logs with `just host-logs`.
+
+**Common paths:**
+
+| Goal | Command |
+|------|---------|
+| Cold start (all scopes) | `platform-up` [oss] |
+| Cluster only (host already up) | `cluster-up` [oss] |
+| Workloads only (kind substrate already up) | `workloads-up` [oss] |
+| Empty substrate only | `kind-up` |
+| Full local wipe | `platform-down` |
+| Full wipe + drop OCI registry cache | `platform-down --no-keep-registry` |
 
 **The pivot (this is the important part).** Temporal **workers run on kind** (Worker
 Deployment), not in Compose. Compose's role is now narrowed to two things: (1) the host
-visibility/console plane for the kind paths (`host-plane-up-cloud`), and (2) a **legacy local
+visibility/console plane for the kind paths (`host-up`), and (2) a **legacy local
 self-hosted OSS server + app tier** fallback (`legacy-up`). Running workers, or the full app
 tier against Cloud, on Compose is **no longer a goal** — those modes (`up-cloud`,
 `up-cloud-prod`, `compose/workers.yml`) have been removed.
@@ -40,15 +68,16 @@ backend deterministic regardless of the host shell:
 
 | Task              | Sources                          | Compose files                              |
 |-------------------|----------------------------------|--------------------------------------------|
-| `host-plane-up-cloud`   | `.secrets/keys/cloud.env`        | base only (kind runs the workers AND the app tier) |
+| `host-up` (cloud) | `.secrets/keys/cloud.env`        | base only (kind runs the workers AND the app tier) |
+| `host-up oss`     | `config/local-oss-kind.env`      | base only                                  |
 | `legacy-up` / `legacy-fresh` | `config/local-oss.env`      | base + `host-apptier.yml` + `oss-server.yml` (no workers) |
-| `legacy-down` / `host-plane-down` | —                      | (matching set; `-v` drops volumes)         |
+| `host-down` / `legacy-down` | —                      | (matching set; `-v` drops volumes)         |
 
 `legacy-down` must use the same `-f` set as its `legacy-up`. **Bring the stack down before switching
 modes** (they share host ports and one Compose project).
 
 On the **kind path, the cluster runs both the workers AND the app tier** (orders-db via
-CloudNativePG + orders-service), so `host-plane-up-cloud` is base-only: no `host-apptier.yml`.
+CloudNativePG + orders-service), so `host-up` is base-only: no `host-apptier.yml`.
 The still-on-host console + pgweb reach the in-cluster app tier through the host ports kind
 maps — `host.docker.internal:8002` (orders-service) and `:5433` (orders-db). The sourced
 Cloud profile also gives the console its read-only Temporal Cloud liveness credentials.
@@ -126,26 +155,22 @@ split, one level up. Once OSS-on-kind lands, the kind cluster will run the worke
 ### kind + Cloud — how to run it
 
 **Console first (required).** The `platform-console` (:8086) is the operator's live window;
-bring it up before any live kind testing so a human can follow along. `just host-plane-up-cloud`
-then `just headlamp-reload`. This is enforced — `just platform-up` and `just orders-db-reset`
-run `just preflight` (probes `:8086/healthz`) and abort if the console is down. See AGENTS.md
+bring it up before any live kind testing so a human can follow along. `just host-up`
+(detached; tail with `just host-logs`), then `just headlamp-reload`. This is enforced —
+`just cluster-up`, `just workloads-up`, and `just orders-db-reset` run `just preflight`
+(probes `:8086/healthz`) and abort if the console is down. See AGENTS.md
 ("Live kind testing — bring the platform-console up FIRST").
 
 ```sh
-just host-plane-up-cloud  # host visibility + console + mock-api (start this FIRST; console is the live window)
+just host-up              # host scope — start FIRST; console is the live window
 just headlamp-reload
 
-just platform-up    # cluster + local registry, mirror deps, CI (build/push), publish chart,
-                    # pin workers by digest, terraform apply. One command, each step idempotent.
-                    # Gated on `just preflight` — fails fast if the console isn't up.
+just cluster-up           # cluster scope — kind + workloads (preflight-gated via workloads-up)
+                    # One-shot cold start instead: just platform-up
 
-# or step by step:
-just cluster-up                                     # kind + local registry (kubeconfig -> .secrets/kube)
-just mirror-deps                                    # cert-manager + worker-controller charts+images -> local registry
-just ci                                             # lint + test + build/push worker images
-just chart-publish                                  # publish orders-workers + orders-app charts to the local OCI registry
-terraform -chdir=deploy/terraform/layers/cluster init && \
-terraform -chdir=deploy/terraform/layers/cluster apply   # pass TF_VAR_worker_image_digests to pin by digest
+# or step by step (finer control):
+just kind-up              # kind scope only — empty substrate
+just workloads-up         # workloads scope — mirror, ci, publish, terraform apply
 
 # ArgoCD UI: http://localhost:8090 (kind NodePort) — framed in the demo console at
 # http://localhost:8088 (via viz-proxy). Cluster explorer (Headlamp): console :8087. (ADR-0014)
@@ -153,7 +178,7 @@ terraform -chdir=deploy/terraform/layers/cluster apply   # pass TF_VAR_worker_im
 
 Things worth knowing:
 
-- **kind lifecycle is CLI-owned** (`deploy/kind/cluster-up.sh`, via `just`), not the Terraform
+- **kind lifecycle is CLI-owned** (`deploy/kind/cluster-up.sh`, via `just kind-up`), not the Terraform
   kind provider. Terraform's kubernetes/helm providers read the written kubeconfig, so they never
   depend on a not-yet-created resource. Mirrors pointing at a pre-existing GKE cluster (ADR-0009).
 - **Delivery is local-only** (ADR-0011): the local registry is **zot**, which hosts our pushes
@@ -204,8 +229,9 @@ standard) and is a tunable chart value — immutable in-place, so `just temporal
 re-pick escape hatch.
 
 ```sh
-just host-plane-up-oss                 # host visibility + console (CONSOLE_BACKEND=oss) — start FIRST
-just platform-up oss     # same bring-up as Cloud, but temporal_backend=oss + the OSS server
+just host-up oss                 # host visibility + console (CONSOLE_BACKEND=oss) — start FIRST
+just cluster-up oss              # kind + workloads with temporal_backend=oss + the OSS server
+# or one-shot: just platform-up oss
 ```
 
 The connection contract is unchanged — `tls` stays **on**; only the credential type differs (Cloud
@@ -302,4 +328,35 @@ just cluster-stop                     # docker stop nodes + registry; state pres
 just cluster-start                    # docker start; workers + apps resume, zero network
 ```
 
-`cluster-down` (delete) is for reclaiming resources, not for going offline — use `cluster-stop`.
+`cluster-down` (delete kind) is for reclaiming resources, not for going offline — use `cluster-stop`.
+(`cluster-down` delegates to `kind-down`, which removes the substrate and all workloads with it.)
+
+### Full reset from scratch
+
+When you want to tear down **everything local**, wipe in-cluster state, and bring the stack
+back up cleanly — not the same as "going offline" above.
+
+| What you want | Command |
+|---|---|
+| Pause cluster only (host + all state kept) | `just cluster-stop` → resume with `just cluster-start` |
+| Pause everything (host + cluster, all state kept) | `just platform-stop` |
+| Pause cluster + wipe host volumes | `just host-down` then `just cluster-stop` |
+| **Full local reset** (host + cluster gone; registry cache kept) | `just platform-down` |
+| Full reset **and** drop OCI registry cache | `just platform-down --no-keep-registry` |
+
+`platform-down` does **not** delete Temporal Cloud workflow history. For demo data only, use the
+console **Reset demo** button or `POST /admin/reset` on orders-api.
+
+**Bring everything back up** after `platform-down`:
+
+```sh
+just platform-up           # all scopes — host (detached) + cluster
+just platform-up oss       # OSS host profile + OSS workloads
+```
+
+Day-to-day (host already up):
+
+```sh
+just host-up               # detached; tail with just host-logs
+just cluster-up            # kind + workloads only
+```

@@ -50,7 +50,7 @@ terraform output -json api_key_tokens              # SENSITIVE: worker key per n
 `.secrets/keys/cloud.env`, with `TEMPORAL_ADDRESS=<endpoints[ziggymart]>`,
 `TEMPORAL_NAMESPACE=<namespace_handles[ziggymart]>`, `TEMPORAL_TLS=true`,
 `TEMPORAL_API_KEY=<api_key_tokens[ziggymart]>`, and (optional)
-`TEMPORAL_CLOUD_OPS_API_KEY=<observer_api_key_token>`. The `just host-plane-up-cloud` task sources
+`TEMPORAL_CLOUD_OPS_API_KEY=<observer_api_key_token>`. The `just host-up` task sources
 this file (the kind+Cloud host plane; it also gives the console its read-only Cloud liveness
 + inventory creds). App code already supports it
 (`libs/orders/python/orders/services/temporal.py`). Outputs are keyed by `<domain>` (no env

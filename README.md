@@ -89,8 +89,8 @@ vision above:
 
 | Apps/workers run on | Temporal backend | Command                              | Status |
 |---------------------|------------------|--------------------------------------|--------|
-| **kind**            | **Temporal Cloud** | `just host-plane-up-cloud` + `just platform-up` | ✅ **the supported path (default)** |
-| **kind**            | **Local OSS server** | `just host-plane-up-oss` + `just platform-up oss` | ✅ working — in-cluster `temporal-server` chart (ADR-0003) |
+| **kind**            | **Temporal Cloud** | `just host-up` + `just cluster-up` (or `just platform-up`) | ✅ **the supported path (default)** |
+| **kind**            | **Local OSS server** | `just host-up oss` + `just cluster-up oss` (or `just platform-up oss`) | ✅ working — in-cluster `temporal-server` chart (ADR-0003) |
 | Compose             | Local OSS server  | `just legacy-up` (server + app, **no workers**) | ⚠️ legacy fallback; see caveat |
 
 > **Compose caveat (important).** Compose is **no longer a workflow-execution runtime**.
@@ -174,17 +174,26 @@ read-only account-level **observer** key for the console, and the `OrderId` /
 and **contains the API keys in plaintext** — treat it as a credential. Full detail:
 [`deploy/terraform/layers/cloud/README.md`](deploy/terraform/layers/cloud/README.md).
 
-### 4. Bring up the kind cluster and deploy the workers
+### 4. Bring up the stack (host + kind cluster + workers)
 
-One command does the whole local lifecycle: create the kind cluster + local OCI registry,
-mirror third-party charts, run the CI gate (lint, typecheck, test, build + push worker
-images), publish the workers Helm chart, pin the workers by image digest, and apply the
-cluster Terraform layer (which reads the Cloud layer's state, writes the worker API key as
-a Kubernetes Secret, and seeds the ArgoCD Applications):
+**Recommended one-shot** — host (detached) + kind + workloads:
 
 ```bash
 just platform-up
 ```
+
+**Two-step path** (same result, finer control) — host first, then the kind side:
+
+```bash
+just host-up          # detached; tail logs with just host-logs
+just cluster-up       # kind + workloads (preflight-gated)
+```
+
+`cluster-up` (and the kind leg of `platform-up`) creates the kind cluster + local OCI registry,
+mirrors third-party charts, runs the CI gate (lint, typecheck, test, build + push worker
+images), publishes the workers Helm chart, pins the workers by image digest, and applies the
+cluster Terraform layer (which reads the Cloud layer's state, writes the worker API key as
+a Kubernetes Secret, and seeds the ArgoCD Applications).
 
 The cluster layer wires the workers to Cloud automatically — it reads the **regional**
 Cloud endpoint and the worker API key from the Cloud layer's outputs and injects them via
@@ -200,14 +209,14 @@ just k get applications -n argocd            # orders-workers should be Synced/H
 just k get pods -n orders                    # workflow + activity worker pods Running
 ```
 
-### 5. Bring up the host visibility plane (console, pgweb, observability)
+### 5. Host visibility plane and Cloud connection profile
 
 On the kind path the **app tier runs in-cluster** (orders-api + orders-db via CNPG, part
-of `just platform-up`). What runs on the host is the **visibility plane**: the demo
+of `just cluster-up`). What runs on the host is the **visibility plane**: the demo
 console, pgweb, the LGTM stack, mock-api, and the cluster observers (Headlamp, ArgoCD via
-viz-proxy). Bring it up with `just host-plane-up-cloud`, which sources the Cloud connection
-profile — the console uses it for a read-only Temporal Cloud liveness probe, and pgweb +
-the console reach the in-cluster app tier through the host ports kind maps.
+viz-proxy). `just host-up` sources the Cloud connection profile — the console uses it for
+a read-only Temporal Cloud liveness probe, and pgweb + the console reach the in-cluster
+app tier through the host ports kind maps.
 
 The profile also carries an optional **read-only observer key** (`TEMPORAL_CLOUD_OPS_API_KEY`,
 the cloud layer's `observer_api_key_token` output). When present, the console calls the
@@ -215,11 +224,11 @@ Temporal Cloud Ops API to render a **regions + namespaces** status block on the 
 page (account-scoped `read`, minted by the cloud layer's `observer.tf`). Omit it and the
 block is simply hidden — the single-namespace liveness probe still works.
 
-> **Do this *before* Step 4's `just platform-up`.** The console is the operator's live
-> window onto the bring-up, so it must be up first — `just platform-up` is gated on it
-> (`just preflight` probes `:8086/healthz` and aborts if the console is down). The console
-> is boot-resilient: it comes up Healthy with the whole kind side absent and self-heals as
-> the cluster appears (ADR-0015).
+> **Host before kind mutations.** The console is the operator's live window onto the
+> bring-up — start it with `just host-up` (or use `just platform-up`, which brings host up
+> first). `just cluster-up` / `just workloads-up` are gated on it via `just preflight`
+> (`:8086/healthz`). The console is boot-resilient: it comes up Healthy with the whole kind
+> side absent and self-heals as the cluster appears (ADR-0015).
 
 ```bash
 # Derive the ziggymart connection profile from the Cloud layer outputs (keyed by domain).
@@ -234,8 +243,8 @@ export TEMPORAL_CLOUD_OPS_API_KEY=$(terraform output -raw observer_api_key_token
 EOF
 cd -
 
-just host-plane-up-cloud     # host visibility plane + console + pgweb + mock-api (start FIRST)
-just headlamp-reload   # nudge the cluster explorer to pick up the kubeconfig (optional)
+just host-up          # host visibility plane + console + pgweb + mock-api (start FIRST)
+just headlamp-reload  # nudge the cluster explorer to pick up the kubeconfig (optional)
 ```
 
 ### 6. Open the consoles and run an order
