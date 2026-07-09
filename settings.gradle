@@ -7,4 +7,4 @@ include 'orders-lib-java'
 project(':orders-lib-java').projectDir = file('libs/orders/java')
 
 include 'orders-finalization-java-worker'
-project(':orders-finalization-java-worker').projectDir = file('apps/temporal/workers/java/orders/activity')
+project(':orders-finalization-java-worker').projectDir = file('apps/temporal/workers/java/orders/finalization-java')

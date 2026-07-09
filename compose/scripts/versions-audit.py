@@ -140,8 +140,18 @@ def build_rows(spec: dict) -> list[Row]:
 
     java_sdk = t.get("java_sdk")
     if java_sdk:
-        actual, loc = search1("gradle.properties", r"^temporalJavaSdkVersion=(\S+)", flags=re.MULTILINE)
-        rows.append(Row(1, "temporal Java SDK", java_sdk, actual, f"{loc} (temporalJavaSdkVersion)"))
+        actual, loc = search1(
+            "gradle.properties", r"^temporalJavaSdkVersion=(\S+)", flags=re.MULTILINE
+        )
+        rows.append(
+            Row(
+                1,
+                "temporal Java SDK",
+                java_sdk,
+                actual,
+                f"{loc} (temporalJavaSdkVersion)",
+            )
+        )
 
     # Server / admin-tools / UI tags live in .env.
     for comp, var in [

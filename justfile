@@ -75,9 +75,13 @@ proto-breaking:
 proto-check: proto-gen
     git diff --exit-code -- libs/orders/python/orders/_pb
 
-# Verify config/domains/*.yaml against namespaces.yaml and kernel task-queue constants.
+# Verify config/domains/*.yaml against namespaces.yaml, worker dirs, queues, and charts.
 verify-domains:
     uv run python compose/scripts/verify-domains.py
+
+# Domain doctor — single domain by filename stem or domain key.
+verify-domain NAME:
+    uv run python compose/scripts/verify-domains.py {{NAME}}
 
 # Scaffold a new domain from templates/domain/<lang>/ (Python today; Java in M6).
 scaffold-domain NAME LANG="python":
@@ -160,7 +164,7 @@ build-images:
     for profile in workflow activity; do
       docker build -f images/python.Dockerfile \
         --build-arg APP_GROUP=workers \
-        --build-arg APP_PATH=apps/temporal/workers/python/$profile \
+        --build-arg APP_PATH=apps/temporal/workers/python/orders/$profile \
         --build-arg APP_MODULE=main \
         --build-arg APP_CMD=python \
         -t "$REGISTRY/orders-worker-$profile:$TAG" .
@@ -177,7 +181,7 @@ build-images:
     docker build -f images/java.Dockerfile \
       --build-arg DOMAIN=orders \
       --build-arg APP_MODULE=:orders-finalization-java-worker \
-      --build-arg WORKER_REL_PATH=apps/temporal/workers/java/orders/activity \
+      --build-arg WORKER_REL_PATH=apps/temporal/workers/java/orders/finalization-java \
       --build-arg APP_JAR=orders-finalization-java-worker \
       -t "$REGISTRY/orders-worker-finalization-java:$TAG" .
     echo "Built $REGISTRY/orders-worker-{workflow,activity,finalization-java}:$TAG, orders-api:$TAG, temporal-worker-autoscaler:$TAG"
@@ -507,7 +511,7 @@ switch-backend target *FLAGS:
     # Recreate the host console with the target profile (flips CONSOLE_BACKEND etc).
     profile=".secrets/keys/cloud.env"; [ "{{target}}" = "oss" ] && profile="config/local-oss-kind.env"
     set -a; . "$profile"; set +a
-    docker compose -f docker-compose.yml up -d --no-deps --force-recreate console
+    docker compose -f docker-compose.yml up -d --no-deps --force-recreate platform-console
     just headlamp-reload 2>/dev/null || true
     echo "Switched to backend '{{target}}'. Console recreated with the {{target}} profile."
 

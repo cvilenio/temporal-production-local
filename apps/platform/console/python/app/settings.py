@@ -39,7 +39,9 @@ class Settings(BaseSettings):
 
     # Generic descriptor-driven workflow trigger (Phase B). Empty address disables
     # the feature gracefully — the console still boots (ADR-0015).
-    domain_descriptors_dir: str = ""  # set DOMAIN_DESCRIPTORS_DIR env; empty = appkit default
+    domain_descriptors_dir: str = (
+        ""  # set DOMAIN_DESCRIPTORS_DIR env; empty = appkit default
+    )
     temporal_trigger_address: str = ""
     temporal_trigger_tls: bool = False
     temporal_trigger_api_key: str = ""
@@ -49,7 +51,7 @@ class Settings(BaseSettings):
     # TLS SNI / cert CN when the connect address differs (kind host gateway → frontend).
     temporal_trigger_tls_domain: str = ""
     # Comma-separated domain keys omitted from the generic catalog (orders stays on scenarios.py).
-    generic_trigger_exclude_domains: str = "ziggymart"
+    generic_trigger_exclude_domains: str = "orders"
 
     @property
     def temporal_cloud_url(self) -> str:

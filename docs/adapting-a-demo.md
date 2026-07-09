@@ -7,7 +7,7 @@ and `verify-domains` contract (ADR-0026).
 ## Before you start
 
 Pick a short domain key (lowercase, hyphens OK) that matches the demo's Temporal namespace intent.
-Read `config/domains/ziggymart.yaml` for the descriptor shape on an existing production domain.
+Read `config/domains/orders.yaml` for the descriptor shape on an existing production domain.
 Confirm the demo's task queues and workflow types — the verifier will fail if they drift from the kernel.
 
 ## Scaffold
@@ -50,7 +50,8 @@ console will encode inputs from `sample_inputs` in the domain descriptor.
 ## Align the domain descriptor
 
 Update `config/domains/<domain>.yaml` so `workers`, `workflows`, and `task_queue` fields mirror the kernel.
-Use `kernel: <other-lib>` when the domain key differs from the library package name (see `ziggymart` → `orders`).
+The `domain` field is the single identity key for the descriptor filename, code package, and worker images.
+Use optional `namespace:` only when the Temporal namespace differs (see `orders` with `namespace: ziggymart`).
 Set `data_converter: default` unless you add a custom resolver (Python: `appkit.domains.resolve_data_converter`;
 Java: `@Primary @Bean(name = "mainDataConverter")` per samples-java `payloadconverter/*`).
 The cluster layer reads `data_converter` at deploy time and injects `TEMPORAL_DATA_CONVERTER` on worker pods.

@@ -17,31 +17,23 @@ connection:
   # apiKeySecret is the k8s Secret created by the cluster layer; key holds the token.
   apiKeySecret: {{DOMAIN}}-cloud-apikey
   apiKeySecretKey: api-key
-  # mtlsSecret: orders-temporal-tls   # (alternative) mTLS Connection instead of API key
+  # mtlsSecret: {{DOMAIN}}-temporal-tls   # (alternative) mTLS Connection instead of API key
 
-# orders-api is co-located in the orders namespace (orders-app chart, Service
-# `orders-service`). The kernel's default is the host-dev localhost:8002, so the
-# in-cluster URL MUST be set explicitly or activities dial localhost in-pod and
-# fail "All connection attempts failed".
-ordersServiceUrl: "http://orders-service:8000"
+# Downstream HTTP services the worker must reach (business API, external simulators).
+# Each entry becomes an env var (name → url) and, when startupProbe is enabled, a
+# TCP reachability check in the exec probe. Empty for plain Hello demos with no deps.
+downstreamServices: []
 
 # Data-converter ref from config/domains/*.yaml — injected at deploy time as
 # TEMPORAL_DATA_CONVERTER on worker pods (ADR-0026).
 dataConverter: "default"
 
-# Demo domains (HelloWorkflow) have no orders-api dependency — disable the
-# downstream-reachability startup gate so Worker-Controller promotion is not blocked.
+# Downstream-reachability startup gate (see workerdeployment.yaml). Disable for plain
+# demos with no downstreamServices so Worker-Controller promotion is not blocked.
 startupProbe:
   enabled: false
   periodSeconds: 5
   failureThreshold: 60
-
-# mock-api (the simulated external dependency / "the internet") stays on the host
-# while the workers run on kind. Workers reach it via the cluster's host gateway —
-# host.docker.internal — which correctly models cluster egress to an outside
-# service rather than an in-cluster hop. Validate kind pods can resolve this name
-# (deploy/terraform/kind-config.yaml notes the CoreDNS/host-gateway fallback).
-mockApiUrl: "http://host.docker.internal:8001"
 
 # OTLP push endpoint for TRACES → lgtm/Tempo. gRPC, so it MUST be the 4317 port
 # (4318 is OTLP/HTTP). lgtm publishes 4317 on the host (docker-compose.yml); workers
@@ -87,12 +79,11 @@ logging:
 rollout:
   strategy: AllAtOnce
 
-# Keep drained versions alive long enough that PINNED in-flight orders finish on
-# the version they started on, then scale the old version down. Right-sized to
-# THIS app's actual workflow length (orders complete in minutes; even the
-# deliberately-hanging ghost/lost scenarios are a few minutes worst case), with
-# headroom. HARD FLOOR: scaledownDelay must exceed the max workflow execution
-# time — below it, a pinned in-flight order loses its only poller and stalls.
+# Keep drained versions alive long enough that PINNED in-flight workflows finish on
+# the version they started on, then scale the old version down. Right-sized to the
+# domain's typical workflow length, with headroom. HARD FLOOR: scaledownDelay must
+# exceed the max workflow execution time — below it, a pinned in-flight execution
+# loses its only poller and stalls.
 sunset:
   scaledownDelay: 10m
   deleteDelay: 30m
@@ -117,8 +108,8 @@ autoscaling:
   # nothing; the kind+Cloud deploy path turns it on (see applications.tf injection).
   enabled: false
   # Per-profile bounds + queue scoping, keyed by worker `name` (matches workers[].name).
-  # queueType selects which backlog the controller reads. taskQueue must match
-  # orders.shared.temporal_ids.TaskQueue. targetBacklogPerReplica = backlog tasks/replica.
+  # queueType selects which backlog the controller reads. taskQueue must match the
+  # domain's TaskQueue constants in code. targetBacklogPerReplica = backlog tasks/replica.
   # Optional per-worker `behavior:` overrides the controller's defaults (fast up, damped
   # down): scaleUpStabilizationSeconds, scaleDownStabilizationSeconds, tolerancePercent,
   # maxScaleUpStep, maxScaleDownStep, panicThresholdPercent.
@@ -129,6 +120,8 @@ autoscaling:
       minReplicas: 1
       maxReplicas: 6
       targetBacklogPerReplica: 5
+      slotScaleUpEnabled: true
+      slotScaleDownGateEnabled: true
     activity:
       taskQueue: {{DOMAIN}}-activity-task-queue
       queueType: activity
@@ -136,9 +129,8 @@ autoscaling:
       maxReplicas: 10
       targetBacklogPerReplica: 5
 
-# One entry per worker profile (mirrors orders.worker.WORKER_PROFILES and
-# apps/temporal/workers/python/<name>/). Each profile is its own image (the entrypoint is
-# baked at build time via APP_PATH), so each gets its own image tag = version.
+# One entry per worker profile. Each profile is its own image (entrypoint baked at
+# build time via APP_PATH), so each gets its own image tag = version.
 # Images live in the local kind registry (localhost:5001), pushed by `just ci`;
 # the cluster layer pins the tag to the freshly-built git SHA at apply time.
 #
@@ -162,3 +154,17 @@ workers:
       repository: localhost:5001/{{DOMAIN}}-worker-activity
       tag: "latest"
     command: ["python", "main.py"]
+  # Optional polyglot worker (Java httpGet startup probe + extraEnv). Omit when not needed.
+  # - name: finalize-java
+  #   deploymentName: {{DOMAIN}}-finalize-java
+  #   replicas: 1
+  #   image:
+  #     repository: localhost:5001/{{DOMAIN}}-worker-finalize-java
+  #     tag: "latest"
+  #   startupProbe:
+  #     type: httpGet
+  #     path: /health/readiness
+  #     port: 9000
+  #   extraEnv:
+  #     OTEL_SERVICE_NAME: {{DOMAIN}}-worker-finalize-java
+  #     SDK_METRICS_PORT: "9000"

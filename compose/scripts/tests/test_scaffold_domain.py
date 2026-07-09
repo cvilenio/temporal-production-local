@@ -30,9 +30,7 @@ def _seed_minimal_repo(root: Path) -> None:
 
 def _seed_minimal_java_repo(root: Path) -> None:
     _seed_minimal_repo(root)
-    (root / "settings.gradle").write_text(
-        (REPO_ROOT / "settings.gradle").read_text()
-    )
+    (root / "settings.gradle").write_text((REPO_ROOT / "settings.gradle").read_text())
 
 
 def test_scaffold_domain_python_and_verify(tmp_path: Path) -> None:
@@ -70,7 +68,9 @@ def test_scaffold_domain_python_and_verify(tmp_path: Path) -> None:
         path = tmp_path / rel
         assert path.is_file(), f"missing scaffolded file: {rel}"
 
-    dash = (tmp_path / f"compose/observability/grafana/dashboards/{DOMAIN}/{DOMAIN}.json").read_text()
+    dash = (
+        tmp_path / f"compose/observability/grafana/dashboards/{DOMAIN}/{DOMAIN}.json"
+    ).read_text()
     assert "prometheus-kind" in dash
     assert f'namespace=\\"{DOMAIN}\\"' in dash
 

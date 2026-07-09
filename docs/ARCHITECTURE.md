@@ -47,9 +47,10 @@ entirely by the connection profile (env), see [Connection profiles](#connection-
 apps/                         DEPLOYABLE assembly — what you DEPLOY. Grouped by class.
   temporal/                     Orchestration substrate — required for workflows to run.
     workers/python/               each worker app = settings.py + dependencies.py + main.py
-      workflow/                     hosts OrderWorkflow (wires no activity ports)
-      activity/                     hosts the activities (wires mock-api/orders-service ports)
-      (activity-cpu/, activity-io/ … add a sibling dir — see Worker fleet)
+      <domain>/                   one dir per domain (e.g. orders/)
+        workflow/                   hosts OrderWorkflow (wires no activity ports)
+        activity/                   hosts the activities (wires mock-api/orders-service ports)
+        (activity-cpu/, activity-io/ … add a sibling profile dir — see Worker fleet)
     codec-server/python/        Temporal-adjacent: remote codec proxy (scaffold).
   platform/                     Platform/operability tooling (not required by business logic).
     console/python/               Host-plane operator UI (HTMX + SSE); aggregates infra UIs.

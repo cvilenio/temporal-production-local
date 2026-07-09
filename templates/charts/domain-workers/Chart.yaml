@@ -1,11 +1,14 @@
 apiVersion: v2
 name: {{DOMAIN}}-workers
 description: >-
-  Versioned Orders worker fleet, delivered as Temporal Worker Controller CRDs
+  Versioned domain worker fleet, delivered as Temporal Worker Controller CRDs
   (WorkerDeployment + Connection). One WorkerDeployment per worker profile
   (workflow, activity, …). Build ID is derived from the pod-template hash, so
   shipping a new version is just a new image tag. See ADR-0004.
 type: application
+# 0.1.20: generic downstreamServices env + exec-probe wiring; extraEnv; httpGet
+# startupProbe; slot scale-up/down gate wiring on WorkerAutoscaler.
+# 0.1.16: (prior) WorkerAutoscaler / autoscaling seam.
 # 0.1.12: replace the KEDA Temporal-scaler seam (WorkerResourceTemplate → ScaledObject)
 # with WorkerAutoscaler CRs consumed by the custom temporal-worker-autoscaler controller
 # (seconds-level direct-patch scaling; ADR-0023). WorkerDeployment still omits
@@ -14,8 +17,8 @@ type: application
 # is the sole owner of the per-version Deployment's replica count (ADR-0023 §2). 0.1.10
 # always set replicas, which fought the HPA and cycled pods. 0.1.10: per-version KEDA
 # autoscaling via the Temporal scaler; 0.1.9 used the version-blind Prometheus scaler.
-# Keep in lockstep with cluster TF orders_workers_chart_version.
-version: 0.1.16
+# Keep in lockstep with cluster TF <domain>_workers_chart_version.
+version: 0.1.20
 appVersion: "1.0"
 # Requires the Temporal Worker Controller installed in-cluster (CRDs:
 # temporal.io/v1alpha1). Installed via Terraform/ArgoCD; depends on cert-manager.

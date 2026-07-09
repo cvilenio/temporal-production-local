@@ -14,6 +14,7 @@ from appkit.domains import (
     list_domain_descriptors,
     load_domain_descriptor,
     resolve_data_converter,
+    temporal_namespace_for_domain,
 )
 from appkit.settings import (
     TelemetrySettings,
@@ -44,6 +45,7 @@ __all__ = [
     "list_domain_descriptors",
     "load_domain_descriptor",
     "resolve_data_converter",
+    "temporal_namespace_for_domain",
     "init_observability",
     "run_worker",
     "telemetry_resource",
