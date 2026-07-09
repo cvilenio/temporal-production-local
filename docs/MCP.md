@@ -27,8 +27,9 @@ These are **live-connection** servers. They connect to the local observability +
 bring it up first (console-first, per the repo rule):
 
 ```
-just host-plane-up-cloud   # host visibility + console + mock-api
-just platform-up     # kind workloads
+just host-up           # host visibility + console + mock-api (detached)
+just cluster-up        # kind + workloads
+# or one-shot: just platform-up
 ```
 
 When the stack is down, the servers still load but their tool calls return

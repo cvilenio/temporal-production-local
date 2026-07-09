@@ -11,7 +11,7 @@
 #   just            list all recipes
 #   just legacy-up  local OSS app stack (all-on-host fallback)
 #   just ci         python gate + image build/push
-#   just cluster-up kind + local registry          (see deploy/terraform/kind-config.yaml)
+#   just kind-up kind + local registry             (see deploy/terraform/kind-config.yaml)
 # =============================================================================
 
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
@@ -170,7 +170,7 @@ ci: check build-images push-images
 
 # Legacy Compose-only OSS fallback: server + app tier on the host (no workers).
 # NEITHER plane in the ADR-0014 sense — it folds app-tier/OSS-server duties that
-# normally live on kind onto the host instead. Prefer host-plane-up-* + kind.
+# normally live on kind onto the host instead. Prefer host-up + kind.
 legacy-up: render-oss-bootstrap grafana-plugins
     set -a; . config/local-oss.env; set +a; docker compose -f docker-compose.yml -f compose/host-apptier.yml -f compose/oss-server.yml up --build
 
@@ -182,29 +182,43 @@ legacy-down:
 # Recreate the legacy Compose-only OSS stack.
 legacy-fresh: legacy-down legacy-up
 
-# Host plane (ADR-0014): visibility + console + mock-api for the kind+Cloud path
-# (kind owns the workers AND the app tier). Bring this up FIRST before any live
-# kind testing. Runs in the foreground (streams compose logs) — keep it in a
-# dedicated terminal; `just platform-up` only gates on it via `just preflight`,
-# it does not start it.
-host-plane-up-cloud: headlamp-plugins grafana-plugins
-    set -a; . .secrets/keys/cloud.env; set +a; docker compose -f docker-compose.yml up --build
+# Host plane (ADR-0014): visibility + console + mock-api for the kind path.
+# Bring up FIRST before live kind testing. Detached — tail logs with `just host-logs`.
+# backend selects Cloud vs OSS connection profile for the console.
+host-up backend="cloud": headlamp-plugins grafana-plugins
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{backend}}" in cloud|oss) ;; *) echo "backend must be 'cloud' or 'oss'"; exit 1;; esac
+    profile=".secrets/keys/cloud.env"
+    [ "{{backend}}" = "oss" ] && profile="config/local-oss-kind.env"
+    set -a; . "$profile"; set +a
+    docker compose -f docker-compose.yml up -d --build
 
-# Host plane (ADR-0014) for the kind + self-hosted OSS path (ADR-0003). Same
-# host stack as host-plane-up-cloud, but sourcing the OSS connection profile
-# (CONSOLE_BACKEND=oss, empty Cloud vars). Bring this up FIRST before any live
-# kind testing, then `just platform-up oss`. Foreground, like host-plane-up-cloud.
-host-plane-up-oss: headlamp-plugins grafana-plugins
-    set -a; . config/local-oss-kind.env; set +a; docker compose -f docker-compose.yml up --build
-
-# Stop the host plane (Cloud- or OSS-profile) and drop volumes.
-host-plane-down:
+# Stop the host plane and drop volumes.
+host-down:
     docker compose -f docker-compose.yml -f compose/host-apptier.yml down -v --remove-orphans; docker compose -p "${PWD##*/}" -f docker-compose.yml -f compose/host-apptier.yml down -v --remove-orphans || true; docker network rm temporal-network 2>/dev/null || true
+
+# Pause the host plane, keep volumes.
+host-stop:
+    docker compose -f docker-compose.yml -f compose/host-apptier.yml stop
+
+# Resume a previously-stopped host plane.
+host-start:
+    docker compose -f docker-compose.yml -f compose/host-apptier.yml start
+
+# Tear down and recreate the host plane.
+host-refresh backend="cloud":
+    just host-down
+    just host-up {{backend}}
+
+# Follow host-plane compose logs.
+host-logs:
+    docker compose -f docker-compose.yml -f compose/host-apptier.yml logs -f
 
 # --- Worker/API images (docker — cross-language artifact build) ---------------
 # Tagged with git-describe so a build is immutable + uniquely addressable; a
 # dirty tree carries a `-dirty` suffix. Deploys pin by DIGEST (image-digests);
-# the tag is for humans. REGISTRY defaults to the local registry from cluster-up.
+# the tag is for humans. REGISTRY defaults to the local registry from kind-up.
 
 # Build/push worker images for one domain only (adopt-domain uses this to avoid churn).
 build-domain-images NAME:
@@ -282,10 +296,28 @@ worker-digests-json ADOPT="":
         --registry "$REGISTRY" --tag "$TAG"
     fi
 
-# --- Local cluster (kind + local registry) -----------------------------------
+# --- Lifecycle grammar (<scope>-<verb>) ---------------------------------------
+#
+# Five scopes (ADR-0014, workloads split from substrate):
+#
+#   host       — Compose visibility/console plane (detached; `just host-logs` to tail)
+#   kind       — kind nodes + local OCI registry (empty substrate)
+#   workloads  — ArgoCD apps / TF cluster layer on kind
+#   cluster    — kind + workloads (whole kind side)
+#   platform   — host + cluster (everything)
+#
+# Verbs: host/cluster/platform get up/down/stop/start/refresh; kind/workloads are
+# up/down only (kind pause IS cluster-stop; workloads pause/refresh collapse to
+# cluster-stop / workloads-up).
+#
+# Temporal backend is always `[cloud|oss]` on recipes that take it (never a
+# separate command tree).
+#
+# --- kind (substrate) --------------------------------------------------------
 
-# Bring up the kind cluster + local registry (kubeconfig under .secrets/).
-cluster-up: render-deps
+# Bring up kind + local registry only (empty cluster — no ArgoCD apps yet).
+# kubeconfig → .secrets/kube/. For apps use `just cluster-up`.
+kind-up: render-deps
     CLUSTER_NAME={{cluster_name}} REGISTRY_NAME={{registry_name}} REGISTRY_PORT={{registry_port}} \
     KUBECONFIG_PATH={{kubeconfig}} KIND_CONFIG=deploy/terraform/kind-config.yaml \
     bash deploy/kind/cluster-up.sh
@@ -313,10 +345,10 @@ release-worker-deployments:
         || echo "  (skip: $wd not found or already released)"
     done
 
-# Tear down the kind cluster (keeps the registry; KEEP_REGISTRY=false to remove).
 # Releases Cloud Worker Deployment ownership first (graceful decommission) so the
 # next cluster's controller can reclaim routing — see release-worker-deployments.
-cluster-down: release-worker-deployments
+# Tear down kind + registry (KEEP_REGISTRY=false removes the registry).
+kind-down: release-worker-deployments
     CLUSTER_NAME={{cluster_name}} REGISTRY_NAME={{registry_name}} \
     KUBECONFIG_PATH={{kubeconfig}} bash deploy/kind/cluster-down.sh
 
@@ -342,7 +374,7 @@ _registry-endpoint-heal:
       sleep 1
     done
     if [ -z "$ip" ]; then
-      echo "ERROR: could not derive '{{registry_name}}' IP on the kind network (does the container exist? run 'just cluster-up')"
+      echo "ERROR: could not derive '{{registry_name}}' IP on the kind network (does the container exist? run 'just kind-up')"
       exit 1
     fi
     current="$(KUBECONFIG={{kubeconfig}} kubectl get endpointslice artifact-registry -n kube-public \
@@ -398,7 +430,7 @@ kind-ready:
     set -euo pipefail
     nodes="$(kind get nodes --name {{cluster_name}} 2>/dev/null || true)"
     if [ -z "$nodes" ]; then
-      echo "cluster '{{cluster_name}}' not found — run 'just cluster-up' (needs internet)"
+      echo "cluster '{{cluster_name}}' not found — run 'just kind-up' (needs internet)"
       exit 1
     fi
     stopped=false
@@ -431,7 +463,7 @@ cluster-start:
     #!/usr/bin/env bash
     set -euo pipefail
     nodes="$(kind get nodes --name {{cluster_name}} 2>/dev/null || true)"
-    if [ -z "$nodes" ]; then echo "cluster '{{cluster_name}}' not found — run 'just cluster-up' (needs internet)"; exit 1; fi
+    if [ -z "$nodes" ]; then echo "cluster '{{cluster_name}}' not found — run 'just kind-up' (needs internet)"; exit 1; fi
     echo "Starting registry + cluster '{{cluster_name}}' (offline-safe)..."
     docker start {{registry_name}} $nodes >/dev/null
     echo "Waiting for the API to serve (past the startup RBAC race)..."
@@ -638,7 +670,7 @@ headlamp-reload:
 # `grafana.plugins`) into the bind-mounted compose/deployment/grafana/plugins/.
 # GF_INSTALL_PLUGINS is a no-op on the otel-lgtm image and GF_PLUGINS_PREINSTALL
 # hangs on boot (air-gap, ADR-0013) — this is the offline substitute. Idempotent
-# once fetched — `legacy-up` and `host-plane-up-cloud` run it first so the ClickHouse
+# once fetched — `legacy-up` and `host-up` run it first so the ClickHouse
 # datasource plugin is present on boot. Bump a version/sha in the manifest to
 # re-fetch, then `docker restart lgtm` to load it.
 grafana-plugins:
@@ -650,21 +682,19 @@ grafana-plugins:
 preflight:
     uv run poe preflight-console
 
-# Full local bring-up: cluster + registry, mirror deps, CI (build/push), publish chart,
-# pin workers by digest, apply the cluster layer. One command, each step idempotent.
-# Gated on the console being up first (preflight) so the bring-up is never blind.
-#
-# The positional `backend` selects the Temporal backend for this FRESH bring-up:
-# `cloud` (default, the supported path) or `oss` (the in-cluster self-hosted server) —
-# `just platform-up` vs `just platform-up oss`. On oss it also creates the
-# temporal-server Application. To SWITCH an already-running stack use the guarded
-# `just switch-backend` — do NOT re-run platform-up to flip a live backend.
-platform-up backend="cloud":
+# --- workloads ---------------------------------------------------------------
+
+# Build, publish, and apply the GitOps stack onto an existing kind substrate.
+# Steps: mirror-deps → ci (build/push) → chart-publish → terraform apply (ArgoCD apps).
+# Gated on host plane (preflight). Does NOT run kind-up — substrate must exist.
+# backend: `cloud` (default) or `oss` (also enables the in-cluster temporal-server).
+# To switch a live backend use `just switch-backend`, not a re-run of this recipe.
+# Deploy GitOps workloads onto an existing kind substrate (preflight-gated).
+workloads-up backend="cloud":
     #!/usr/bin/env bash
     set -euo pipefail
     case "{{backend}}" in cloud|oss) ;; *) echo "backend must be 'cloud' or 'oss'"; exit 1;; esac
     just preflight
-    just cluster-up
     just mirror-deps
     just ci
     just chart-publish
@@ -675,13 +705,115 @@ platform-up backend="cloud":
     export TF_VAR_orders_api_image_digest="$api"
     export TF_VAR_autoscaler_image_digest="$aut"
     export TF_VAR_temporal_backend="{{backend}}"
-    # Fresh bring-up: the OSS server exists iff this is an OSS bring-up. (Switching a
-    # live stack is switch-backend's job, which preserves the server independently.)
     [ "{{backend}}" = "oss" ] && export TF_VAR_oss_server_enabled=true || export TF_VAR_oss_server_enabled=false
     terraform -chdir=deploy/terraform/layers/cluster init -input=false
     terraform -chdir=deploy/terraform/layers/cluster apply -auto-approve
     just headlamp-reload 2>/dev/null || true
-    echo "platform up (backend={{backend}})."
+    echo "workloads up (backend={{backend}})."
     echo "  Console (all UIs): http://localhost:8086   ArgoCD: http://localhost:8088   Headlamp: http://localhost:8087"
-    echo "  (If the host plane wasn't running, start it with 'just host-plane-up-cloud' then 'just headlamp-reload'."
-    echo "   host-plane-up-cloud runs the app tier + visibility WITHOUT workers — the cluster runs those.)"
+
+# Tear down ArgoCD apps / TF cluster layer; leaves kind + registry + ArgoCD running.
+workloads-down:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    L="deploy/terraform/layers/cluster"
+    backend="$(terraform -chdir=$L output -raw temporal_backend 2>/dev/null || echo cloud)"
+    oss_enabled="$(terraform -chdir=$L output -raw oss_server_enabled 2>/dev/null || echo false)"
+    export TF_VAR_temporal_backend="$backend"
+    export TF_VAR_oss_server_enabled="$oss_enabled"
+    terraform -chdir=$L init -input=false
+    terraform -chdir=$L destroy -auto-approve
+
+# --- cluster (kind + workloads) ----------------------------------------------
+
+# Bring up kind substrate then deploy workloads. Preflight-gated (console must be up).
+cluster-up backend="cloud":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{backend}}" in cloud|oss) ;; *) echo "backend must be 'cloud' or 'oss'"; exit 1;; esac
+    just preflight
+    just kind-up
+    just workloads-up {{backend}}
+
+# Teardown matches kind-down: deleting kind removes all workloads with it.
+cluster-down:
+    just kind-down
+
+# Tear down and recreate the cluster (kind + workloads).
+cluster-refresh backend="cloud":
+    just cluster-down
+    just cluster-up {{backend}}
+
+# --- platform (host + cluster) -----------------------------------------------
+
+# Cold-start one-shot: host (detached) + cluster. Polls console health before kind side.
+platform-up backend="cloud":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{backend}}" in cloud|oss) ;; *) echo "backend must be 'cloud' or 'oss'"; exit 1;; esac
+    just host-up {{backend}}
+    echo "==> Waiting for platform-console (:8086/healthz)..."
+    for i in $(seq 1 45); do
+      if curl -sf -o /dev/null --max-time 2 http://localhost:8086/healthz; then
+        echo "platform-console is up."
+        break
+      fi
+      if [ "$i" -eq 45 ]; then
+        echo "platform-console did not become healthy — check: docker ps && docker logs platform-console --tail 50"
+        exit 1
+      fi
+      sleep 2
+    done
+    just cluster-up {{backend}}
+
+# DESTRUCTIVE: host-down + cluster-down. Drops compose volumes and ALL in-cluster state.
+# See RUNMODES.md "Full reset from scratch".
+platform-down *FLAGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    KEEP=true
+    case "{{FLAGS}}" in *--no-keep-registry*) KEEP=false;; esac
+    read -r -p "Reset host plane + cluster? Drops compose volumes and ALL in-cluster state. Type 'yes': " ans
+    [ "$ans" = "yes" ] || { echo "aborted."; exit 1; }
+    echo "==> Host plane down (compose down -v)..."
+    just host-down
+    echo "==> Cluster down (releases Cloud Worker Deployments first)..."
+    if [ "$KEEP" = true ]; then
+      just cluster-down
+    else
+      KEEP_REGISTRY=false just cluster-down
+    fi
+    echo ""
+    echo "Reset complete. Bring everything back up:"
+    echo "  just platform-up              # Cloud (host + cluster)"
+    echo "  just platform-up oss          # OSS backend variant"
+    echo ""
+    echo "Or host then cluster separately:"
+    echo "  just host-up && just cluster-up"
+    echo "  just host-up oss && just cluster-up oss"
+    echo ""
+    echo "Cloud workflow history in your namespace is unchanged. Logical demo reset only:"
+    echo "  console → Reset demo, or POST /admin/reset on orders-api (Cloud: local tables only)."
+
+# Pause host + cluster, keep all state.
+platform-stop:
+    just host-stop
+    just cluster-stop
+
+# Resume a previously-stopped host + cluster.
+platform-start:
+    just host-start
+    just cluster-start
+
+# DESTRUCTIVE: tear down everything then cold-start. Single confirmation prompt.
+platform-refresh backend="cloud":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{backend}}" in cloud|oss) ;; *) echo "backend must be 'cloud' or 'oss'"; exit 1;; esac
+    read -r -p "Refresh platform (host + cluster)? Drops compose volumes and ALL in-cluster state. Type 'yes': " ans
+    [ "$ans" = "yes" ] || { echo "aborted."; exit 1; }
+    echo "==> Host plane down (compose down -v)..."
+    just host-down
+    echo "==> Cluster down (releases Cloud Worker Deployments first)..."
+    just cluster-down
+    just platform-up {{backend}}

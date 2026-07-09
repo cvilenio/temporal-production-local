@@ -2,7 +2,7 @@
 # =============================================================================
 # Tear down the local kind cluster. Leaves the registry container by default so
 # pushed images survive a cluster recreate; pass KEEP_REGISTRY=false to remove it.
-# Driven by `just cluster-down`.
+# Driven by `just kind-down`.
 # =============================================================================
 set -euo pipefail
 

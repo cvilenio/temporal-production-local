@@ -236,11 +236,12 @@ just verify-domain <domain>
 **Host plane first** — console must be up before kind mutations (`just preflight` enforces this).
 
 ```bash
-just host-plane-up-oss          # kind + OSS profile (console, Grafana, mock-api)
-# or: just host-plane-up-cloud  # Cloud profile
+just host-up oss                # OSS host profile (console, Grafana, mock-api)
+# or: just host-up              # Cloud profile
 ```
 
-Ensure the kind cluster exists (`just cluster-up` / `just platform-up oss` on a fresh machine).
+Ensure the kind substrate exists (`just kind-up`) or the full cluster (`just cluster-up oss`
+/ `just platform-up oss` on a fresh machine).
 
 Adopt the domain end-to-end:
 
@@ -251,7 +252,7 @@ just adopt-domain <domain>
 Runs, in order: `verify-domain` → `uv lock` → `build-images` → `push-images` → `chart-publish` → `terraform apply` (preserves current `temporal_backend` and existing worker digests) → `bootstrap-oss-namespaces`.
 
 `terraform apply` is the single cluster-mutating step.
-Prefer `just adopt-domain` over full `just platform-up` when adding one domain alongside orders (see `docs/RUNMODES.md` surgical redeploy).
+Prefer `just adopt-domain` over full `just cluster-up` when adding one domain alongside orders (see `docs/RUNMODES.md` surgical redeploy).
 
 **Orders-only extras** (not part of the workers `for_each`): `orders-api`, `orders-data` — legitimate additive richness for the flagship demo.
 

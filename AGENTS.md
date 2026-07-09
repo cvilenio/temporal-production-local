@@ -136,17 +136,19 @@ together (see ADR-0022 / ADR-0021).
 # Live kind testing — bring the platform-console up FIRST (MUST)
 
 The `platform-console` (http://localhost:8086) is the operator's single live window onto a
-run. Before doing **any** live testing on the kind cluster — `just platform-up`, running or
+run. Before doing **any** live testing on the kind cluster — `just cluster-up`, running or
 resetting orders, mutating cluster state — the console MUST already be up so a human can
 follow along in real time.
 
-- **Start it first:** `just host-plane-up-cloud` (host visibility + console + mock-api), then
-  `just headlamp-reload`. The console is boot-resilient (ADR-0015 / `console/.../db.py`): it
-  boots Healthy with the entire kind side absent and self-heals as the cluster appears, so it
-  is always safe to start before `just platform-up`.
+- **Start it first:** `just host-up` (detached host plane; tail logs with `just host-logs`),
+  then `just headlamp-reload`. The console is boot-resilient (ADR-0015 / `console/.../db.py`):
+  it boots Healthy with the entire kind side absent and self-heals as the cluster appears, so it
+  is always safe to start before `just cluster-up`. One-shot alternative: `just platform-up`
+  brings host up first, then the kind side.
 - **Enforced, not just documented:** `just preflight` (→ `poe preflight-console`) probes
-  `:8086/healthz` and fails with how-to-fix if the console is down. `just platform-up` and
-  `just orders-db-reset` run it as a gate, so a blind live test aborts before it starts.
+  `:8086/healthz` and fails with how-to-fix if the console is down. `just cluster-up`,
+  `just workloads-up`, and `just orders-db-reset` run it as a gate, so a blind live test
+  aborts before it starts.
 - **Off-path agents:** if you mutate the cluster outside those recipes (e.g. raw `kubectl`,
   `terraform apply` on the cluster layer), run `just preflight` yourself first.
 
@@ -184,28 +186,28 @@ So:
   alone: `curl :8086/healthz` (console), `curl :3000/api/health` (Grafana), `docker ps` for
   `Up ... (healthy)` on the containers you need, `kubectl get pods -A` for zero
   non-Running/Completed pods. Prefer `just preflight` where it exists (console gate) - it is the
-  same probe `platform-up` already trusts.
+  same probe `cluster-up` already trusts.
 - **The one exception is the network to Temporal Cloud.** Anything crossing the internet -
   starting Cloud workflows, `tcld`, scraping the Cloud metrics endpoint - has real, non-local
   latency, so a patient wait there is legitimate. This whole low-latency assumption applies to
   the local kind / Docker / Terraform substrate only; do not carry the aggressive timeouts onto
   Cloud calls.
 
-This generalizes beyond `host-plane-up-cloud` / `platform-up`: any local `docker`, `kubectl`,
+This generalizes beyond `host-up` / `cluster-up`: any local `docker`, `kubectl`,
 or `terraform` step follows the same discipline - verify it is progressing via observable state,
 fast, and fail fast when it is not.
 
 **Known cold-build trap (pre-build to sidestep it).** On a cold `docker compose up --build`,
 Docker Desktop's parallel bake can hang exporting the `platform-console` image, and a
-backgrounded `just host-plane-up-cloud` can die at that point *before* `docker compose up` ever
+backgrounded `just host-up` can die at that point *before* `docker compose up` ever
 runs - so no containers are created and healthz never comes up (the exact "waiting on a corpse"
 trap above). If a bring-up shows no containers within the first window on a cold build,
 pre-build the images as their own step first - `docker compose build platform-console mock-api
 codec-server` - then re-run the recipe; containers then come up in ~30s. Relatedly, a detached
 compose that dies before its `depends_on: <svc> service_healthy` chain clears can leave a
 late-ordered service (e.g. `otel-collector`, gated on `clickhouse` healthy) stale/`Exited`
-while the rest are `Up` - prefer a foreground bring-up in a dedicated terminal, or verify the
-*full* expected container set with `docker ps`, not just the console.
+while the rest are `Up` - verify the *full* expected container set with `docker ps`, not just
+the console. Tail host logs with `just host-logs` when debugging.
 
 **Get the environment to known-good BEFORE improvising around it.**
 Live testing assumes a running, healthy kind cluster.
@@ -213,7 +215,7 @@ After a host or Docker restart the cluster is often stopped or half-broken, and 
 Do not reverse-engineer a fix by hand-patching cluster resources.
 This is a local sandbox with no production load: reconciling to a known-good state is cheap and always safe, so prefer the deterministic recovery recipe over clever surgery.
 
-- If the cluster is stopped, resume it with `just cluster-start` (it restarts the registry + nodes and self-heals the registry EndpointSlice); if it does not exist, `just cluster-up`.
+- If the cluster is stopped, resume it with `just cluster-start` (it restarts the registry + nodes and self-heals the registry EndpointSlice); if it does not exist, `just cluster-up` (or `just kind-up` for an empty substrate only).
 - For any other stale or unknown cluster state (including a running cluster with a stale registry EndpointSlice), run `just kind-ready` first — it repairs in place without restarting when nodes are already up.
 - Only after the cluster is Healthy (ArgoCD Applications Synced/Healthy, zero non-Running pods) proceed with the test.
 
@@ -243,7 +245,7 @@ work.
   auto-mode classifier gating a protected IaC change) blocks the *whole* command, so the publish
   never runs either → ArgoCD then fails "OCI chart … `<version>` not found." Publish first,
   confirm it landed, then apply.
-- **Redeploy surgically to avoid worker-version churn.** Don't run full `just platform-up` to
+- **Redeploy surgically to avoid worker-version churn.** Don't run full `just cluster-up` to
   ship one component — it rebuilds the workers, producing a new image digest = a new Worker
   Deployment version the Worker Controller must poll (extra shared Worker-Deployment-Read Cloud
   load). Rebuild only the changed image and pass the *current* worker digests through to
@@ -257,7 +259,7 @@ work.
 A project-scoped `.mcp.json` gives agents read-mostly MCP access to the three systems they
 inspect most — the ClickHouse warehouse (`otel_logs` / `otel_metrics_*`), the durable Prometheus
 store, and the kind cluster. All run via `uvx` (no Node/Go), point at the local **kind + Cloud**
-endpoints, and need the stack up (`just host-plane-up-cloud` → `just platform-up`) to return data.
+endpoints, and need the stack up (`just host-up` → `just cluster-up`, or `just platform-up`) to return data.
 Docker/Terraform/Grafana/ArgoCD were deliberately left out as net baggage for this repo. See
 `docs/MCP.md` for the rationale, smoke tests, and how to add more later.
 
