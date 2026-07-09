@@ -1,6 +1,6 @@
 """Load generic trigger catalog entries from config/domains/*.yaml (Phase B).
 
-The orders flagship panel stays on scenarios.py — ziggymart (and any configured
+The orders flagship panel stays on scenarios.py — orders (and any configured
 excludes) are omitted from this catalog so the generic path stays additive.
 """
 
@@ -41,6 +41,15 @@ def load_catalog(*, exclude_domains: set[str]) -> list[CatalogDomain]:
     for desc in list_domain_descriptors(exclude=exclude_domains):
         domain = str(desc["domain"])
         workers = desc.get("workers") or []
+        worker_langs = {
+            str(w.get("language")).lower() for w in workers if w.get("language")
+        }
+        if len(worker_langs) == 1:
+            language = next(iter(worker_langs))
+        elif worker_langs:
+            language = "+".join(sorted(worker_langs))
+        else:
+            language = str(desc.get("language") or "python")
         wf_queue = next(
             (w["task_queue"] for w in workers if w.get("kind") == "workflow"), None
         )
@@ -52,19 +61,23 @@ def load_catalog(*, exclude_domains: set[str]) -> list[CatalogDomain]:
             wf_type = str(wf.get("type") or "")
             task_queue = str(wf.get("task_queue") or wf_queue or "")
             samples = tuple(
-                WorkflowSample(label=str(s.get("label") or "default"), input=s.get("input"))
+                WorkflowSample(
+                    label=str(s.get("label") or "default"), input=s.get("input")
+                )
                 for s in (wf.get("sample_inputs") or [])
             )
             if wf_type and task_queue and samples:
                 workflows.append(
-                    CatalogWorkflow(type=wf_type, task_queue=task_queue, samples=samples)
+                    CatalogWorkflow(
+                        type=wf_type, task_queue=task_queue, samples=samples
+                    )
                 )
         if not workflows:
             continue
         catalog.append(
             CatalogDomain(
                 domain=domain,
-                language=str(desc.get("language") or "python"),
+                language=language,
                 data_converter=str(desc.get("data_converter") or "default"),
                 workflows=tuple(workflows),
                 workflow_task_queue=wf_queue,

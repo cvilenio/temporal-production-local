@@ -95,9 +95,7 @@ def require_replace(text: str, old: str, new: str, *, label: str) -> str:
     return updated
 
 
-def copy_tree(
-    ctx: ScaffoldCtx, src: Path, dst: Path, mapping: dict[str, str]
-) -> None:
+def copy_tree(ctx: ScaffoldCtx, src: Path, dst: Path, mapping: dict[str, str]) -> None:
     if dst.exists():
         die(f"refusing to overwrite existing path: {dst.relative_to(ctx.root)}")
     for path in src.rglob("*"):
@@ -242,7 +240,10 @@ def patch_pyproject(ctx: ScaffoldCtx, domain: str) -> None:
     if f"{group} = [" not in text:
         insert = f'{group} = ["{domain}", "appkit", "dependency-injector>=4.49"]\n'
         text = require_replace(
-            text, "workers = [", insert + "workers = [", label="pyproject dependency group"
+            text,
+            "workers = [",
+            insert + "workers = [",
+            label="pyproject dependency group",
         )
     if group not in text.split("default-groups")[1]:
         text = require_replace(
@@ -279,7 +280,9 @@ def patch_pyproject(ctx: ScaffoldCtx, domain: str) -> None:
 def patch_settings_gradle(ctx: ScaffoldCtx, domain: str) -> None:
     path = ctx.settings_gradle
     if not path.is_file():
-        die("missing settings.gradle — add the M5 Gradle spine before scaffolding Java domains")
+        die(
+            "missing settings.gradle — add the M5 Gradle spine before scaffolding Java domains"
+        )
     text = path.read_text()
     lib_include = f"include '{domain}-lib'"
     if lib_include in text:
@@ -298,7 +301,9 @@ def patch_settings_gradle(ctx: ScaffoldCtx, domain: str) -> None:
         project(':{domain}-activity-worker').projectDir = file('apps/temporal/workers/java/{domain}/activity')
         """
     ).rstrip()
-    text = require_replace(text, anchor, anchor + block, label="settings.gradle domain modules")
+    text = require_replace(
+        text, anchor, anchor + block, label="settings.gradle domain modules"
+    )
     path.write_text(text)
 
 
@@ -366,7 +371,9 @@ def scaffold_grafana(ctx: ScaffoldCtx, domain: str, mapping: dict[str, str]) -> 
     dash_dir = ctx.root / "compose/observability/grafana/dashboards" / domain
     dash_dir.mkdir(parents=True, exist_ok=True)
     dash_path = dash_dir / f"{domain}.json"
-    dash_path.write_text(substitute(ctx.grafana_dashboard_template.read_text(), mapping))
+    dash_path.write_text(
+        substitute(ctx.grafana_dashboard_template.read_text(), mapping)
+    )
     prov_dir = ctx.root / "compose/observability/grafana/provisioning/dashboards"
     prov_dir.mkdir(parents=True, exist_ok=True)
     prov_path = prov_dir / f"{domain}.yaml"

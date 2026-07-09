@@ -94,6 +94,8 @@ services:
       - ./compose/observability/prometheus/prometheus.yaml:/otel-lgtm/prometheus.yaml:ro
       - ./compose/observability/grafana/provisioning/dashboards/ziggymart.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/ziggymart.yaml:ro
       - ./compose/observability/grafana/dashboards:/var/lib/grafana/dashboards/ziggymart:ro
+      - ./compose/observability/grafana/provisioning/dashboards/orders.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/orders.yaml:ro
+      - ./compose/observability/grafana/dashboards/orders:/var/lib/grafana/dashboards/orders:ro
       - ./compose/observability/grafana/provisioning/dashboards/critical.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/critical.yaml:ro
       - ./compose/observability/grafana/dashboards-critical:/var/lib/grafana/dashboards/critical:ro
       # Self-hosted-only server internals (persistence/task-processing/shard/
@@ -321,7 +323,7 @@ services:
       - TEMPORAL_TLS_CLIENT_KEY_PATH=${TEMPORAL_TLS_CLIENT_KEY_PATH:-/etc/temporal/tls/tls.key}
       - TEMPORAL_TLS_SERVER_CA_CERT_PATH=${TEMPORAL_TLS_SERVER_CA_CERT_PATH:-/etc/temporal/tls/ca.crt}
       - TEMPORAL_TRIGGER_TLS_DOMAIN=${TEMPORAL_TRIGGER_TLS_DOMAIN:-temporal-frontend.temporal.svc.cluster.local}
-      - GENERIC_TRIGGER_EXCLUDE_DOMAINS=${GENERIC_TRIGGER_EXCLUDE_DOMAINS:-ziggymart}
+      - GENERIC_TRIGGER_EXCLUDE_DOMAINS=${GENERIC_TRIGGER_EXCLUDE_DOMAINS:-orders}
       - GRAFANA_EMBED_URL=http://localhost:3000
       - PGWEB_EMBED_URL=http://localhost:8083
       # Cluster-visibility UIs, fronted by viz-proxy (frame headers stripped).

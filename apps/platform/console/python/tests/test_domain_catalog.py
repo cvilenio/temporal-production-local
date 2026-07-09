@@ -5,9 +5,9 @@ from app.domain_catalog import load_catalog
 
 
 def test_catalog_excludes_orders_domain():
-    catalog = load_catalog(exclude_domains={"ziggymart"})
+    catalog = load_catalog(exclude_domains={"orders"})
     domains = {entry.domain for entry in catalog}
-    assert "ziggymart" not in domains
+    assert "orders" not in domains
 
 
 def test_catalog_loads_workflow_samples_from_descriptor(
@@ -18,10 +18,10 @@ def test_catalog_loads_workflow_samples_from_descriptor(
     (desc_dir / "demo.yaml").write_text(
         """
 domain: demo
-language: python
 data_converter: default
 workers:
   - profile: workflow
+    language: python
     kind: workflow
     deployment_name: demo-workflow
     task_queue: demo-workflow-task-queue

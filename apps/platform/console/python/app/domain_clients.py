@@ -12,8 +12,13 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
 
-from appkit import build_temporal_client, data_converter_for_domain
+from appkit import (
+    build_temporal_client,
+    data_converter_for_domain,
+    temporal_namespace_for_domain,
+)
 from temporalio.api.enums.v1 import TaskQueueType
+from temporalio.api.taskqueue.v1 import TaskQueue
 from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
 from temporalio.client import Client
 
@@ -56,7 +61,9 @@ class DomainClientPool:
         state = DomainClientState()
         self._states[domain] = state
         if not self._trigger_enabled():
-            state.error = "temporal trigger not configured (set TEMPORAL_TRIGGER_ADDRESS)"
+            state.error = (
+                "temporal trigger not configured (set TEMPORAL_TRIGGER_ADDRESS)"
+            )
             return state
         try:
             converter = data_converter_for_domain(domain)
@@ -64,14 +71,16 @@ class DomainClientPool:
             state.error = f"descriptor/converter: {exc}"
             return state
         try:
+            temporal_ns = temporal_namespace_for_domain(domain)
             state.client = await build_temporal_client(
                 address=settings.temporal_trigger_address,
-                namespace=domain,
+                namespace=temporal_ns,
                 tls=settings.temporal_trigger_tls,
                 api_key=settings.temporal_trigger_api_key or None,
                 tls_client_cert_path=settings.temporal_tls_client_cert_path or None,
                 tls_client_key_path=settings.temporal_tls_client_key_path or None,
-                tls_server_ca_cert_path=settings.temporal_tls_server_ca_cert_path or None,
+                tls_server_ca_cert_path=settings.temporal_tls_server_ca_cert_path
+                or None,
                 tls_domain=settings.temporal_trigger_tls_domain or None,
                 data_converter=converter,
             )
@@ -128,6 +137,7 @@ class DomainClientPool:
             }
         started: list[TriggerResult] = []
         errors: list[str] = []
+        temporal_ns = temporal_namespace_for_domain(domain)
         for _ in range(count):
             wf_id = f"{domain}-{sample_label}-{uuid.uuid4().hex[:10]}"
             try:
@@ -142,7 +152,9 @@ class DomainClientPool:
                     TriggerResult(
                         workflow_id=handle.id,
                         run_id=run_id,
-                        temporal_ui_url=self.temporal_ui_url(domain, handle.id, run_id),
+                        temporal_ui_url=self.temporal_ui_url(
+                            temporal_ns, handle.id, run_id
+                        ),
                     )
                 )
             except Exception as exc:
@@ -181,10 +193,11 @@ class DomainClientPool:
             else TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW
         )
         try:
+            temporal_ns = temporal_namespace_for_domain(domain)
             resp = await state.client.workflow_service.describe_task_queue(
                 DescribeTaskQueueRequest(
-                    namespace=domain,
-                    task_queue={"name": task_queue},
+                    namespace=temporal_ns,
+                    task_queue=TaskQueue(name=task_queue),
                     task_queue_type=queue_type,
                 )
             )

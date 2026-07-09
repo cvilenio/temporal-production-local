@@ -1,0 +1,60 @@
+# Domain descriptor — single source of truth for worker topology, queues, and console triggers.
+#
+# Schema (verify-domain / verify-domains enforce):
+#   domain:            required — the ONE name: descriptor filename, console catalog key,
+#                        code package (libs/<domain>/), worker/image identity.
+#   namespace:         optional — Temporal namespace; defaults to `domain`. The ONLY identity
+#                        that may differ (e.g. domain: orders, namespace: ziggymart). Must exist
+#                        as a key in config/temporal/namespaces.yaml.
+#   data_converter:    optional — default "default" (pydantic/json).
+#   workers[]:         required — one entry per worker profile/image.
+#     profile:         required — e.g. workflow, activity, finalization-java.
+#     language:        required — python | java | go | typescript.
+#     kind:            required — workflow | activity.
+#     task_queue:      required — must match a TaskQueue constant in libs/<domain>/ code.
+#     deployment_name: required — k8s WorkerDeployment name.
+#     dependency_group: optional — Python uv group; default "<domain>-workers".
+#     dockerfile:      optional — default "images/<language>.Dockerfile".
+#   workflows[]:       optional — console trigger catalog entries.
+#     type, task_queue, sample_inputs (WARN if sample_inputs missing).
+#   observability:
+#     dashboard:       optional — when true, expects
+#                        compose/observability/grafana/dashboards/<domain>/<domain>.json.
+#
+# Worker code path (deterministic): apps/temporal/workers/<language>/<domain>/<profile>/
+# Image name: <domain>-worker-<profile>   Digest map key: <domain>-<profile> (Phase 4+)
+
+domain: orders
+namespace: ziggymart
+data_converter: default
+workers:
+  - profile: workflow
+    language: python
+    kind: workflow
+    deployment_name: orders-workflow-python
+    task_queue: orders-workflow-task-queue
+    dependency_group: workers
+  - profile: activity
+    language: python
+    kind: activity
+    deployment_name: orders-activity-python
+    task_queue: orders-activity-task-queue
+    dependency_group: workers
+  - profile: finalization-java
+    language: java
+    kind: activity
+    deployment_name: orders-finalization-java
+    task_queue: orders-finalization-task-queue
+workflows:
+  - type: OrderWorkflow
+    task_queue: orders-workflow-task-queue
+    sample_inputs:
+      - label: happy_path
+        input:
+          item_id: ITEM-001
+          quantity: 1
+          user_id: "00000000-0000-0000-0000-000000000001"
+          address: "123 Main St, Springfield"
+          amount: 49.99
+observability:
+  dashboard: true

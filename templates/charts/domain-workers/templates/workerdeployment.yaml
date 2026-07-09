@@ -58,17 +58,15 @@ spec:
           command: {{ .command | toJson }}
           {{- end }}
           # The controller injects the TEMPORAL_* envs (address/namespace/api-key/
-          # version), but not these. Both MUST be set explicitly: the kernel's
-          # defaults are the host-dev values (localhost:8001/:8002), so without an
-          # override the activities dial localhost inside the pod and fail with
-          # "All connection attempts failed". orders-api is co-located in this
-          # namespace (Service `orders-service`); mock-api stays on the host (the
-          # simulated external dependency), reached via the cluster's host gateway.
+          # version), but not these. App code defaults are host-dev localhost URLs;
+          # without explicit overrides activities dial localhost in-pod and fail with
+          # "All connection attempts failed". downstreamServices injects per-domain
+          # business API / external simulator URLs (empty for plain Hello demos).
           env:
-            - name: ORDERS_SERVICE_URL
-              value: {{ $.Values.ordersServiceUrl | quote }}
-            - name: MOCK_API_URL
-              value: {{ $.Values.mockApiUrl | quote }}
+            {{- range $.Values.downstreamServices }}
+            - name: {{ .name }}
+              value: {{ .url | quote }}
+            {{- end }}
             # OTLP push: traces → lgtm/Tempo (4317); business metrics → standalone
             # collector → ClickHouse (4319, ADR-0024). gRPC, host-published.
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
@@ -77,6 +75,8 @@ spec:
               value: {{ $.Values.metricsOtelEndpoint | quote }}
             - name: TEMPORAL_DATA_CONVERTER
               value: {{ $.Values.dataConverter | quote }}
+            - name: TEMPORAL_NAMESPACE
+              value: {{ $.Values.connection.temporalNamespace | quote }}
             {{- if $.Values.connection.tls }}
             # API-key AND mTLS connections require TLS (the controller doesn't set it).
             - name: TEMPORAL_TLS
@@ -103,22 +103,24 @@ spec:
               value: {{ $.Values.logging.otlpPush | quote }}
             - name: SERVICE_NAMESPACE
               value: {{ $.Values.logging.serviceNamespace | quote }}
+            {{- range $k, $v := .extraEnv }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
           # NOTE: no mTLS volumeMount/volume here. The Worker Controller ALREADY mounts
           # the Connection's mutualTLSSecretRef cert at /etc/temporal/tls on every worker
           # pod; adding our own mount there is a duplicate mountPath (rejected as
           # "must be unique"). The cert-path env above points at the controller's mount.
           {{- if $.Values.startupProbe.enabled }}
-          # Downstream-reachability gate, STARTUP-ONLY (not a periodic readiness
-          # probe — that would re-ping downstream forever and couple failure
-          # domains into a cascade; see ADR-0016). A lightweight TCP connect to the
-          # worker's configured ORDERS_SERVICE_URL + MOCK_API_URL: until both are
-          # reachable the pod stays NotReady, so the Worker Controller does NOT
-          # promote this version to Current (Build-ID routing gate) and the old
-          # version keeps serving. A permanently-misconfigured version (e.g. the
-          # localhost bug) lands in CrashLoopBackOff and simply never takes traffic
-          # — instead of every workflow failing. Reads the env so the probe always
-          # matches the actual endpoints (single source of truth).
+          # Downstream-reachability gate, STARTUP-ONLY (ADR-0016). Python workers use
+          # a TCP exec probe over downstreamServices env URLs. Java workers use Spring
+          # Boot Actuator readiness on :9000 — see per-worker startupProbe in values.yaml.
           startupProbe:
+            {{- if and .startupProbe (eq .startupProbe.type "httpGet") }}
+            httpGet:
+              path: {{ .startupProbe.path | quote }}
+              port: {{ .startupProbe.port }}
+            {{- else }}
             exec:
               command:
                 - python
@@ -126,8 +128,12 @@ spec:
                 - |
                   import os, socket, sys
                   from urllib.parse import urlparse
+                  {{- $names := list }}
+                  {{- range $.Values.downstreamServices }}
+                  {{- $names = append $names (printf "%q" .name) }}
+                  {{- end }}
                   ok = True
-                  for var in ("ORDERS_SERVICE_URL", "MOCK_API_URL"):
+                  for var in ({{ join ", " $names }}):
                       u = urlparse(os.environ.get(var, ""))
                       if not u.hostname:
                           continue
@@ -141,6 +147,7 @@ spec:
                       finally:
                           s.close()
                   sys.exit(0 if ok else 1)
+            {{- end }}
             periodSeconds: {{ $.Values.startupProbe.periodSeconds }}
             failureThreshold: {{ $.Values.startupProbe.failureThreshold }}
           {{- end }}

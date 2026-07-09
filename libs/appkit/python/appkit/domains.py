@@ -42,6 +42,12 @@ def load_domain_descriptor(domain: str) -> dict:
     return data
 
 
+def temporal_namespace_from_descriptor(descriptor: dict) -> str:
+    """Resolve Temporal namespace from a domain descriptor (override or domain key)."""
+    domain = str(descriptor.get("domain") or "")
+    return str(descriptor.get("namespace") or domain)
+
+
 def domain_for_namespace(namespace: str) -> str | None:
     """Map a Temporal namespace handle to a domain key (bare name before Cloud suffix)."""
     bare = namespace.split(".", 1)[0]
@@ -50,8 +56,10 @@ def domain_for_namespace(namespace: str) -> str | None:
         return None
     for path in root.glob("*.yaml"):
         desc = yaml.safe_load(path.read_text()) or {}
-        if desc.get("domain") == bare:
-            return bare
+        if temporal_namespace_from_descriptor(desc) == bare:
+            domain = desc.get("domain")
+            if domain:
+                return str(domain)
     return None
 
 
@@ -80,6 +88,11 @@ def resolve_data_converter(name: str) -> DataConverter:
     raise ValueError(
         f"unknown data_converter {name!r} — add a resolver or set data_converter: default"
     )
+
+
+def temporal_namespace_for_domain(domain: str) -> str:
+    """Temporal namespace for a domain (honors optional namespace override)."""
+    return temporal_namespace_from_descriptor(load_domain_descriptor(domain))
 
 
 def data_converter_for_domain(domain: str) -> DataConverter:

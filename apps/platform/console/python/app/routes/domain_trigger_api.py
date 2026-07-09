@@ -36,7 +36,10 @@ async def trigger_workflows(
     except (TypeError, ValueError):
         return {"ok": False, "error": "count must be an integer between 1 and 5"}
     if not domain or not workflow_type or not sample_label:
-        return {"ok": False, "error": "domain, workflow_type, and sample_label are required"}
+        return {
+            "ok": False,
+            "error": "domain, workflow_type, and sample_label are required",
+        }
     return await domain_client_pool.trigger(
         domain=domain,
         workflow_type=workflow_type,
