@@ -22,7 +22,7 @@ from pathlib import Path
 import yaml
 
 SCRIPT_REPO = Path(__file__).resolve().parents[2]
-SUPPORTED_LANGS = frozenset({"java", "python", "go", "typescript"})
+SUPPORTED_LANGS = frozenset({"java", "python", "go", "typescript", "ruby", "dotnet"})
 TEXT_SUFFIXES = {
     ".py",
     ".toml",
@@ -41,6 +41,12 @@ TEXT_SUFFIXES = {
     ".js",
     ".mjs",
     ".cjs",
+    ".rb",
+    ".gemspec",
+    ".cs",
+    ".csproj",
+    ".props",
+    ".editorconfig",
 }
 
 
@@ -145,7 +151,19 @@ def copy_tree_idempotent(
         if out.exists() and not force:
             continue
         out.parent.mkdir(parents=True, exist_ok=True)
-        if path.suffix in TEXT_SUFFIXES or path.name in {"Dockerfile", ".npmrc"}:
+        if (
+            path.suffix in TEXT_SUFFIXES
+            or path.name
+            in {
+                "Dockerfile",
+                ".npmrc",
+                "Gemfile",
+                "Directory.Build.props",
+                "Directory.Packages.props",
+                ".editorconfig",
+            }
+            or path.name.endswith(".gemspec")
+        ):
             out.write_text(substitute(path.read_text(), mapping))
         else:
             shutil.copy2(path, out)
@@ -175,6 +193,8 @@ def lib_template_rel(lang: str) -> str:
         return "libs/{{DOMAIN}}/java"
     if lang == "typescript":
         return "libs/{{DOMAIN}}/typescript"
+    if lang == "ruby":
+        return "libs/{{DOMAIN}}/ruby"
     die(f"unsupported language {lang!r} for lib scaffold")
     return ""
 
@@ -199,7 +219,7 @@ def scaffold_libs(
     force: bool,
 ) -> None:
     for lang in sorted(languages):
-        if lang == "go":
+        if lang in {"go", "dotnet"}:
             continue
         if lang not in SUPPORTED_LANGS:
             die(f"unsupported language {lang!r} in descriptor")
@@ -208,6 +228,30 @@ def scaffold_libs(
         dst = ctx.root / substitute(template_rel, mapping)
         if src.is_dir():
             copy_tree_idempotent(src, dst, mapping, force=force)
+
+
+def scaffold_dotnet_domain_root(
+    ctx: ScaffoldCtx, domain: str, mapping: dict[str, str], force: bool
+) -> None:
+    """Materialize shared MSBuild props once per dotnet domain worker tree."""
+    template_rel = "apps/temporal/workers/dotnet/{{DOMAIN}}"
+    src_root = template_root_for_lang("dotnet") / template_rel
+    dst_root = ctx.root / substitute(template_rel, mapping)
+    for name in (
+        "Directory.Build.props",
+        "Directory.Packages.props",
+        ".editorconfig",
+        "CamelCasePayloadConverter.cs",
+        "TemporalIds.cs",
+    ):
+        src = src_root / name
+        if not src.is_file():
+            continue
+        out = dst_root / name
+        if out.exists() and not force:
+            continue
+        dst_root.mkdir(parents=True, exist_ok=True)
+        out.write_text(substitute(src.read_text(), mapping))
 
 
 def scaffold_workers(
@@ -406,6 +450,59 @@ def finalize_go_modules(ctx: ScaffoldCtx, descriptor: dict, domain: str) -> None
         subprocess.run(["go", "mod", "tidy"], cwd=mod_dir, check=True)
 
 
+def bundle_lock_dir(ctx: ScaffoldCtx, bundle_dir: Path) -> None:
+    """Run bundle lock with Ruby 3.3+ (prefer host when new enough, else Docker)."""
+    rel = bundle_dir.relative_to(ctx.root).as_posix()
+
+    host_ruby = subprocess.run(
+        [
+            "ruby",
+            "-e",
+            "exit(Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.3') ? 0 : 1)",
+        ],
+        cwd=bundle_dir,
+        check=False,
+    )
+    if host_ruby.returncode == 0:
+        subprocess.run(["bundle", "lock"], cwd=bundle_dir, check=True)
+        return
+
+    subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{ctx.root}:/repo",
+            "-w",
+            f"/repo/{rel}",
+            "ruby:3.3-slim",
+            "bundle",
+            "lock",
+        ],
+        check=True,
+    )
+
+
+def finalize_ruby_bundles(ctx: ScaffoldCtx, descriptor: dict, domain: str) -> None:
+    """Generate Gemfile.lock for each Ruby lib/worker (images/ruby.Dockerfile requires it)."""
+    dirs: list[Path] = []
+    lib_dir = ctx.root / f"libs/{domain}/ruby"
+    if lib_dir.is_dir() and (lib_dir / "Gemfile").is_file():
+        dirs.append(lib_dir)
+    for worker in descriptor.get("workers") or []:
+        if str(worker.get("language", "")).lower() != "ruby":
+            continue
+        profile = str(worker.get("profile") or "")
+        worker_dir = ctx.root / f"apps/temporal/workers/ruby/{domain}/{profile}"
+        if (worker_dir / "Gemfile").is_file():
+            dirs.append(worker_dir)
+    for bundle_dir in dirs:
+        if (bundle_dir / "Gemfile.lock").is_file():
+            continue
+        bundle_lock_dir(ctx, bundle_dir)
+
+
 def patch_go_workspace(ctx: ScaffoldCtx, domain: str, descriptor: dict) -> None:
     """Ensure root go.work lists Go worker modules when present (optional)."""
     go_work = ctx.root / "go.work"
@@ -487,6 +584,10 @@ def chart_workers_values(descriptor: dict) -> list[dict]:
         }
         if language == "python":
             entry["command"] = ["python", "main.py"]
+        elif language == "ruby":
+            entry["command"] = ["ruby", "worker.rb"]
+        elif language == "dotnet":
+            entry["command"] = ["dotnet", "Worker.dll"]
         values.append(entry)
     return values
 
@@ -620,6 +721,8 @@ def patch_language_manifests(ctx: ScaffoldCtx, domain: str, descriptor: dict) ->
         finalize_go_modules(ctx, descriptor, domain)
     if "typescript" in languages:
         patch_typescript_workspace(ctx, domain)
+    if "ruby" in languages:
+        finalize_ruby_bundles(ctx, descriptor, domain)
 
 
 def scaffold_domain(ctx: ScaffoldCtx, domain: str, *, force: bool = False) -> None:
@@ -632,6 +735,8 @@ def scaffold_domain(ctx: ScaffoldCtx, domain: str, *, force: bool = False) -> No
     add_chart_version_variable(ctx, domain)
 
     scaffold_libs(ctx, domain, languages, mapping, force)
+    if "dotnet" in languages:
+        scaffold_dotnet_domain_root(ctx, domain, mapping, force)
     scaffold_workers(ctx, descriptor, domain, mapping, force)
     scaffold_chart(ctx, domain, descriptor, mapping, force)
 

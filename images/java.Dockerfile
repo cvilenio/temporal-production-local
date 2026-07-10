@@ -7,8 +7,11 @@
 #   APP_MODULE       Gradle subproject (e.g. :hello-workflow-worker)
 #   WORKER_REL_PATH  Path to worker module under apps/temporal/workers/java/
 #   APP_JAR          Boot jar base name under build/libs/ (defaults from module)
+#   JAVA_VERSION     Temurin major line for jdk/jre stages (default 17)
 # =============================================================================
-FROM eclipse-temurin:17-jdk AS builder
+ARG JAVA_VERSION=17
+
+FROM eclipse-temurin:${JAVA_VERSION}-jdk AS builder
 
 WORKDIR /workspace
 
@@ -25,7 +28,7 @@ ARG APP_MODULE=:hello-workflow-worker
 
 RUN chmod +x gradlew && ./gradlew ${APP_MODULE}:bootJar -x test --no-daemon
 
-FROM eclipse-temurin:17-jre
+FROM eclipse-temurin:${JAVA_VERSION}-jre
 
 ARG WORKER_REL_PATH=apps/temporal/workers/java/hello/workflow
 ARG APP_JAR=hello-workflow-worker

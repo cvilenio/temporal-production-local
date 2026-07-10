@@ -32,10 +32,31 @@ CLUSTER_VARS = REPO_ROOT / "deploy/terraform/layers/cluster/variables.tf"
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 SETTINGS_GRADLE = REPO_ROOT / "settings.gradle"
 
-SUPPORTED_LANGUAGES = ("python", "java", "go", "typescript")
+SUPPORTED_LANGUAGES = ("python", "java", "go", "typescript", "ruby", "dotnet")
+
+# Worker languages that are self-contained per worker dir (no libs/<domain>/ kernel).
+LANGS_WITHOUT_KERNEL_LIB = frozenset({"go", "dotnet"})
+
+WORKER_KNOWN_FIELDS = frozenset(
+    {
+        "profile",
+        "language",
+        "kind",
+        "task_queue",
+        "deployment_name",
+        "dependency_group",
+        "dockerfile",
+        "replicas",
+        "startup_probe",
+        "extra_env",
+        "runtime_version",
+    }
+)
 
 _PY_TASK_QUEUE_RE = re.compile(r'=\s*"([^"]+-task-queue)"')
 _JAVA_TASK_QUEUE_RE = re.compile(r'=\s*"([^"]+-task-queue)";\s*$', re.MULTILINE)
+_RUBY_TASK_QUEUE_RE = re.compile(r"=\s*'([^']+-task-queue)'")
+_DOTNET_TASK_QUEUE_RE = re.compile(r'=\s*"([^"]+-task-queue)";\s*$', re.MULTILINE)
 _CHART_VERSION_RE = re.compile(
     r'^version:\s*["\']?([0-9]+(?:\.[0-9]+)*)(?:["\']|$)', re.MULTILINE
 )
@@ -147,12 +168,40 @@ def java_task_queues(domain: str) -> set[str]:
     return queues
 
 
+def ruby_task_queues(domain: str) -> set[str]:
+    path = (
+        REPO_ROOT
+        / f"libs/{domain}/ruby/lib/{domain.replace('-', '_')}_lib/temporal_ids.rb"
+    )
+    if not path.is_file():
+        candidates = list((REPO_ROOT / f"libs/{domain}/ruby").rglob("temporal_ids.rb"))
+        if not candidates:
+            raise FileNotFoundError(
+                f"add libs/{domain}/ruby/.../temporal_ids.rb with task-queue constants"
+            )
+        path = candidates[0]
+    return set(_RUBY_TASK_QUEUE_RE.findall(path.read_text()))
+
+
+def dotnet_task_queues(domain: str) -> set[str]:
+    path = REPO_ROOT / f"apps/temporal/workers/dotnet/{domain}/TemporalIds.cs"
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"add apps/temporal/workers/dotnet/{domain}/TemporalIds.cs with task-queue constants"
+        )
+    return set(_DOTNET_TASK_QUEUE_RE.findall(path.read_text()))
+
+
 def code_task_queues(domain: str, languages: set[str]) -> set[str]:
     queues: set[str] = set()
     if "python" in languages:
         queues |= python_task_queues(domain)
     if "java" in languages:
         queues |= java_task_queues(domain)
+    if "ruby" in languages:
+        queues |= ruby_task_queues(domain)
+    if "dotnet" in languages:
+        queues |= dotnet_task_queues(domain)
     return queues
 
 
@@ -187,6 +236,14 @@ def worker_has_entrypoint(worker_path: Path, language: str) -> bool:
         return (worker_path / "go.mod").is_file() or any(worker_path.rglob("main.go"))
     if lang == "typescript":
         return (worker_path / "package.json").is_file()
+    if lang == "ruby":
+        return (worker_path / "worker.rb").is_file() and (
+            worker_path / "Gemfile"
+        ).is_file()
+    if lang == "dotnet":
+        return (worker_path / "Program.cs").is_file() and any(
+            worker_path.glob("*.csproj")
+        )
     return False
 
 
@@ -262,16 +319,19 @@ def verify_descriptor(
             f"add a {namespace}: entry or fix namespace:"
         )
 
-    libs_dir = REPO_ROOT / "libs" / domain
-    if not libs_dir.is_dir():
-        errors.append(
-            f"{rel_path}: missing libs/{domain}/ — add the domain package before deploying"
-        )
-
     workers = descriptor.get("workers") or []
     if not workers:
         errors.append(f"{rel_path}: workers[] is empty — add at least one worker entry")
         return errors, warnings
+
+    worker_languages_pre = {
+        str(w.get("language", "")).lower() for w in workers if w.get("language")
+    }
+    libs_dir = REPO_ROOT / "libs" / domain
+    if worker_languages_pre - LANGS_WITHOUT_KERNEL_LIB and not libs_dir.is_dir():
+        errors.append(
+            f"{rel_path}: missing libs/{domain}/ — add the domain package before deploying"
+        )
 
     pyproject_text = PYPROJECT.read_text() if PYPROJECT.is_file() else ""
 
@@ -298,6 +358,13 @@ def verify_descriptor(
         if not task_queue:
             errors.append(f"{rel_path}: workers[{profile!r}] missing 'task_queue'")
             continue
+
+        unknown_fields = sorted(set(worker) - WORKER_KNOWN_FIELDS)
+        if unknown_fields:
+            errors.append(
+                f"{rel_path}: workers[{profile!r}] unknown field(s) {unknown_fields} — "
+                f"fix typo or extend verify-domains WORKER_KNOWN_FIELDS"
+            )
 
         lang = str(language).lower()
         worker_languages.add(lang)
@@ -329,7 +396,7 @@ def verify_descriptor(
         elif not worker_has_entrypoint(wdir, lang):
             errors.append(
                 f"{rel_path}: worker dir {rel(wdir)}/ has no entrypoint — "
-                f"add main.py (python), build.gradle (java), or go.mod (go)"
+                f"add main.py (python), build.gradle (java), go.mod (go), worker.rb+Gemfile (ruby), or Program.cs+.csproj (dotnet)"
             )
 
         if lang == "python":

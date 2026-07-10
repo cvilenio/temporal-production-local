@@ -45,6 +45,8 @@ temporal:
   worker_controller_chart: "0.27.0" # MIRROR of charts.temporal-worker-controller.version (audit asserts ==)
   go_sdk: "1.45.0" # verify: templates/domain/go/**/go.mod (go.temporal.io/sdk)
   ts_sdk: "^1.20.0" # verify: templates/domain/typescript/**/package.json (@temporalio/*)
+  ruby_sdk: "~> 1.5" # verify: templates/domain/ruby/**/Gemfile (temporalio)
+  dotnet_sdk: "1.16.0" # verify: templates/domain/dotnet/**/Directory.Packages.props (Temporalio)
 
 # ── Tier 2 — platform tools (hard-gated like Tier 1) ─────────────────────────
 platform:
@@ -61,6 +63,13 @@ platform:
     otel_lgtm: "latest" # grafana/otel-lgtm — intentionally unpinned; audit skips
   alloy: "1.17.0" # verify: deploy/charts/alloy/{Chart.yaml appVersion, values.yaml image.tag}
   postgresql: "16" # verify: .env POSTGRESQL_VERSION + compose/host-apptier.yml
+  runtimes: # verify: images/*.Dockerfile ARG defaults (worker base images)
+    python: "3.12" # verify: images/python.Dockerfile (ARG PYTHON_VERSION)
+    java: "17" # verify: images/java.Dockerfile (ARG JAVA_VERSION)
+    go: "1.26" # verify: images/go.Dockerfile (ARG GO_VERSION)
+    node: "22" # verify: images/typescript.Dockerfile (ARG NODE_VERSION)
+    ruby: "3.3" # verify: images/ruby.Dockerfile (ARG RUBY_VERSION)
+    dotnet: "8.0" # verify: images/dotnet.Dockerfile (ARG DOTNET_VERSION)
 
 # ── Tier 3 — code deps (least rigor; report-only — audit warns, never fails) ──
 # Canonical specs are the orders kernel's (libs/orders/python). Recorded here so the

@@ -100,3 +100,38 @@ converters register in `resolve_data_converter()` when needed.
 - Live hello proof (kind+OSS, pre-strip): HelloWorkflow COMPLETED; activity on
   `hello-activity-task-queue`; Grafana panels resolve with `prometheus-kind` uid
 - Independent Temporal-aware `/code-review` required before merge (PR #1)
+
+## Amendment (2026-07-10): Ruby, .NET, `runtime_version`, cross-SDK .NET payloads
+
+Polyglot domain adoption now includes **Ruby** and **.NET** alongside Python, Java, Go, and
+TypeScript. Templates live under `templates/domain/ruby/` and `templates/domain/dotnet/`;
+`compose/scripts/build_domain_images.py` is the sole adapter for language-specific image build args.
+
+### `runtime_version` (descriptor → Dockerfile ARG)
+
+Optional per-worker `runtime_version` on `config/domains/*.yaml` pins the language runtime base
+without forking Dockerfiles. Defaults match `config/dependencies.yaml` → `platform.runtimes` and
+each `images/<language>.Dockerfile` ARG. Notable mapping: **dotnet** `runtime_version: net8.0` (or
+`net10.0`) sets both `DOTNET_VERSION` (image tag `8.0`) and `TARGET_FRAMEWORK` (`net8.0`).
+
+### Ruby runtime layout
+
+Ruby workers use per-worker `Gemfile` + path gem to `libs/<domain>/ruby`. The image copies
+`vendor/bundle` **and** mirrors `/libs` at runtime (Bundler resolves path deps even in deployment
+mode) and sets `BUNDLE_DEPLOYMENT=1` / `BUNDLE_PATH=/app/vendor/bundle`. OSS/kind mTLS is wired in
+the worker template via `Temporalio::Client::Connection::TLSOptions` reading the standard
+`TEMPORAL_TLS_*` env vars injected by the chart.
+
+### .NET cross-SDK payload interop
+
+.NET's default `System.Text.Json` payload converter uses PascalCase property names and is
+case-sensitive. Other SDK templates and the console `sample_inputs` catalog emit camelCase JSON
+(e.g. `{"name":"Temporal"}`). Domain templates therefore ship `CamelCasePayloadConverter` and wire
+`DataConverter.Default with { PayloadConverter = new CamelCasePayloadConverter() }` on worker
+client connect — per Temporal .NET SDK guidance for multi-SDK interoperability.
+
+### Console trigger on kind+OSS
+
+Host-plane `/domain-trigger` requires `TEMPORAL_TRIGGER_TLS=true` when the backend is OSS (mTLS
+certs mounted at `/etc/temporal/tls`). Workers in-cluster use the Worker Controller's injected
+certs; the console trigger path is separate.

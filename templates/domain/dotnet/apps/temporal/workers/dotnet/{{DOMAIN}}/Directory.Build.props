@@ -1,0 +1,15 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework Condition="'$(TargetFramework)' == ''">net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>{{Domain}}Demo</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Temporalio" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)CamelCasePayloadConverter.cs" Link="CamelCasePayloadConverter.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)TemporalIds.cs" Link="TemporalIds.cs" />
+  </ItemGroup>
+</Project>

@@ -328,6 +328,29 @@ just cluster-stop                     # docker stop nodes + registry; state pres
 just cluster-start                    # docker start; workers + apps resume, zero network
 ```
 
+## Polyglot worker runtimes (`runtime_version`)
+
+Domain descriptors may set optional per-worker `runtime_version` to pin language bases without
+forking Dockerfiles. `compose/scripts/build_domain_images.py` maps descriptor values to image
+build args; defaults live in `config/dependencies.yaml` → `platform.runtimes` and each
+`images/<language>.Dockerfile` ARG.
+
+| Language | Example | Effect |
+|---|---|---|
+| python | `3.12` | `PYTHON_VERSION` |
+| java | `17` | `JAVA_VERSION` |
+| go | `1.26` | Go toolchain tag |
+| typescript | `22` | `NODE_VERSION` |
+| ruby | `3.3` | `RUBY_VERSION` |
+| dotnet | `net8.0` / `net10.0` | `DOTNET_VERSION` + `TARGET_FRAMEWORK` (TFM ↔ image tag agreement) |
+
+Ruby and .NET templates, adoption runbook steps, and the .NET camelCase payload converter for
+cross-SDK `sample_inputs` are documented in `docs/adapting-a-demo.md` and ADR-0026 (2026-07-10
+amendment).
+
+**Console trigger on kind+OSS:** set `TEMPORAL_TRIGGER_TLS=true` in the OSS host profile so
+`/domain-trigger` can reach the mTLS frontend (certs: `.secrets/temporal-client-mtls`).
+
 `cluster-down` (delete kind) is for reclaiming resources, not for going offline — use `cluster-stop`.
 (`cluster-down` delegates to `kind-down`, which removes the substrate and all workloads with it.)
 

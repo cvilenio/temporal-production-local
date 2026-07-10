@@ -14,8 +14,11 @@
 #   APP_MODULE  uvicorn target (main:app) or python module; workers override CMD
 #   APP_CMD     uvicorn | python
 #   APP_PORT    listen port (web apps only)
+#   PYTHON_VERSION  base image tag (default 3.12)
 # =============================================================================
-FROM python:3.12-slim
+ARG PYTHON_VERSION=3.12
+
+FROM python:${PYTHON_VERSION}-slim
 
 ARG APP_GROUP
 ARG APP_PATH

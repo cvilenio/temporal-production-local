@@ -4,8 +4,11 @@
 #
 #   APP_PATH   worker package dir, e.g.
 #              apps/temporal/workers/typescript/<domain>/activity
+#   NODE_VERSION   base image tag (default 22)
 # =============================================================================
-FROM node:22-bookworm-slim AS build
+ARG NODE_VERSION=22
+
+FROM node:${NODE_VERSION}-bookworm-slim AS build
 ARG APP_PATH
 WORKDIR /repo
 
@@ -27,7 +30,7 @@ RUN DOMAIN="$(echo "${APP_PATH}" | sed 's|apps/temporal/workers/typescript/||' |
 WORKDIR /repo/${APP_PATH}
 RUN pnpm exec tsc -p tsconfig.json
 
-FROM node:22-bookworm-slim
+FROM node:${NODE_VERSION}-bookworm-slim
 ARG APP_PATH
 WORKDIR /repo
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
