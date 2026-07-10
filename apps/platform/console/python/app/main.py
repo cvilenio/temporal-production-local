@@ -69,4 +69,4 @@ app.include_router(status_api.router)
 
 @app.get("/healthz")
 def healthcheck():
-    return {"status": "ok"}
+    return {"status": "ok", "backend": settings.console_backend}
