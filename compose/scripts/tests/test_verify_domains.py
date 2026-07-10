@@ -106,3 +106,51 @@ def test_verify_warns_on_missing_sample_inputs(tmp_path: Path) -> None:
     assert "WARN" in result.stdout
     assert "sample_inputs" in result.stdout
     assert "console trigger" in result.stdout
+
+
+def test_verify_rejects_obsolete_top_level_autoscaling(tmp_path: Path) -> None:
+    _minimal_orders_tree(tmp_path)
+    desc = tmp_path / "config/domains/orders.yaml"
+    text = desc.read_text()
+    desc.write_text(
+        "autoscaling:\n  enabled: true\n" + text,
+    )
+    result = _run_verify(tmp_path, "orders")
+    assert result.returncode == 1
+    combined = result.stdout + result.stderr
+    assert "obsolete top-level 'autoscaling'" in combined
+
+
+def test_verify_errors_on_invalid_autoscaling_bounds(tmp_path: Path) -> None:
+    _minimal_orders_tree(tmp_path)
+    desc = tmp_path / "config/domains/orders.yaml"
+    text = desc.read_text()
+    desc.write_text(
+        text.replace(
+            "minReplicas: 1\n      maxReplicas: 6",
+            "minReplicas: 5\n      maxReplicas: 2",
+        )
+    )
+    result = _run_verify(tmp_path, "orders")
+    assert result.returncode == 1
+    combined = result.stdout + result.stderr
+    assert "minReplicas" in combined
+    assert "maxReplicas" in combined
+
+
+def test_verify_warns_on_replicas_with_autoscaling(tmp_path: Path) -> None:
+    _minimal_orders_tree(tmp_path)
+    desc = tmp_path / "config/domains/orders.yaml"
+    text = desc.read_text()
+    desc.write_text(
+        text.replace(
+            "    dependency_group: workers\n    autoscaling:",
+            "    dependency_group: workers\n    replicas: 2\n    autoscaling:",
+            1,
+        )
+    )
+    result = _run_verify(tmp_path, "orders")
+    assert result.returncode == 0, result.stdout + result.stderr
+    combined = result.stdout + result.stderr
+    assert "WARN" in combined
+    assert "both replicas and autoscaling" in combined

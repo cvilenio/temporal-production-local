@@ -6,13 +6,11 @@
 # ScaledObject seam (which bottomed out on the HPA sync loop and tripped the Cloud
 # per-API rate limit via per-version poll fan-out).
 #
-# Gated by .Values.autoscaling.enabled so the host/OSS `helm template` path (no
-# controller) renders nothing; the kind+Cloud path enables it (see applications.tf).
-{{- if .Values.autoscaling.enabled }}
-{{- $a := .Values.autoscaling }}
+# Gated per worker: presence of workers[].autoscaling renders a CR; workers without
+# it render nothing (host-OSS dev path, or fixed-replica workers).
 {{- range .Values.workers }}
-{{- $wa := index $a.workers .name }}
-{{- if $wa }}
+{{- if .autoscaling }}
+{{- $a := .autoscaling }}
 ---
 apiVersion: autoscaling.ziggymart.io/v1alpha1
 kind: WorkerAutoscaler
@@ -24,33 +22,34 @@ metadata:
 spec:
   # Matches the temporal.io/deployment-name label on the versioned Deployments.
   deploymentName: {{ .deploymentName | quote }}
-  taskQueue: {{ $wa.taskQueue | quote }}
-  queueType: {{ $wa.queueType | default "workflow" | quote }}
-  minReplicas: {{ $wa.minReplicas }}
-  maxReplicas: {{ $wa.maxReplicas }}
-  targetBacklogPerReplica: {{ $wa.targetBacklogPerReplica | int }}
-  {{- with $wa.behavior }}
+  taskQueue: {{ .taskQueue | quote }}
+  queueType: {{ .kind | quote }}
+  minReplicas: {{ $a.minReplicas }}
+  maxReplicas: {{ $a.maxReplicas }}
+  {{- with $a.targetBacklogPerReplica }}
+  targetBacklogPerReplica: {{ . | int }}
+  {{- end }}
+  {{- with $a.behavior }}
   behavior:
     {{- toYaml . | nindent 4 }}
   {{- end }}
-  {{- if $wa.slotScaleUpEnabled }}
+  {{- if $a.slotScaleUpEnabled }}
   slotScaleUpEnabled: true
   {{- end }}
-  {{- if $wa.slotScaleDownGateEnabled }}
+  {{- if $a.slotScaleDownGateEnabled }}
   slotScaleDownGateEnabled: true
   {{- end }}
-  {{- if $wa.targetSlotUtilizationPercent }}
-  targetSlotUtilizationPercent: {{ $wa.targetSlotUtilizationPercent }}
+  {{- if $a.targetSlotUtilizationPercent }}
+  targetSlotUtilizationPercent: {{ $a.targetSlotUtilizationPercent }}
   {{- end }}
-  {{- if $wa.scaleDownSlotUtilizationPercent }}
-  scaleDownSlotUtilizationPercent: {{ $wa.scaleDownSlotUtilizationPercent }}
+  {{- if $a.scaleDownSlotUtilizationPercent }}
+  scaleDownSlotUtilizationPercent: {{ $a.scaleDownSlotUtilizationPercent }}
   {{- end }}
-  {{- if $wa.slotUpWindowSeconds }}
-  slotUpWindowSeconds: {{ $wa.slotUpWindowSeconds }}
+  {{- if $a.slotUpWindowSeconds }}
+  slotUpWindowSeconds: {{ $a.slotUpWindowSeconds }}
   {{- end }}
-  {{- if $wa.slotDownWindowSeconds }}
-  slotDownWindowSeconds: {{ $wa.slotDownWindowSeconds }}
+  {{- if $a.slotDownWindowSeconds }}
+  slotDownWindowSeconds: {{ $a.slotDownWindowSeconds }}
   {{- end }}
-{{- end }}
 {{- end }}
 {{- end }}

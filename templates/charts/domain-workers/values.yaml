@@ -90,73 +90,56 @@ sunset:
 
 # Per-worker autoscaling via the custom temporal-worker-autoscaler controller
 # (ADR-0023). Rendered by templates/workerautoscaler.yaml as one WorkerAutoscaler CR
-# per worker; the controller discovers each worker's per-version Deployments
-# (temporal.io/deployment-name label), reads fresh per-version backlog from Temporal
-# Cloud (one central rate-safe caller), and patches replicas directly for
-# seconds-level actuation. Supersedes the KEDA Temporal-scaler seam (which bottomed
-# out on the HPA sync loop and tripped the Cloud per-API rate limit).
-#
-# Separate top-level key on purpose: the cluster Terraform layer injects the whole
-# `workers:` array (account-bearing image refs), so per-worker autoscaling settings
-# can't live inside it. The template joins this block to each worker by its `name`.
+# per worker with workers[].autoscaling set; taskQueue and queueType are derived from
+# workers[].taskQueue and workers[].kind at render time (not written in the descriptor).
 #
 # minReplicas >= 1 here (always warm). Scale-to-zero (minReplicas: 0) is supported by
 # the controller (the task queue is the durable buffer) but deferred until a
 # safe-to-zero guard against in-flight tasks lands (ADR-0023).
-autoscaling:
-  # Off by default so `helm template` / the host-OSS dev path (no controller) renders
-  # nothing; the kind+Cloud deploy path turns it on (see applications.tf injection).
-  enabled: false
-  # Per-profile bounds + queue scoping, keyed by worker `name` (matches workers[].name).
-  # queueType selects which backlog the controller reads. taskQueue must match the
-  # domain's TaskQueue constants in code. targetBacklogPerReplica = backlog tasks/replica.
-  # Optional per-worker `behavior:` overrides the controller's defaults (fast up, damped
-  # down): scaleUpStabilizationSeconds, scaleDownStabilizationSeconds, tolerancePercent,
-  # maxScaleUpStep, maxScaleDownStep, panicThresholdPercent.
-  workers:
-    workflow:
-      taskQueue: {{DOMAIN}}-workflow-task-queue
-      queueType: workflow
-      minReplicas: 1
-      maxReplicas: 6
-      targetBacklogPerReplica: 5
-      slotScaleUpEnabled: true
-      slotScaleDownGateEnabled: true
-    activity:
-      taskQueue: {{DOMAIN}}-activity-task-queue
-      queueType: activity
-      minReplicas: 1
-      maxReplicas: 10
-      targetBacklogPerReplica: 5
-
+#
 # One entry per worker profile. Each profile is its own image (entrypoint baked at
 # build time via APP_PATH), so each gets its own image tag = version.
 # Images live in the local kind registry (localhost:5001), pushed by `just ci`;
 # the cluster layer pins the tag to the freshly-built git SHA at apply time.
 #
-# `replicas` is the fixed count for the NON-autoscaled path only (host-OSS dev:
-# no KEDA, controller owns replicas). When autoscaling is enabled for a worker
-# (see autoscaling.workers above), the WorkerDeployment omits .spec.replicas and
-# the KEDA HPA owns the count between min/maxReplicaCount — `replicas` is ignored
-# there on purpose (ADR-0023 §2; setting it would fight the HPA and cycle pods).
+# `replicas` is the fixed count for workers WITHOUT workers[].autoscaling (host-OSS dev:
+# no autoscaler CR, controller owns replicas). When autoscaling is present, the
+# WorkerDeployment omits .spec.replicas and the WorkerAutoscaler owns the count between
+# min/maxReplicas - `replicas` is ignored there on purpose (ADR-0023 §2).
 workers:
   - name: workflow
     deploymentName: {{DOMAIN}}-workflow-{{LANG}}
+    taskQueue: {{DOMAIN}}-workflow-task-queue
+    kind: workflow
     replicas: 1
     image:
       repository: localhost:5001/{{DOMAIN}}-worker-workflow
       tag: "latest" # cluster layer overrides with the git-SHA tag from `just ci`
     command: ["python", "main.py"]
+    autoscaling:
+      minReplicas: 1
+      maxReplicas: 6
+      targetBacklogPerReplica: 5
+      slotScaleUpEnabled: true
+      slotScaleDownGateEnabled: true
   - name: activity
     deploymentName: {{DOMAIN}}-activity-{{LANG}}
+    taskQueue: {{DOMAIN}}-activity-task-queue
+    kind: activity
     replicas: 2
     image:
       repository: localhost:5001/{{DOMAIN}}-worker-activity
       tag: "latest"
     command: ["python", "main.py"]
+    autoscaling:
+      minReplicas: 1
+      maxReplicas: 10
+      targetBacklogPerReplica: 5
   # Optional polyglot worker (Java httpGet startup probe + extraEnv). Omit when not needed.
   # - name: finalize-java
   #   deploymentName: {{DOMAIN}}-finalize-java
+  #   taskQueue: {{DOMAIN}}-finalize-task-queue
+  #   kind: activity
   #   replicas: 1
   #   image:
   #     repository: localhost:5001/{{DOMAIN}}-worker-finalize-java
@@ -168,3 +151,7 @@ workers:
   #   extraEnv:
   #     OTEL_SERVICE_NAME: {{DOMAIN}}-worker-finalize-java
   #     SDK_METRICS_PORT: "9000"
+  #   autoscaling:
+  #     minReplicas: 1
+  #     maxReplicas: 10
+  #     targetBacklogPerReplica: 5

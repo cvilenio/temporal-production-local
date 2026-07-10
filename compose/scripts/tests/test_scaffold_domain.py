@@ -134,6 +134,100 @@ def test_scaffold_domain_python_idempotent(tmp_path: Path) -> None:
     )
     assert verify.returncode == 0, verify.stdout + verify.stderr
 
+    values_path = tmp_path / f"deploy/charts/{DOMAIN}-workers/values.yaml"
+    values = yaml.safe_load(values_path.read_text())
+    assert "autoscaling" not in values
+    for worker in values["workers"]:
+        assert "taskQueue" in worker
+        assert "kind" in worker
+        assert "autoscaling" not in worker
+
+
+def test_scaffold_chart_values_passes_descriptor_autoscaling(tmp_path: Path) -> None:
+    domain = "scaffoldautos"
+    _seed_minimal_repo(tmp_path)
+    desc_path = tmp_path / f"config/domains/{domain}.yaml"
+    desc_path.parent.mkdir(parents=True, exist_ok=True)
+    desc_path.write_text(
+        yaml.safe_dump(
+            {
+                "domain": domain,
+                "k8s_namespace": "orders",
+                "data_converter": "default",
+                "workers": [
+                    {
+                        "profile": "workflow",
+                        "language": "python",
+                        "kind": "workflow",
+                        "deployment_name": f"{domain}-workflow-python",
+                        "task_queue": f"{domain}-workflow-task-queue",
+                        "autoscaling": {
+                            "minReplicas": 2,
+                            "maxReplicas": 8,
+                            "targetBacklogPerReplica": 3,
+                            "slotScaleUpEnabled": True,
+                        },
+                    },
+                    {
+                        "profile": "activity",
+                        "language": "python",
+                        "kind": "activity",
+                        "deployment_name": f"{domain}-activity-python",
+                        "task_queue": f"{domain}-activity-task-queue",
+                        "autoscaling": {
+                            "minReplicas": 1,
+                            "maxReplicas": 12,
+                            "targetBacklogPerReplica": 7,
+                        },
+                    },
+                ],
+                "workflows": [
+                    {
+                        "type": "HelloWorkflow",
+                        "task_queue": f"{domain}-workflow-task-queue",
+                        "sample_inputs": [
+                            {"label": "happy_path", "input": {"name": "Temporal"}}
+                        ],
+                    }
+                ],
+                "observability": {"dashboard": False},
+            },
+            sort_keys=False,
+        )
+    )
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(SCAFFOLD),
+            "--name",
+            domain,
+            "--root",
+            str(tmp_path),
+        ],
+        check=True,
+        cwd=REPO_ROOT,
+    )
+
+    values = yaml.safe_load(
+        (tmp_path / f"deploy/charts/{domain}-workers/values.yaml").read_text()
+    )
+    assert "autoscaling" not in values
+    by_name = {w["name"]: w for w in values["workers"]}
+    assert by_name["workflow"]["autoscaling"] == {
+        "minReplicas": 2,
+        "maxReplicas": 8,
+        "targetBacklogPerReplica": 3,
+        "slotScaleUpEnabled": True,
+    }
+    assert by_name["activity"]["autoscaling"] == {
+        "minReplicas": 1,
+        "maxReplicas": 12,
+        "targetBacklogPerReplica": 7,
+    }
+    assert by_name["workflow"]["taskQueue"] == f"{domain}-workflow-task-queue"
+    assert by_name["workflow"]["kind"] == "workflow"
+
 
 def test_scaffold_domain_java_and_verify(tmp_path: Path) -> None:
     _seed_minimal_java_repo(tmp_path)

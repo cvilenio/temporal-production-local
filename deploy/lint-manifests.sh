@@ -59,7 +59,8 @@ fi
 
 kc=(kubeconform -strict -summary
     -schema-location default
-    -schema-location "$catalog")
+    -schema-location "$catalog"
+    -skip WorkerAutoscaler)
 
 for chart in "${charts[@]}"; do
   echo "== kubeconform: rendered $(basename "$chart") chart =="
