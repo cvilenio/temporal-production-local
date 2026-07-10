@@ -185,12 +185,13 @@ legacy-fresh: legacy-down legacy-up
 # Host plane (ADR-0014): visibility + console + mock-api for the kind path.
 # Bring up FIRST before live kind testing. Detached — tail logs with `just host-logs`.
 # backend selects Cloud vs OSS connection profile for the console.
-host-up backend="cloud": headlamp-plugins grafana-plugins
+host-up backend="": headlamp-plugins grafana-plugins
     #!/usr/bin/env bash
     set -euo pipefail
-    case "{{backend}}" in cloud|oss) ;; *) echo "backend must be 'cloud' or 'oss'"; exit 1;; esac
+    backend="{{backend}}"; if [ -z "$backend" ]; then backend="$(terraform -chdir=deploy/terraform/layers/cluster output -raw temporal_backend 2>/dev/null || echo cloud)"; fi
+    case "$backend" in cloud|oss) ;; *) echo "backend must be 'cloud' or 'oss'"; exit 1;; esac
     profile=".secrets/keys/cloud.env"
-    [ "{{backend}}" = "oss" ] && profile="config/local-oss-kind.env"
+    [ "$backend" = "oss" ] && profile="config/local-oss-kind.env"
     set -a; . "$profile"; set +a
     docker compose -f docker-compose.yml up -d --build
 
@@ -207,7 +208,7 @@ host-start:
     docker compose -f docker-compose.yml -f compose/host-apptier.yml start
 
 # Tear down and recreate the host plane.
-host-refresh backend="cloud":
+host-refresh backend="":
     just host-down
     just host-up {{backend}}
 
@@ -557,7 +558,19 @@ switch-backend target *FLAGS:
     # prune the OSS server (only `temporal-server-down` does). Guessing false here
     # would set oss_server_enabled=false → Terraform destroys the server + CNPG.
     srv="$(terraform -chdir=$L output -raw oss_server_enabled 2>/dev/null || echo true)"
-    if [ "$cur" = "{{target}}" ]; then echo "Already on backend '{{target}}' — nothing to do."; exit 0; fi
+    reconcile_console() {
+      local target="$1"
+      profile=".secrets/keys/cloud.env"; [ "$target" = "oss" ] && profile="config/local-oss-kind.env"
+      set -a; . "$profile"; set +a
+      docker compose -f docker-compose.yml up -d --no-deps --force-recreate platform-console
+      just headlamp-reload 2>/dev/null || true
+    }
+    if [ "$cur" = "{{target}}" ]; then
+      echo "Cluster already on backend '{{target}}' — reconciling platform-console to the {{target}} profile."
+      reconcile_console "{{target}}"
+      echo "Console recreated with the {{target}} profile."
+      exit 0
+    fi
     echo "Switching backend: $cur -> {{target}}"
 
     # Detect open workflows on the CURRENT backend (best-effort). Cloud: source the
@@ -612,10 +625,7 @@ switch-backend target *FLAGS:
     echo "Cluster repointed to {{target}}. Waiting for ArgoCD to reconcile the workers..."
 
     # Recreate the host console with the target profile (flips CONSOLE_BACKEND etc).
-    profile=".secrets/keys/cloud.env"; [ "{{target}}" = "oss" ] && profile="config/local-oss-kind.env"
-    set -a; . "$profile"; set +a
-    docker compose -f docker-compose.yml up -d --no-deps --force-recreate platform-console
-    just headlamp-reload 2>/dev/null || true
+    reconcile_console "{{target}}"
     echo "Switched to backend '{{target}}'. Console recreated with the {{target}} profile."
 
 # Remove the in-cluster OSS temporal-server (Application + CNPG Postgres + certs).
@@ -676,11 +686,22 @@ headlamp-reload:
 grafana-plugins:
     @uv run python compose/scripts/fetch-grafana-plugins.py
 
-# Probe that the platform-console is up. Required before ANY live kind testing so
-# the operator can follow along in real time — see AGENTS.md / docs/RUNMODES.md.
-# Wraps `poe preflight-console`; exits non-zero with how-to-fix if the console is down.
-preflight:
+# Live-test gate: fails if the console is down OR its backend drifts from the target
+# (expected arg, else live cluster state). Wraps poe preflight-console for liveness.
+preflight expected="":
+    #!/usr/bin/env bash
+    set -euo pipefail
     uv run poe preflight-console
+    console="$(curl -sf --max-time 3 http://localhost:8086/healthz | python3 -c 'import sys,json; print(json.load(sys.stdin).get("backend",""))' 2>/dev/null || echo "")"
+    target="{{expected}}"
+    if [ -z "$target" ]; then
+      target="$(terraform -chdir=deploy/terraform/layers/cluster output -raw temporal_backend 2>/dev/null || echo "")"
+    fi
+    if [ -n "$console" ] && [ -n "$target" ] && [ "$console" != "$target" ]; then
+      echo "backend drift: platform-console is '$console' but the target backend is '$target'." >&2
+      echo "Resync the console:  just host-refresh $target   (or run: just host-up $target)" >&2
+      exit 1
+    fi
 
 # --- workloads ---------------------------------------------------------------
 
@@ -694,7 +715,7 @@ workloads-up backend="cloud":
     #!/usr/bin/env bash
     set -euo pipefail
     case "{{backend}}" in cloud|oss) ;; *) echo "backend must be 'cloud' or 'oss'"; exit 1;; esac
-    just preflight
+    just preflight {{backend}}
     just mirror-deps
     just ci
     just chart-publish
@@ -731,7 +752,7 @@ cluster-up backend="cloud":
     #!/usr/bin/env bash
     set -euo pipefail
     case "{{backend}}" in cloud|oss) ;; *) echo "backend must be 'cloud' or 'oss'"; exit 1;; esac
-    just preflight
+    just preflight {{backend}}
     just kind-up
     just workloads-up {{backend}}
 
