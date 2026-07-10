@@ -80,6 +80,11 @@ def pypi_latest(pkg: str) -> str:
     return max(stable, key=vtuple) if stable else data["info"]["version"]
 
 
+def rubygems_latest(pkg: str) -> str:
+    data = _get_json(f"https://rubygems.org/api/v1/gems/{pkg}.json")
+    return data["version"]
+
+
 def dockerhub_latest(repo: str, major: int | None = None) -> str:
     """Max semver tag in a Docker Hub repo (covers images AND OCI Helm charts).
 
@@ -107,6 +112,14 @@ def github_latest_release(repo: str) -> str:
     return _get_json(f"https://api.github.com/repos/{repo}/releases/latest")["tag_name"]
 
 
+def nuget_latest(package: str) -> str:
+    data = _get_json(
+        f"https://api.nuget.org/v3-flatcontainer/{package.lower()}/index.json"
+    )
+    versions = [v for v in data.get("versions", []) if is_stable(v) and vtuple(v)]
+    return max(versions, key=vtuple) if versions else data["versions"][-1]
+
+
 def tfregistry_latest(provider: str) -> str:
     return _get_json(f"https://registry.terraform.io/v1/providers/{provider}")[
         "version"
@@ -127,6 +140,18 @@ def main() -> None:
             t["python_sdk"],
             lambda: pypi_latest("temporalio"),
             "PyPI",
+        ),
+        (
+            "temporal Ruby SDK",
+            t["ruby_sdk"],
+            lambda: rubygems_latest("temporalio"),
+            "RubyGems",
+        ),
+        (
+            "temporal .NET SDK",
+            t["dotnet_sdk"],
+            lambda: nuget_latest("Temporalio"),
+            "NuGet",
         ),
         (
             "temporal server",

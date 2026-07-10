@@ -1,0 +1,6 @@
+# frozen_string_literal: true
+
+source 'https://rubygems.org'
+
+gem 'temporalio', '~> 1.5'
+gem '{{DOMAIN_PKG}}_lib', path: '../../../../../../libs/{{DOMAIN}}/ruby'

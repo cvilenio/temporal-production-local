@@ -192,6 +192,59 @@ def build_rows(spec: dict) -> list[Row]:
                 )
             )
 
+    ruby_sdk = t.get("ruby_sdk")
+    if ruby_sdk:
+        for rel in sorted(REPO_ROOT.glob("templates/domain/ruby/**/Gemfile")):
+            text = read(rel.relative_to(REPO_ROOT).as_posix())
+            if not text or "temporalio" not in text:
+                continue
+            actual, loc = search1(
+                rel.relative_to(REPO_ROOT).as_posix(),
+                r"gem\s+['\"]temporalio['\"],\s*['\"]([^'\"]+)['\"]",
+            )
+            rows.append(
+                Row(
+                    1,
+                    "temporal Ruby SDK",
+                    ruby_sdk,
+                    actual,
+                    f"{rel.relative_to(REPO_ROOT)}",
+                )
+            )
+        for rel in sorted(REPO_ROOT.glob("templates/domain/ruby/**/*.gemspec")):
+            actual, loc = search1(
+                rel.relative_to(REPO_ROOT).as_posix(),
+                r"spec\.add_dependency\s+['\"]temporalio['\"],\s*['\"]([^'\"]+)['\"]",
+            )
+            rows.append(
+                Row(
+                    1,
+                    "temporal Ruby SDK",
+                    ruby_sdk,
+                    actual,
+                    f"{rel.relative_to(REPO_ROOT)}",
+                )
+            )
+
+    dotnet_sdk = t.get("dotnet_sdk")
+    if dotnet_sdk:
+        for rel in sorted(
+            REPO_ROOT.glob("templates/domain/dotnet/**/Directory.Packages.props")
+        ):
+            actual, loc = search1(
+                rel.relative_to(REPO_ROOT).as_posix(),
+                r'PackageVersion Include="Temporalio" Version="([^"]+)"',
+            )
+            rows.append(
+                Row(
+                    1,
+                    "temporal .NET SDK",
+                    dotnet_sdk,
+                    actual,
+                    f"{rel.relative_to(REPO_ROOT)}",
+                )
+            )
+
     # Server / admin-tools / UI tags live in .env.
     for comp, var in [
         ("temporal server", "TEMPORAL_VERSION"),
@@ -337,6 +390,35 @@ def build_rows(spec: dict) -> list[Row]:
     rows.append(Row(2, "postgresql", pg, env_pg, ".env (POSTGRESQL_VERSION)"))
     ha_pg, _ = search1("compose/host-apptier.yml", r"image:\s*postgres:(\S+)")
     rows.append(Row(2, "postgresql", pg, ha_pg, "compose/host-apptier.yml"))
+
+    # Worker image language runtimes — Dockerfile ARG defaults.
+    runtimes = p.get("runtimes") or {}
+    runtime_dockerfiles = {
+        "python": ("images/python.Dockerfile", "PYTHON_VERSION"),
+        "java": ("images/java.Dockerfile", "JAVA_VERSION"),
+        "go": ("images/go.Dockerfile", "GO_VERSION"),
+        "node": ("images/typescript.Dockerfile", "NODE_VERSION"),
+        "ruby": ("images/ruby.Dockerfile", "RUBY_VERSION"),
+        "dotnet": ("images/dotnet.Dockerfile", "DOTNET_VERSION"),
+    }
+    for key, (dockerfile, arg_name) in runtime_dockerfiles.items():
+        expected = runtimes.get(key)
+        if not expected:
+            continue
+        actual, loc = search1(
+            dockerfile,
+            rf"^ARG\s+{re.escape(arg_name)}=(\S+)",
+            flags=re.MULTILINE,
+        )
+        rows.append(
+            Row(
+                2,
+                f"runtime {key}",
+                str(expected),
+                actual,
+                f"{loc} (ARG {arg_name})",
+            )
+        )
 
     # ---- Tier 3: code deps (report-only) -------------------------------------
     # Canonical specs live in the orders kernel; warn on drift anywhere it appears.

@@ -31,7 +31,18 @@ REPO_ROOT = Path(
 ).resolve()
 DOMAINS_DIR = REPO_ROOT / "config" / "domains"
 
-SUPPORTED_LANGUAGES = frozenset({"python", "java", "go", "typescript"})
+SUPPORTED_LANGUAGES = frozenset(
+    {"python", "java", "go", "typescript", "ruby", "dotnet"}
+)
+
+# Maps worker language -> Dockerfile ARG name for optional runtime_version override.
+_RUNTIME_VERSION_BUILD_ARG: dict[str, str] = {
+    "python": "PYTHON_VERSION",
+    "java": "JAVA_VERSION",
+    "go": "GO_VERSION",
+    "typescript": "NODE_VERSION",
+    "ruby": "RUBY_VERSION",
+}
 
 
 @dataclass(frozen=True)
@@ -71,6 +82,33 @@ def java_gradle_module(domain: str, profile: str) -> str:
     return f"{domain}-{profile}-worker"
 
 
+def dotnet_runtime_parts(runtime_version: str | None) -> tuple[str, str]:
+    """Map descriptor runtime_version to MSBuild TFM + SDK/runtime image tag."""
+    rv = str(runtime_version or "net8.0").strip()
+    if rv.startswith("net"):
+        return rv, rv[3:]
+    return f"net{rv}", rv
+
+
+def dotnet_version_build_args(worker: dict) -> dict[str, str]:
+    if not worker.get("runtime_version"):
+        return {}
+    tfm, tag = dotnet_runtime_parts(str(worker["runtime_version"]))
+    return {"TARGET_FRAMEWORK": tfm, "DOTNET_VERSION": tag}
+
+
+def runtime_version_build_args(language: str, worker: dict) -> dict[str, str]:
+    """Emit the language's version build-arg when runtime_version is set on the worker."""
+    rv = worker.get("runtime_version")
+    if rv is None or rv == "":
+        return {}
+    lang = language.lower()
+    arg_name = _RUNTIME_VERSION_BUILD_ARG.get(lang)
+    if not arg_name:
+        return {}
+    return {arg_name: str(rv)}
+
+
 def language_build_args(
     *,
     domain: str,
@@ -80,32 +118,47 @@ def language_build_args(
     rel_worker_dir: str,
 ) -> dict[str, str]:
     lang = language.lower()
+    args: dict[str, str]
     if lang == "python":
         dep_group = str(worker.get("dependency_group") or f"{domain}-workers")
-        return {
+        args = {
             "APP_GROUP": dep_group,
             "APP_PATH": rel_worker_dir,
             "APP_MODULE": "main",
             "APP_CMD": "python",
         }
-    if lang == "java":
+    elif lang == "java":
         module = java_gradle_module(domain, profile)
-        return {
+        args = {
             "DOMAIN": domain,
             "APP_MODULE": f":{module}",
             "WORKER_REL_PATH": rel_worker_dir,
             "APP_JAR": module,
         }
-    if lang == "go":
-        return {
+    elif lang == "go":
+        args = {
             "APP_PATH": rel_worker_dir,
             "APP_PKG": "./cmd",
         }
-    if lang == "typescript":
-        return {
+    elif lang == "typescript":
+        args = {
             "APP_PATH": rel_worker_dir,
         }
-    raise ValueError(f"unsupported worker language {language!r}")
+    elif lang == "ruby":
+        args = {
+            "APP_PATH": rel_worker_dir,
+        }
+    elif lang == "dotnet":
+        args = {
+            "APP_PATH": rel_worker_dir,
+            "DOMAIN": domain,
+        }
+        args.update(dotnet_version_build_args(worker))
+    else:
+        raise ValueError(f"unsupported worker language {language!r}")
+    if lang != "dotnet":
+        args.update(runtime_version_build_args(lang, worker))
+    return args
 
 
 def iter_workers(domain_filter: str | None = None) -> list[WorkerSpec]:

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Compile-check Go and typecheck TypeScript domain templates offline."""
+"""Compile-check Go, typecheck TypeScript, syntax-check Ruby, and build-check .NET domain templates offline."""
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,12 +14,15 @@ GO_DOMAIN = "golint"
 TS_DOMAIN = "tlint"
 
 
-def substitute(text: str, domain: str) -> str:
-    return (
+def substitute(text: str, domain: str, *, lang: str = "") -> str:
+    text = (
         text.replace("{{DOMAIN}}", domain)
         .replace("{{DOMAIN_PKG}}", domain.replace("-", "_"))
-        .replace("{{LANG}}", "go")
+        .replace("{{Domain}}", domain.replace("-", " ").title().replace(" ", ""))
     )
+    if lang:
+        text = text.replace("{{LANG}}", lang)
+    return text
 
 
 def copy_tree(src: Path, dst: Path, domain: str) -> None:
@@ -167,9 +171,86 @@ def lint_typescript_templates() -> None:
     print("TypeScript domain templates typecheck ok.")
 
 
+def lint_ruby_templates() -> None:
+    src = SCRIPT_REPO / "templates/domain/ruby"
+    if not src.is_dir():
+        return
+    rb_domain = "rubylint"
+    with tempfile.TemporaryDirectory(prefix="ruby-template-lint-") as tmp:
+        root = Path(tmp)
+        for path in sorted(src.rglob("*")):
+            rel = path.relative_to(src)
+            rel_parts = [substitute(part, rb_domain) for part in rel.parts]
+            out = root.joinpath(*rel_parts)
+            if path.is_dir():
+                out.mkdir(parents=True, exist_ok=True)
+                continue
+            out.parent.mkdir(parents=True, exist_ok=True)
+            if path.suffix == ".rb":
+                out.write_text(substitute(path.read_text(), rb_domain, lang="ruby"))
+            else:
+                shutil.copy2(path, out)
+        for path in sorted(root.rglob("*.rb")):
+            subprocess.run(["ruby", "-c", str(path)], check=True)
+    print("Ruby domain templates syntax ok.")
+
+
+def lint_dotnet_templates() -> None:
+    src = SCRIPT_REPO / "templates/domain/dotnet"
+    if not src.is_dir():
+        return
+    dn_domain = "dotnetlint"
+    with tempfile.TemporaryDirectory(prefix="dotnet-template-lint-") as tmp:
+        root = Path(tmp)
+        for path in sorted(src.rglob("*")):
+            rel = path.relative_to(src)
+            rel_parts = [
+                substitute(part, dn_domain, lang="dotnet") for part in rel.parts
+            ]
+            out = root.joinpath(*rel_parts)
+            if path.is_dir():
+                out.mkdir(parents=True, exist_ok=True)
+                continue
+            out.parent.mkdir(parents=True, exist_ok=True)
+            if path.suffix in {
+                ".cs",
+                ".csproj",
+                ".props",
+                ".editorconfig",
+            } or path.name in {
+                "Directory.Build.props",
+                "Directory.Packages.props",
+                ".editorconfig",
+            }:
+                out.write_text(substitute(path.read_text(), dn_domain, lang="dotnet"))
+            else:
+                shutil.copy2(path, out)
+        subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "-v",
+                f"{root}:/repo",
+                "-w",
+                f"/repo/apps/temporal/workers/dotnet/{dn_domain}/workflow",
+                "mcr.microsoft.com/dotnet/sdk:8.0",
+                "dotnet",
+                "build",
+                "-c",
+                "Release",
+                "-p:TargetFramework=net8.0",
+            ],
+            check=True,
+        )
+    print(".NET domain templates build ok.")
+
+
 def main() -> None:
     lint_go_templates()
     lint_typescript_templates()
+    lint_ruby_templates()
+    lint_dotnet_templates()
 
 
 if __name__ == "__main__":

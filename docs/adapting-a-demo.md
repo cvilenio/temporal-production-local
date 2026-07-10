@@ -88,10 +88,13 @@ Each language uses its native toolchain; the scaffolder patches the manifest; th
 | **Java** | Gradle multi-project (`settings.gradle`) | `include` + `projectDir` per worker module | `images/java.Dockerfile` | Worker path in `settings.gradle` |
 | **Go** | Per-worker `go.mod` (isolated module) | Worker dir with `go.mod` + `cmd/` | `images/go.Dockerfile` | `go.mod` in worker dir |
 | **TypeScript** | pnpm workspace (`pnpm-workspace.yaml`, created on first TS scaffold) | Workspace package entries | `images/typescript.Dockerfile` | `package.json` in worker dir |
+| **Ruby** | Per-worker `Gemfile` + path gem to `libs/<domain>/ruby` | `bundle lock` via scaffolder (host Ruby 3.3+ or Docker) | `images/ruby.Dockerfile` | `Gemfile` + `Gemfile.lock` in lib and each worker dir |
+| **.NET** | Central `Directory.Packages.props` (Temporalio pinned) | Shared `Directory.Build.props` at domain root | `images/dotnet.Dockerfile` | `*.csproj` in each worker dir |
 
 Build args are resolved in `compose/scripts/build_domain_images.py` (the only place language-specific build knowledge lives).
 Optional per-worker `dockerfile:` on the descriptor overrides the default `images/<language>.Dockerfile`.
 Optional per-worker `dependency_group:` (Python) defaults to `<domain>-workers` — use a separate group when the workflow worker must stay light and activity workers need heavier deps.
+Optional per-worker `runtime_version:` pins the language runtime base (see below).
 
 ### Commit your lockfiles
 
@@ -104,6 +107,8 @@ After porting real dependencies, commit the lock artifacts so image builds are r
 | **Java** | Commit `gradle.lockfile` / version-catalog changes as you add deps (`just java-build` to verify) |
 | **Go** | Run `go mod tidy` in each worker module and commit `go.sum` |
 | **TypeScript** | Run `pnpm install` at the repo root and commit `pnpm-lock.yaml` |
+| **Ruby** | Commit `Gemfile.lock` in `libs/<domain>/ruby` and each `apps/temporal/workers/ruby/<domain>/<profile>/` (scaffolder runs `bundle lock`) |
+| **.NET** | No separate lockfile — `Directory.Packages.props` pins package versions; commit csproj/props changes |
 
 `just adopt-domain` runs `uv lock` for Python before build; you still must commit the result.
 
@@ -225,6 +230,39 @@ Per worker entrypoint, register the right workflows/activities and keep **produc
 - Workers: `apps/temporal/workers/typescript/<domain>/<profile>/`
 - Use `proxyActivities` with `taskQueue: TaskQueue.ACTIVITY` in workflow code.
 
+#### Ruby
+
+- Domain library gem: `libs/<domain>/ruby/` (path dep from worker `Gemfile`)
+- Workers: `apps/temporal/workers/ruby/<domain>/<profile>/worker.rb`
+- Queue constants: `libs/<domain>/ruby/lib/<domain>_lib/temporal_ids.rb`
+- Route activities with `task_queue:` on `Temporalio::Workflow.execute_activity` (production split).
+- Set `workflow_versioning_behavior Temporalio::VersioningBehavior::PINNED` on workflow classes.
+- OSS/kind workers need mTLS cert paths from env (`TEMPORAL_TLS_CLIENT_*`, `TEMPORAL_TLS_SERVER_CA_CERT_PATH`) — wired in the template via `TLSOptions`.
+
+#### .NET
+
+- Shared MSBuild props: `apps/temporal/workers/dotnet/<domain>/Directory.Build.props` + `Directory.Packages.props`
+- Workers: `apps/temporal/workers/dotnet/<domain>/<profile>/` (`dotnet Worker.dll` at runtime)
+- Queue constants: `TemporalIds.cs` in each worker project
+- Route activities with `TaskQueue` on `Workflow.ExecuteActivityAsync` options.
+- `[Workflow(..., VersioningBehavior = VersioningBehavior.Pinned)]` on workflow classes.
+- **Cross-SDK payloads:** templates ship `CamelCasePayloadConverter` (camelCase JSON + case-insensitive bind) so `sample_inputs` like `{"name":"Temporal"}` interoperate with Python/Go/TS/Java/Ruby starters. System.Text.Json defaults are PascalCase and case-sensitive.
+
+### `runtime_version` (optional per worker)
+
+Descriptor field `runtime_version` pins the worker image language base when it differs from the Dockerfile ARG default (`config/dependencies.yaml` → `platform.runtimes`):
+
+| Language | Example `runtime_version` | Build effect |
+|---|---|---|
+| python | `"3.12"` / `"3.13"` | `PYTHON_VERSION` image ARG |
+| java | `"17"` / `"21"` | `JAVA_VERSION` image ARG |
+| go | `"1.26"` | Go toolchain image tag |
+| typescript | `"22"` | `NODE_VERSION` image ARG |
+| ruby | `"3.3"` | `RUBY_VERSION` image ARG |
+| dotnet | `"net8.0"` / `"net10.0"` | `DOTNET_VERSION` + `TARGET_FRAMEWORK` (e.g. `net8.0` → SDK/runtime `8.0`) |
+
+Omit `runtime_version` to use the Dockerfile default baked into `images/<language>.Dockerfile`.
+
 Gate before deploy:
 
 ```bash
@@ -271,13 +309,13 @@ Prefer `just adopt-domain` over full `just cluster-up` when adding one domain al
    Schedule-to-start panels show NaN when idle — expected with no backlog.
 4. **Terminate** the test execution when done.
 
-**OSS console trigger note:** the Temporal frontend is ClusterIP-only from Docker.
-If trigger fails with TLS handshake errors, port-forward and recreate the console:
+**OSS console trigger note:** the Temporal frontend on kind uses mTLS. For `/domain-trigger` from the host-plane console, set `TEMPORAL_TRIGGER_TLS=true` in your OSS host profile (certs are already mounted at `/etc/temporal/tls` in `docker-compose.yml` — populate `.secrets/temporal-client-mtls` first). Without TLS, the trigger client fails with handshake errors even though workers run fine in-cluster.
+
+If the frontend is ClusterIP-only from Docker, port-forward and point the console at it:
 
 ```bash
 kubectl port-forward -n temporal svc/temporal-frontend 17233:7233
-# set TEMPORAL_TRIGGER_ADDRESS=host.docker.internal:17233 in config/local-oss-kind.env
-# mount mTLS client certs - see docs/adapting-a-demo.md / extract from temporal-client-mtls secret
+# set TEMPORAL_TRIGGER_ADDRESS=host.docker.internal:17233 and TEMPORAL_TRIGGER_TLS=true
 docker compose up -d --no-deps --force-recreate platform-console
 ```
 
@@ -306,6 +344,8 @@ docker compose up -d --no-deps --force-recreate platform-console
 | Java | `templates/domain/java/` |
 | Go | `templates/domain/go/` |
 | TypeScript | `templates/domain/typescript/` |
+| Ruby | `templates/domain/ruby/` |
+| .NET | `templates/domain/dotnet/` |
 | Helm chart | `templates/charts/domain-workers/` |
 | Grafana | `templates/grafana/dashboard.json` |
 

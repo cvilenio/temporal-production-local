@@ -1,0 +1,24 @@
+##### Temporal workflow files have different editor config #####
+[*.workflow.cs]
+
+# We use getters for queries, they cannot be properties
+dotnet_diagnostic.CA1024.severity = none
+
+# Don't force workflows to have static methods
+dotnet_diagnostic.CA1822.severity = none
+
+# Do not need ConfigureAwait in workflows
+dotnet_diagnostic.CA2007.severity = none
+
+# Do not need task scheduler for workflows
+dotnet_diagnostic.CA2008.severity = none
+
+# Workflow randomness is intentionally deterministic
+dotnet_diagnostic.CA5394.severity = none
+
+# Allow async methods to not have await in them
+dotnet_diagnostic.CS1998.severity = none
+
+# Don't avoid, but rather encourage things using TaskScheduler.Current in workflows
+dotnet_diagnostic.VSTHRD103.severity = none
+dotnet_diagnostic.VSTHRD105.severity = none
