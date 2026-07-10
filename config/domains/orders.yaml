@@ -16,14 +16,18 @@
 #     deployment_name: required — k8s WorkerDeployment name.
 #     dependency_group: optional — Python uv group; default "<domain>-workers".
 #     dockerfile:      optional — default "images/<language>.Dockerfile".
-#     replicas:        optional — default 1 in TF when omitted.
+#     replicas:        optional - static replica count when autoscaling is absent; default 1 in TF.
+#                        Ignored when autoscaling is present (minReplicas is the floor).
 #     startup_probe:   optional — per-worker startup gate (e.g. Java httpGet readiness).
 #     extra_env:       optional — extra container env vars (map).
 #     runtime_version: optional — language-runtime pin for the worker image base (string;
 #                        meaning is language-specific: python "3.12", java "17", go "1.26",
 #                        typescript/node "22"). Default = the Dockerfile ARG baked default
 #                        when omitted (see config/dependencies.yaml platform.runtimes).
-#   autoscaling:       optional — WorkerAutoscaler config (enabled + per-profile workers map).
+#     autoscaling:     optional - WorkerAutoscaler knobs (minReplicas, maxReplicas,
+#                        targetBacklogPerReplica, slotScaleUpEnabled, slotScaleDownGateEnabled,
+#                        behavior, targetSlotUtilizationPercent, etc.). taskQueue and queueType
+#                        are derived from task_queue and kind at render time - do not write them.
 #   workflows[]:       optional — console trigger catalog entries.
 #     type, task_queue, sample_inputs (WARN if sample_inputs missing).
 #   observability:
@@ -37,50 +41,34 @@ domain: orders
 namespace: ziggymart
 k8s_namespace: orders
 data_converter: default
-autoscaling:
-  enabled: true
-  workers:
-    workflow:
-      taskQueue: orders-workflow-task-queue
-      queueType: workflow
+workers:
+  - profile: workflow
+    language: python
+    kind: workflow
+    task_queue: orders-workflow-task-queue
+    deployment_name: orders-workflow-python
+    dependency_group: workers
+    autoscaling:
       minReplicas: 1
       maxReplicas: 6
       targetBacklogPerReplica: 5
       slotScaleUpEnabled: true
       slotScaleDownGateEnabled: true
-    activity:
-      taskQueue: orders-activity-task-queue
-      queueType: activity
-      minReplicas: 1
-      maxReplicas: 10
-      targetBacklogPerReplica: 5
-    finalization-java:
-      taskQueue: orders-finalization-task-queue
-      queueType: activity
-      minReplicas: 1
-      maxReplicas: 10
-      targetBacklogPerReplica: 5
-workers:
-  - profile: workflow
-    language: python
-    kind: workflow
-    deployment_name: orders-workflow-python
-    task_queue: orders-workflow-task-queue
-    dependency_group: workers
-    replicas: 1
   - profile: activity
     language: python
     kind: activity
-    deployment_name: orders-activity-python
     task_queue: orders-activity-task-queue
+    deployment_name: orders-activity-python
     dependency_group: workers
-    replicas: 2
+    autoscaling:
+      minReplicas: 1
+      maxReplicas: 10
+      targetBacklogPerReplica: 5
   - profile: finalization-java
     language: java
     kind: activity
-    deployment_name: orders-finalization-java
     task_queue: orders-finalization-task-queue
-    replicas: 1
+    deployment_name: orders-finalization-java
     startup_probe:
       type: httpGet
       path: /health/readiness
@@ -88,6 +76,10 @@ workers:
     extra_env:
       OTEL_SERVICE_NAME: orders-worker-finalization-java
       SDK_METRICS_PORT: "9000"
+    autoscaling:
+      minReplicas: 1
+      maxReplicas: 10
+      targetBacklogPerReplica: 5
 workflows:
   - type: OrderWorkflow
     task_queue: orders-workflow-task-queue

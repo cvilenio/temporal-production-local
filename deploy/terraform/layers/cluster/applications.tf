@@ -105,7 +105,6 @@ locals {
                 apiKeySecret      = local.worker_apikey_secret # Cloud: set; OSS: ""
                 mtlsSecret        = local.worker_mtls_secret   # OSS: set; Cloud: ""
               }
-              autoscaling   = try(desc.autoscaling, { enabled = true })
               dataConverter = try(desc.data_converter, "default")
               workers = [
                 for w in try(desc.workers, []) : merge(
@@ -114,11 +113,14 @@ locals {
                     deploymentName = w.deployment_name
                     replicas       = try(w.replicas, 1)
                     image          = local.domain_worker_images["${desc.domain}-${w.profile}"]
+                    taskQueue      = w.task_queue
+                    kind           = w.kind
                   },
                   lower(w.language) == "python" ? { command = ["python", "main.py"] } : {},
                   lower(w.language) != "python" ? { language = lower(w.language) } : {},
                   lookup(w, "startup_probe", null) != null ? { startupProbe = w.startup_probe } : {},
                   lookup(w, "extra_env", null) != null ? { extraEnv = w.extra_env } : {},
+                  lookup(w, "autoscaling", null) != null ? { autoscaling = w.autoscaling } : {},
                 )
               ]
             }

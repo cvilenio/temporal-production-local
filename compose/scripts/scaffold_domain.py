@@ -571,12 +571,13 @@ def chart_workers_values(descriptor: dict) -> list[dict]:
     for worker in descriptor.get("workers") or []:
         profile = str(worker["profile"])
         language = str(worker.get("language") or "python").lower()
+        kind = str(worker.get("kind") or "activity")
         entry: dict = {
             "name": profile,
             "deploymentName": worker["deployment_name"],
-            "replicas": worker.get(
-                "replicas", 2 if worker.get("kind") == "activity" else 1
-            ),
+            "taskQueue": worker["task_queue"],
+            "kind": kind,
+            "replicas": worker.get("replicas", 2 if kind == "activity" else 1),
             "image": {
                 "repository": f"localhost:5001/{domain}-worker-{profile}",
                 "tag": "latest",
@@ -588,48 +589,10 @@ def chart_workers_values(descriptor: dict) -> list[dict]:
             entry["command"] = ["ruby", "worker.rb"]
         elif language == "dotnet":
             entry["command"] = ["dotnet", "Worker.dll"]
+        if autoscaling := worker.get("autoscaling"):
+            entry["autoscaling"] = autoscaling
         values.append(entry)
     return values
-
-
-def chart_autoscaling_workers(descriptor: dict) -> dict:
-    domain = str(descriptor["domain"])
-    workers: dict = {}
-    for worker in descriptor.get("workers") or []:
-        profile = str(worker["profile"])
-        kind = str(worker.get("kind") or "activity")
-        queue_type = "workflow" if kind == "workflow" else "activity"
-        entry: dict = {
-            "taskQueue": worker["task_queue"],
-            "queueType": queue_type,
-            "minReplicas": 1,
-            "maxReplicas": 6 if queue_type == "workflow" else 10,
-            "targetBacklogPerReplica": 5,
-        }
-        if queue_type == "workflow":
-            entry["slotScaleUpEnabled"] = True
-            entry["slotScaleDownGateEnabled"] = True
-        workers[profile] = entry
-    if not workers:
-        workers = {
-            "workflow": {
-                "taskQueue": f"{domain}-workflow-task-queue",
-                "queueType": "workflow",
-                "minReplicas": 1,
-                "maxReplicas": 6,
-                "targetBacklogPerReplica": 5,
-                "slotScaleUpEnabled": True,
-                "slotScaleDownGateEnabled": True,
-            },
-            "activity": {
-                "taskQueue": f"{domain}-activity-task-queue",
-                "queueType": "activity",
-                "minReplicas": 1,
-                "maxReplicas": 10,
-                "targetBacklogPerReplica": 5,
-            },
-        }
-    return workers
 
 
 def sync_chart_values(
@@ -643,11 +606,7 @@ def sync_chart_values(
     text = values_path.read_text()
     data = yaml.safe_load(text) or {}
     data["workers"] = chart_workers_values(descriptor)
-    autoscaling = descriptor.get("autoscaling") or {}
-    data["autoscaling"] = {
-        "enabled": bool(autoscaling.get("enabled", False)),
-        "workers": chart_autoscaling_workers(descriptor),
-    }
+    data.pop("autoscaling", None)
     rendered = yaml.safe_dump(data, sort_keys=False)
     write_if_changed(values_path, rendered)
 

@@ -50,6 +50,22 @@ WORKER_KNOWN_FIELDS = frozenset(
         "startup_probe",
         "extra_env",
         "runtime_version",
+        "autoscaling",
+    }
+)
+
+AUTOSCALING_KNOWN_FIELDS = frozenset(
+    {
+        "minReplicas",
+        "maxReplicas",
+        "targetBacklogPerReplica",
+        "slotScaleUpEnabled",
+        "slotScaleDownGateEnabled",
+        "behavior",
+        "targetSlotUtilizationPercent",
+        "scaleDownSlotUtilizationPercent",
+        "slotUpWindowSeconds",
+        "slotDownWindowSeconds",
     }
 )
 
@@ -305,6 +321,12 @@ def verify_descriptor(
             f"{rel_path}: remove obsolete 'kernel' field — use domain: {domain!r} for libs/{domain}/"
         )
 
+    if descriptor.get("autoscaling"):
+        errors.append(
+            f"{rel_path}: remove obsolete top-level 'autoscaling' field - "
+            f"nest autoscaling under each workers[] entry"
+        )
+
     if descriptor.get("language") and not all(
         w.get("language") for w in (descriptor.get("workers") or [])
     ):
@@ -414,6 +436,57 @@ def verify_descriptor(
             if not (wdir / "go.mod").is_file():
                 errors.append(
                     f"{rel_path}: workers[{profile!r}] missing go.mod in {rel(wdir)}/"
+                )
+
+        autoscaling = worker.get("autoscaling")
+        if autoscaling is not None:
+            if not isinstance(autoscaling, dict):
+                errors.append(
+                    f"{rel_path}: workers[{profile!r}] autoscaling must be a mapping"
+                )
+            else:
+                unknown_autoscaling = sorted(
+                    set(autoscaling) - AUTOSCALING_KNOWN_FIELDS
+                )
+                if unknown_autoscaling:
+                    errors.append(
+                        f"{rel_path}: workers[{profile!r}] autoscaling unknown field(s) "
+                        f"{unknown_autoscaling} - fix typo or extend "
+                        f"verify-domains AUTOSCALING_KNOWN_FIELDS"
+                    )
+
+                min_replicas = autoscaling.get("minReplicas")
+                max_replicas = autoscaling.get("maxReplicas")
+                if min_replicas is None:
+                    errors.append(
+                        f"{rel_path}: workers[{profile!r}] autoscaling missing minReplicas"
+                    )
+                elif not isinstance(min_replicas, int) or min_replicas < 1:
+                    errors.append(
+                        f"{rel_path}: workers[{profile!r}] autoscaling minReplicas must be >= 1"
+                    )
+                if max_replicas is None:
+                    errors.append(
+                        f"{rel_path}: workers[{profile!r}] autoscaling missing maxReplicas"
+                    )
+                elif not isinstance(max_replicas, int) or max_replicas < 1:
+                    errors.append(
+                        f"{rel_path}: workers[{profile!r}] autoscaling maxReplicas must be >= 1"
+                    )
+                if (
+                    isinstance(min_replicas, int)
+                    and isinstance(max_replicas, int)
+                    and min_replicas > max_replicas
+                ):
+                    errors.append(
+                        f"{rel_path}: workers[{profile!r}] autoscaling minReplicas "
+                        f"({min_replicas}) must be <= maxReplicas ({max_replicas})"
+                    )
+
+            if worker.get("replicas") is not None:
+                warnings.append(
+                    f"{rel_path}: workers[{profile!r}] has both replicas and autoscaling - "
+                    f"replicas is ignored; minReplicas is the floor"
                 )
 
     try:
