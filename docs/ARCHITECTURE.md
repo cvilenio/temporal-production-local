@@ -185,15 +185,19 @@ each app starts it in its lifecycle.
   evaluates the `temporal_slot_utilization` recording rule, and `remote_write`s to a durable
   host **`prometheus-store`** (15d) that Grafana reads (ADR-0021). Workflow/activity custom
   metrics that must be replay-safe use `*.metric_meter()` and ride this pull path, NOT push.
-- **Autoscaling:** KEDA is the single external-metrics provider (ADR-0023) — a Prometheus
-  scaler on the steady queue (querying the recording rule) and a Temporal scaler with a
-  composite guard for bursty/scale-to-zero queues. Not prometheus-adapter (they collide on
-  the `external.metrics.k8s.io` APIService).
+- **Autoscaling:** a custom leader-elected controller (`temporal-worker-autoscaler`,
+  checkpoint 0028) reads fresh per-version task-queue backlog straight from Temporal Cloud
+  (`DescribeWorkerDeploymentVersion`, one rate-safe caller) and patches versioned Deployment
+  replica counts directly — seconds-level, including scale-to-zero. One `WorkerAutoscaler` CR
+  per worker; the controller discovers each worker's per-version Deployments via the
+  `temporal.io/deployment-name` label. This replaced the original KEDA-based design
+  (ADR-0023 Phase 1), which bottomed out on the HPA sync loop and tripped the Cloud per-API
+  rate limit via per-version poll fan-out.
 - **Grafana datasource choice:** Prometheus (`prometheus-kind` → `prometheus-store`) for
   operational/autoscale/PromQL; **ClickHouse (`clickhouse-logs`)** for business metrics +
   logs (SQL). One ClickHouse server backs both `otel_logs` and `otel_metrics_*`.
 
-See ADR-0020/0021/0023/0024.
+See ADR-0020/0021/0023 (superseded)/0024 and checkpoint 0028.
 
 ---
 

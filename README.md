@@ -75,7 +75,7 @@ vision above:
 | Local OCI delivery + offline-resumable cluster (zot, stop/start) | ✅ working |
 | Retail order workflow (saga, signals, idempotent vs. write-then-verify retries) | ✅ working |
 | App tier (orders API, mock API, console) on kind | ✅ working — orders-api + orders-db (CNPG) on kind; console + mock-api on the host plane |
-| **Observability / metrics on kind** | ✅ working — in-cluster Prometheus scrapes SDK/server pods + the Temporal Cloud OpenMetrics endpoint into `prometheus-kind`; backend-agnostic Grafana dashboards (Critical Flows, Worker Fleet & KEDA, Durable Execution Value) verified live against real Cloud data |
+| **Observability / metrics on kind** | ✅ working — in-cluster Prometheus scrapes SDK/server pods + the Temporal Cloud OpenMetrics endpoint into `prometheus-kind`; backend-agnostic Grafana dashboards (Critical Flows, Worker Fleet & Scaling, Durable Execution Value) verified live against real Cloud data |
 | Self-hosted Temporal **server** on kind (the OSS backend) | ✅ working — live-verified; official Temporal chart + CNPG Postgres + frontend mTLS, one-toggle Cloud↔OSS swap (`just platform-up oss` / `just switch-backend`), ADR-0003 |
 | Polyglot workers (Go / TypeScript / Java) | ✅ **Python + Java** — Go/TS still planned; layout is polyglot-ready |
 | Nexus integration (cross-namespace / cross-domain services) | 🚧 planned — per-domain namespaces + least-privilege service accounts already enable it |
