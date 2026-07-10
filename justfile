@@ -551,7 +551,7 @@ switch-backend target *FLAGS:
     FLAGS="{{FLAGS}}"; DRAIN=false; YES=false
     case "$FLAGS" in *--drain*) DRAIN=true;; esac
     case "$FLAGS" in *--yes*) YES=true;; esac
-    just preflight
+    uv run poe preflight-console
     L="deploy/terraform/layers/cluster"
     cur="$(terraform -chdir=$L output -raw temporal_backend 2>/dev/null || echo cloud)"
     # Default to the NON-destructive value on a failed read: a switch must never
@@ -560,15 +560,22 @@ switch-backend target *FLAGS:
     srv="$(terraform -chdir=$L output -raw oss_server_enabled 2>/dev/null || echo true)"
     reconcile_console() {
       local target="$1"
+      local profile
+      local current=""
+      current="$(curl -sf --max-time 3 http://localhost:8086/healthz | uv run python -c 'import sys,json; print(json.load(sys.stdin).get("backend",""))' 2>/dev/null || true)"
+      if [ -n "$current" ] && [ "$current" = "$target" ]; then
+        echo "platform-console already aligned on backend '$target'."
+        return 0
+      fi
       profile=".secrets/keys/cloud.env"; [ "$target" = "oss" ] && profile="config/local-oss-kind.env"
       set -a; . "$profile"; set +a
       docker compose -f docker-compose.yml up -d --no-deps --force-recreate platform-console
       just headlamp-reload 2>/dev/null || true
+      echo "Console recreated with the ${target} profile."
     }
     if [ "$cur" = "{{target}}" ]; then
-      echo "Cluster already on backend '{{target}}' — reconciling platform-console to the {{target}} profile."
+      echo "Cluster already on backend '{{target}}' - reconciling platform-console to the {{target}} profile."
       reconcile_console "{{target}}"
-      echo "Console recreated with the {{target}} profile."
       exit 0
     fi
     echo "Switching backend: $cur -> {{target}}"
@@ -626,7 +633,7 @@ switch-backend target *FLAGS:
 
     # Recreate the host console with the target profile (flips CONSOLE_BACKEND etc).
     reconcile_console "{{target}}"
-    echo "Switched to backend '{{target}}'. Console recreated with the {{target}} profile."
+    echo "Switched to backend '{{target}}'."
 
 # Remove the in-cluster OSS temporal-server (Application + CNPG Postgres + certs).
 # DESTRUCTIVE: drops all OSS workflow state. Refuses while the backend is still
@@ -692,7 +699,7 @@ preflight expected="":
     #!/usr/bin/env bash
     set -euo pipefail
     uv run poe preflight-console
-    console="$(curl -sf --max-time 3 http://localhost:8086/healthz | python3 -c 'import sys,json; print(json.load(sys.stdin).get("backend",""))' 2>/dev/null || echo "")"
+    console="$(curl -sf --max-time 3 http://localhost:8086/healthz | uv run python -c 'import sys,json; print(json.load(sys.stdin).get("backend",""))' 2>/dev/null || echo "")"
     target="{{expected}}"
     if [ -z "$target" ]; then
       target="$(terraform -chdir=deploy/terraform/layers/cluster output -raw temporal_backend 2>/dev/null || echo "")"
