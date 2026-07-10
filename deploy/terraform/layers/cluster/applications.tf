@@ -69,7 +69,7 @@ locals {
           profile = w.profile
         }
       ]
-    ]) : item.key => {
+      ]) : item.key => {
       repository = "localhost:5001/${item.domain}-worker-${item.profile}"
       tag        = var.worker_image_tag
       digest     = lookup(var.worker_image_digests, item.key, "")
@@ -134,6 +134,24 @@ locals {
           automated   = { prune = true, selfHeal = true }
           syncOptions = ["CreateNamespace=true"]
         }
+        # Defense-in-depth for the WorkerDeployment/autoscaler split (ADR-0023,
+        # checkpoint 0028): replicas for an autoscaled worker are actuated by the
+        # temporal-worker-autoscaler controller on the per-version Deployment the
+        # Worker Controller creates, a resource this Application never renders — so
+        # this is currently a no-op. It's here so a future chart change that starts
+        # setting/rendering replicas for an autoscaled WorkerDeployment can't silently
+        # reintroduce the GitOps-vs-autoscaler fight selfHeal would otherwise cause.
+        # Scoped by name to only autoscaled workers — fixed-replica workers still need
+        # selfHeal to enforce their descriptor-declared replica count (ADR-0004).
+        ignoreDifferences = [
+          for w in try(desc.workers, []) : {
+            group        = "temporal.io"
+            kind         = "WorkerDeployment"
+            name         = w.deployment_name
+            jsonPointers = ["/spec/replicas"]
+          }
+          if lookup(w, "autoscaling", null) != null
+        ]
       }
     }
     if length(try(desc.workers, [])) > 0
