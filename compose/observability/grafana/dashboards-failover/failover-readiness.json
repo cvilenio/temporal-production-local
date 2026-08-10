@@ -1,0 +1,1325 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "liveNow": false,
+  "links": [],
+  "panels": [
+    {
+      "type": "row",
+      "title": "Decision",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "panels": []
+    },
+    {
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "id": 20,
+      "options": {
+        "mode": "markdown",
+        "content": "## Decision\n\nVolume-banded gating on the experience APIs in the selected **source** `$region`: **p99** when requests/5min >= `$p99_min_requests`, **p95** when >= `$min_requests`, otherwise **not judged**.\n\nThe sustained path is a **duty-cycle** test (`$sustain_min / $sustain_window_min`) with an honest-sample guard - not a raw breach-minute count.\n\nThree distinct absent/neutral states on the gate: **CLEAR** (dark) means judged healthy; **TOO FEW REQUESTS** (grey) means data is arriving but not enough to judge; **NO DATA - FEED SILENT** (purple) means nothing arrived in `$stale_grace_min` minutes - after a failover that is itself a signal. Grey and purple are never merged."
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Failover gate (liveness ${stale_grace_min} min; duty ${sustain_min}/${sustain_window_min})",
+      "description": "Verdict for latency on the experience APIs in the selected source region. Scores: 0 CLEAR (dark), 1 WATCH (orange), 2 FAILOVER? (red), 3 TOO FEW REQUESTS (neutral grey), empty/noValue = NO DATA - FEED SILENT (purple). TOO FEW REQUESTS means data is arriving but there is not enough of it to judge. NO DATA - FEED SILENT means nothing has arrived in the last ${stale_grace_min} minutes. PRESENCE = (count(GATING_LAG) >= 1) * (sum(count_over_time(raw p99[stale_grace])) >= 1): volume band satisfied AND a genuinely fresh latency sample inside the grace window (raw range, not offset/lookback). SCORE_FINAL = SCORE * liveness so feed-silent shares the same $stale_grace_min horizon. Volume-banded gating wrapped in sum without(__name__). or (liveness*3) is TOO FEW when SCORE_FINAL is empty but the feed is alive.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "id": 21,
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "((clamp_max(\n  2 * ((max(((((count_over_time(\n  (sum without(__name__) ((\n  (\n    temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300 >= $p99_min_requests)\n  )\n  or\n  (\n    temporal_cloud_v1_service_latency_p95{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300 >= $min_requests)\n  )\n)) > $lat_ceiling_s)\n[${sustain_window_min}m:1m] offset ${publication_lag_min}m\n)) or (count_over_time(\n  (sum without(__name__) ((\n  (\n    temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300 >= $p99_min_requests)\n  )\n  or\n  (\n    temporal_cloud_v1_service_latency_p95{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300 >= $min_requests)\n  )\n)) >= 0)\n[${sustain_window_min}m:1m] offset ${publication_lag_min}m\n) * 0)) / (count_over_time(\n  (sum without(__name__) ((\n  (\n    temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300 >= $p99_min_requests)\n  )\n  or\n  (\n    temporal_cloud_v1_service_latency_p95{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300 >= $min_requests)\n  )\n)) >= 0)\n[${sustain_window_min}m:1m] offset ${publication_lag_min}m\n))) >= bool ($sustain_min / $sustain_window_min)) * (count_over_time(temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[${sustain_window_min}m] offset ${publication_lag_min}m) >= bool $sustain_min))) or vector(0))\n  + 2 * ((((count(count by (temporal_namespace) (sum without(__name__) ((\n  (\n    temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"} offset ${publication_lag_min}m\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m] offset ${publication_lag_min}m) * 300 >= $p99_min_requests)\n  )\n  or\n  (\n    temporal_cloud_v1_service_latency_p95{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"} offset ${publication_lag_min}m\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m] offset ${publication_lag_min}m) * 300 >= $min_requests)\n  )\n)) > $lat_ceiling_s)) >= bool $breadth_min) * (max(sum without(__name__) ((\n  (\n    temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"} offset ${publication_lag_min}m\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m] offset ${publication_lag_min}m) * 300 >= $p99_min_requests)\n  )\n  or\n  (\n    temporal_cloud_v1_service_latency_p95{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"} offset ${publication_lag_min}m\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m] offset ${publication_lag_min}m) * 300 >= $min_requests)\n  )\n))) >= bool ($sev_multiple * $lat_ceiling_s)))) or vector(0))\n  + (((count(sum without(__name__) ((\n  (\n    temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"} offset ${publication_lag_min}m\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m] offset ${publication_lag_min}m) * 300 >= $p99_min_requests)\n  )\n  or\n  (\n    temporal_cloud_v1_service_latency_p95{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"} offset ${publication_lag_min}m\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m] offset ${publication_lag_min}m) * 300 >= $min_requests)\n  )\n)) > $lat_ceiling_s) >= bool 1)) or vector(0))\n, 2)\n* ((count(sum without(__name__) ((\n  (\n    temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"} offset ${publication_lag_min}m\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m] offset ${publication_lag_min}m) * 300 >= $p99_min_requests)\n  )\n  or\n  (\n    temporal_cloud_v1_service_latency_p95{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"} offset ${publication_lag_min}m\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m] offset ${publication_lag_min}m) * 300 >= $min_requests)\n  )\n))) >= bool 1) * (sum(count_over_time(temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[${stale_grace_min}m])) >= bool 1)))\n* (sum(count_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\"}[${stale_grace_min}m])) >= bool 1))\nor\n((sum(count_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\"}[${stale_grace_min}m])) > bool 0) * 3)",
+          "instant": true,
+          "range": false,
+          "legendFormat": "Latency gate"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "wideLayout": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#24262b",
+                "value": null
+              },
+              {
+                "color": "#24262b",
+                "value": 0
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 2
+              },
+              {
+                "color": "#4a4a4a",
+                "value": 3
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "CLEAR",
+                  "color": "#24262b"
+                },
+                "1": {
+                  "text": "WATCH",
+                  "color": "orange"
+                },
+                "2": {
+                  "text": "FAILOVER?",
+                  "color": "red"
+                },
+                "3": {
+                  "text": "TOO FEW REQUESTS",
+                  "color": "#4a4a4a"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "NO DATA - FEED SILENT",
+                  "color": "#b877d9"
+                }
+              }
+            }
+          ],
+          "noValue": "NO DATA - FEED SILENT"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "table",
+      "title": "Latency breach - duty cycle in a ${sustain_window_min} min window (last ${eval_window_min} min)",
+      "description": "One row per namespace x operation (and region). Never merge series across namespaces. format:table + instant \u2192 Prometheus transformDFToTable (label columns + Value #A..G); transforms: merge \u2192 organize \u2192 sortBy. Scored columns (Duty cycle, Est. breach minutes, Peak gating, Multiple of ceiling) are blank when the operation is below the volume floor and therefore not judged; Requests / 5 min and Volume band still render so the reader can see why. Sort by Duty cycle descending, then Requests / 5 min descending (blank duty rows sort after scored rows in practice; secondary sort orders the unscored by volume).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "id": 22,
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(((count_over_time(\n  (sum without(__name__) ((\n  (\n    temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300 >= $p99_min_requests)\n  )\n  or\n  (\n    temporal_cloud_v1_service_latency_p95{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300 >= $min_requests)\n  )\n)) > $lat_ceiling_s)\n[${sustain_window_min}m:1m] offset ${publication_lag_min}m\n)) or (count_over_time(\n  (sum without(__name__) ((\n  (\n    temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300 >= $p99_min_requests)\n  )\n  or\n  (\n    temporal_cloud_v1_service_latency_p95{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300 >= $min_requests)\n  )\n)) >= 0)\n[${sustain_window_min}m:1m] offset ${publication_lag_min}m\n) * 0)) / (count_over_time(\n  (sum without(__name__) ((\n  (\n    temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300 >= $p99_min_requests)\n  )\n  or\n  (\n    temporal_cloud_v1_service_latency_p95{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300 >= $min_requests)\n  )\n)) >= 0)\n[${sustain_window_min}m:1m] offset ${publication_lag_min}m\n)))",
+          "instant": true,
+          "range": false,
+          "format": "table",
+          "legendFormat": "duty"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "count_over_time(temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[${sustain_window_min}m] offset ${publication_lag_min}m)",
+          "instant": true,
+          "range": false,
+          "format": "table",
+          "legendFormat": "honest_samples"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(((((count_over_time(\n  (sum without(__name__) ((\n  (\n    temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300 >= $p99_min_requests)\n  )\n  or\n  (\n    temporal_cloud_v1_service_latency_p95{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300 >= $min_requests)\n  )\n)) > $lat_ceiling_s)\n[${sustain_window_min}m:1m] offset ${publication_lag_min}m\n)) or (count_over_time(\n  (sum without(__name__) ((\n  (\n    temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300 >= $p99_min_requests)\n  )\n  or\n  (\n    temporal_cloud_v1_service_latency_p95{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300 >= $min_requests)\n  )\n)) >= 0)\n[${sustain_window_min}m:1m] offset ${publication_lag_min}m\n) * 0)) / (count_over_time(\n  (sum without(__name__) ((\n  (\n    temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300 >= $p99_min_requests)\n  )\n  or\n  (\n    temporal_cloud_v1_service_latency_p95{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300 >= $min_requests)\n  )\n)) >= 0)\n[${sustain_window_min}m:1m] offset ${publication_lag_min}m\n)))) * (count_over_time(temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[${sustain_window_min}m] offset ${publication_lag_min}m)))",
+          "instant": true,
+          "range": false,
+          "format": "table",
+          "legendFormat": "est_breach_min"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max_over_time((sum without(__name__) ((\n  (\n    temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300 >= $p99_min_requests)\n  )\n  or\n  (\n    temporal_cloud_v1_service_latency_p95{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300 >= $min_requests)\n  )\n)))[${eval_window_min}m:1m] offset ${publication_lag_min}m)",
+          "instant": true,
+          "range": false,
+          "format": "table",
+          "legendFormat": "peak_gating_s"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(max_over_time((sum without(__name__) ((\n  (\n    temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300 >= $p99_min_requests)\n  )\n  or\n  (\n    temporal_cloud_v1_service_latency_p95{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}\n    and on(temporal_namespace, region, operation)\n    (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300 >= $min_requests)\n  )\n)))[${eval_window_min}m:1m] offset ${publication_lag_min}m)) / $lat_ceiling_s",
+          "instant": true,
+          "range": false,
+          "format": "table",
+          "legendFormat": "multiple"
+        },
+        {
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m] offset ${publication_lag_min}m) * 300",
+          "instant": true,
+          "range": false,
+          "format": "table",
+          "legendFormat": "req_5m"
+        },
+        {
+          "refId": "G",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "((avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m] offset ${publication_lag_min}m) * 300 >= bool $p99_min_requests) + (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m] offset ${publication_lag_min}m) * 300 >= bool $min_requests))",
+          "instant": true,
+          "range": false,
+          "format": "table",
+          "legendFormat": "volume_band"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "fields": ""
+        },
+        "frameIndex": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true,
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "No rows"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Duty cycle"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "transparent",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 0.01
+                    },
+                    {
+                      "color": "red",
+                      "value": 0.5
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 110
+              },
+              {
+                "id": "noValue",
+                "value": "not judged"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Honest samples"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Est. breach minutes"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "transparent",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 1
+                    },
+                    {
+                      "color": "red",
+                      "value": 5
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 150
+              },
+              {
+                "id": "noValue",
+                "value": "not judged"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Peak gating (s)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 3
+              },
+              {
+                "id": "noValue",
+                "value": "not judged"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Multiple of ceiling"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "custom.width",
+                "value": 140
+              },
+              {
+                "id": "noValue",
+                "value": "not judged"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Requests / 5 min"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Volume band"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "too few (not judged)",
+                        "color": "#6e6e6e"
+                      },
+                      "1": {
+                        "text": "p95 gate",
+                        "color": "blue"
+                      },
+                      "2": {
+                        "text": "p99 gate",
+                        "color": "purple"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.width",
+                "value": 160
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Namespace"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 180
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Operation"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 220
+              }
+            ]
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "Time 3": true,
+              "Time 4": true,
+              "Time 5": true,
+              "Time 6": true,
+              "Time 7": true,
+              "__name__": true,
+              "instance": true,
+              "job": true,
+              "temporal_account": true
+            },
+            "renameByName": {
+              "temporal_namespace": "Namespace",
+              "operation": "Operation",
+              "region": "Region",
+              "Value #A": "Duty cycle",
+              "Value #B": "Honest samples",
+              "Value #C": "Est. breach minutes",
+              "Value #D": "Peak gating (s)",
+              "Value #E": "Multiple of ceiling",
+              "Value #F": "Requests / 5 min",
+              "Value #G": "Volume band"
+            },
+            "indexByName": {
+              "Namespace": 0,
+              "Operation": 1,
+              "Region": 2,
+              "Duty cycle": 3,
+              "Honest samples": 4,
+              "Est. breach minutes": 5,
+              "Peak gating (s)": 6,
+              "Multiple of ceiling": 7,
+              "Requests / 5 min": 8,
+              "Volume band": 9
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Duty cycle",
+                "desc": true
+              },
+              {
+                "field": "Requests / 5 min",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "title": "Method / known limits",
+      "gridPos": {
+        "h": 16,
+        "w": 24,
+        "x": 0,
+        "y": 21
+      },
+      "id": 23,
+      "options": {
+        "mode": "markdown",
+        "content": "## Method / known limits\n\nThis board is a **customer-shaped** reference implementation of an internal failover-readiness design on Temporal Cloud OpenMetrics (`prometheus-kind`). The SQL does not port. Only the decision design does. Build it as if the namespace carries sustained traffic.\n\n### Inherited thresholds (unvalidated on this surface)\n\nThese numbers come from an internal scan of **1,190 accounts** and are **inherited, not re-derived** here. Treat them as starting points, not as validated for this account:\n\n- `$lat_ceiling_s` (default 0.2s)\n- `$sustain_min` / `$sustain_window_min` (default 5 / 10 \u2192 50% duty)\n- `$sev_multiple` (default 25\u00d7 ceiling)\n- `$breadth_min` (default 2 namespaces)\n- `$p99_min_requests` / `$min_requests` (default 1000 / 100 requests per 5 min)\n\nThe sustained path's **false-alarm rate has never been measured**.\n\n### Volume-band union must collapse `__name__`\n\nWrap the p99-or-p95 gating union in `sum without(__name__) (...)`. Inside a range subquery both arms can appear for the same series when volume crosses `$p99_min_requests` mid-window; `count_over_time` / `max_over_time` drop `__name__` and the two collapse into one labelset, aborting the query with `vector cannot contain metrics with the same labelset`. Ordinary diurnal traffic variation is enough. A broken query must not render as NO DATA - FEED SILENT.\n\n### Calibration that *was* measured here\n\n- `$stale_grace_min` defaults to **7** (not the reference board's 3) because this endpoint publishes ~**209s (~3.5 min)** behind wall clock. A 3-minute liveness window is permanently empty on this surface.\n- `$publication_lag_min` defaults to **4** to clear that lag on windowed subquery counts and on the lagged instant terms (WATCH / severity / gating-presence). Offset alone does **not** fix mid-window carry-forward on gapped series (see duty-cycle section).\n\n### Duty-cycle and subquery carry-forward\n\nOn **continuous** traffic (one sample per minute), subquery steps equal real minutes and the duty ratio is exact. That is the assumed customer condition.\n\nOn a **gapped** series, carry-forward inflates the numerator when a gap **follows** a breaching sample. Worked example: breach at minute 0, gap through minute 4, healthy 5\u20139 \u2192 BREACH_STEPS 5 / TOTAL_STEPS 10 = 0.50 from one real breaching minute.\n\nThe one real-world case is a breach immediately followed by the source region going silent \u2014 a genuine failover signature \u2014 where the board briefly over-scores before liveness flips it to **NO DATA - FEED SILENT**. That is accepted behaviour, not a defect.\n\nThe durable fix is a Prometheus recording rule materialising the breach boolean at scrape time (production answer; not built here).\n\nA namespace that breaches every *third* minute yields 4-in-10 and escapes a 5-in-10 (50%) duty gate. That is a deliberate trade, not an oversight. Missing minutes count as **not-breaching**.\n\n### Single-namespace severity limit\n\nThe severity path requires at least `$breadth_min` breaching namespaces (default 2) and is therefore **inert on a single-namespace view** \u2014 the framed customer case when the board is scoped to one namespace. There the **sustained path is the only route to FAILOVER?**.\n\n### Liveness (correction to the reference design)\n\nLiveness is measured on the namespace's **full** `temporal_cloud_v1_service_request_count` stream in the selected region \u2014 **not** on the gated experience APIs and not on a latency series. A quiet experience API is not a silent region (measured: 0 experience-API latency series vs 7 request-count series emitting in the same 7-minute window). This is a **correction to the reference board's design**, not just a port of it.\n\nResulting states that must stay distinct:\n\n- Feed flowing, not enough to judge \u2192 **TOO FEW REQUESTS** (grey)\n- Nothing emitting in namespace+region \u2192 **NO DATA - FEED SILENT** (purple)\n- Judged healthy \u2192 **CLEAR** (dark)\n\n### Namespace scope and liveness masking\n\nDefault the namespace control to a **single** namespace with traffic. A failover decision is about one namespace at a time. Multi-select remains available so the severity breadth path can see multiple namespaces when you deliberately widen scope.\n\nWhen more than one namespace is selected, liveness `sum()`s `service_request_count` across the selection: a busy namespace can mask a silent one, so a namespace that has actually failed over may render **TOO FEW REQUESTS** instead of **NO DATA - FEED SILENT**. Judge one namespace at a time for a failover decision.\n\nWith a single namespace selected, `$breadth_min = 2` makes the severity path inert, so the **sustained path is the only route to FAILOVER?** \u2014 same limit as in the single-namespace severity note above; the two statements are one rule.\n\n### Absent by design\n\nSuccess ratio, platform overload, and throttle cause-attribution are **out of scope**: `resource_exhausted_cause` does not exist on the customer OpenMetrics surface, and `service_error_count` has no error-class dimension. Nexus is excluded deliberately (wrong input to \"fail over *this* namespace\").\n\n### This board cannot confirm recovery in the target region\n\nThe Decision row is source-region-scoped. Replication lag in Context is replica-region-labelled and is **context, not a gate** (Temporal-owned, no SLA).\n\n### Production hardening (not in this board)\n\nPrefer Prometheus recording rules that pre-materialize the volume-banded gating / breach boolean at one-minute resolution so windowed counts can use raw ranges on selectors. That is the durable fix for the sparse-series / subquery carry-forward class.\n"
+      }
+    },
+    {
+      "type": "row",
+      "title": "Sync Request Health",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 37
+      },
+      "id": 2,
+      "panels": []
+    },
+    {
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      },
+      "id": 10,
+      "options": {
+        "mode": "markdown",
+        "content": "## Sync Request Health\n\nThese are the three **experience APIs** the failover gate watches: `StartWorkflowExecution`, `SignalWorkflowExecution`, and `SignalWithStartWorkflowExecution`.\n\nLatency is in **seconds**. Percentiles (`p50` / `p95` / `p99`) are **pre-computed by Temporal Cloud** \u2014 do not average or otherwise aggregate them across operations (that would not produce a real percentile).\n\nOperations with no traffic render **empty by design** \u2014 an empty Signal panel means this workload has not exercised that API, not that the query is broken. Panels are scoped to the selected **source** `$region` (default `aws-us-east-1`); do not roll up both HA regions here."
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "StartWorkflowExecution latency",
+      "description": "Pre-computed Cloud OpenMetrics percentiles for StartWorkflowExecution (seconds). Not aggregated across operations. Empty when this operation has no traffic - by design. Threshold line is a twin of $lat_ceiling_s (default 0.2); changing the variable does not move this line - update the yellow step by hand.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 45
+      },
+      "id": 11,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "dashed"
+            },
+            "axisSoftMax": 0.25
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.2
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "temporal_cloud_v1_service_latency_p50{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=\"StartWorkflowExecution\"}",
+          "legendFormat": "p50 {{temporal_namespace}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "temporal_cloud_v1_service_latency_p95{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=\"StartWorkflowExecution\"}",
+          "legendFormat": "p95 {{temporal_namespace}}"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=\"StartWorkflowExecution\"}",
+          "legendFormat": "p99 {{temporal_namespace}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "SignalWorkflowExecution latency",
+      "description": "Pre-computed Cloud OpenMetrics percentiles for SignalWorkflowExecution (seconds). Not aggregated across operations. Empty when this operation has no traffic - by design. Threshold line is a twin of $lat_ceiling_s (default 0.2); changing the variable does not move this line - update the yellow step by hand.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 45
+      },
+      "id": 12,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "dashed"
+            },
+            "axisSoftMax": 0.25
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.2
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "temporal_cloud_v1_service_latency_p50{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=\"SignalWorkflowExecution\"}",
+          "legendFormat": "p50 {{temporal_namespace}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "temporal_cloud_v1_service_latency_p95{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=\"SignalWorkflowExecution\"}",
+          "legendFormat": "p95 {{temporal_namespace}}"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=\"SignalWorkflowExecution\"}",
+          "legendFormat": "p99 {{temporal_namespace}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "SignalWithStartWorkflowExecution latency",
+      "description": "Pre-computed Cloud OpenMetrics percentiles for SignalWithStartWorkflowExecution (seconds). Not aggregated across operations. Empty when this operation has no traffic - by design. Threshold line is a twin of $lat_ceiling_s (default 0.2); changing the variable does not move this line - update the yellow step by hand.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 45
+      },
+      "id": 13,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "dashed"
+            },
+            "axisSoftMax": 0.25
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.2
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "temporal_cloud_v1_service_latency_p50{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=\"SignalWithStartWorkflowExecution\"}",
+          "legendFormat": "p50 {{temporal_namespace}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "temporal_cloud_v1_service_latency_p95{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=\"SignalWithStartWorkflowExecution\"}",
+          "legendFormat": "p95 {{temporal_namespace}}"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=\"SignalWithStartWorkflowExecution\"}",
+          "legendFormat": "p99 {{temporal_namespace}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Experience API volume (requests / 5 min)",
+      "description": "Unit: requests per 5 minutes. Converts the Cloud per-second rate: avg_over_time(temporal_cloud_v1_service_request_count[5m]) * 300. Companion to the volume bands on the Decision gate ($min_requests / $p99_min_requests). Scoped to selected source $region.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 53
+      },
+      "id": 14,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\", region=~\"$region\", operation=~\"$exp_ops\"}[5m]) * 300",
+          "legendFormat": "{{operation}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Context",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 60
+      },
+      "id": 3,
+      "panels": []
+    },
+    {
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 61
+      },
+      "id": 30,
+      "options": {
+        "mode": "markdown",
+        "content": "## Context\n\nReplication lag into the HA **replica** region. This is context for a failover decision, **not a gate**. Scoped by namespace only - the `region` label on these series is the replica/target, not the source."
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Replication lag (replica region)",
+      "description": "temporal_cloud_v1_replication_lag_p50/p95/p99 in seconds. Replication lag is Temporal-owned and carries no SLA; it is context for a failover decision, not a gate; and it only exists for namespaces with a multi-region HA replica. Scoped by ${namespace} ONLY - the region label is the REPLICA (target), not the source. Filtering by the Decision-row source ${region} would render this panel empty against a healthy metric (false 'no data'). Empty state: no replica configured / no data - never treat as healthy.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 66
+      },
+      "id": 31,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "insertNulls": false
+          },
+          "noValue": "no replica configured / no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "temporal_cloud_v1_replication_lag_p50{temporal_namespace=~\"$namespace\"}",
+          "legendFormat": "p50 {{temporal_namespace}} lag into {{region}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "temporal_cloud_v1_replication_lag_p95{temporal_namespace=~\"$namespace\"}",
+          "legendFormat": "p95 {{temporal_namespace}} lag into {{region}}"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "temporal_cloud_v1_replication_lag_p99{temporal_namespace=~\"$namespace\"}",
+          "legendFormat": "p99 {{temporal_namespace}} lag into {{region}}"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": [
+    "temporal-failover",
+    "temporal"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "text": "Prometheus (kind metrics)",
+          "value": "prometheus-kind"
+        },
+        "hide": 0,
+        "refresh": 1,
+        "regex": "",
+        "options": [],
+        "includeAll": false,
+        "multi": false,
+        "description": "Prometheus datasource. Default uid prometheus-kind (host metrics store). All panels use ${datasource}."
+      },
+      {
+        "name": "namespace",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(temporal_cloud_v1_service_request_count, temporal_namespace)",
+        "query": {
+          "query": "label_values(temporal_cloud_v1_service_request_count, temporal_namespace)",
+          "refId": "var-namespace"
+        },
+        "refresh": 2,
+        "includeAll": false,
+        "multi": true,
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "sort": 1,
+        "label": "Namespace",
+        "hide": 0,
+        "description": "Temporal Cloud namespace label (temporal_namespace). No saved default - Grafana selects the first value from the label query (a single real namespace on any account). Multi-select remains available so severity breadth can be widened deliberately; with multiple namespaces selected, liveness is an aggregate and can mask a silent namespace (see Method panel). Used by Sync Request Health, Failover gate, Latency breach table, and Context replication lag."
+      },
+      {
+        "name": "region",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(temporal_cloud_v1_service_request_count, region)",
+        "query": {
+          "query": "label_values(temporal_cloud_v1_service_request_count, region)",
+          "refId": "var-region"
+        },
+        "refresh": 2,
+        "includeAll": false,
+        "multi": false,
+        "current": {
+          "text": "aws-us-east-1",
+          "value": "aws-us-east-1"
+        },
+        "sort": 1,
+        "label": "Region",
+        "hide": 0,
+        "description": "Unit: Temporal Cloud region label. Default aws-us-east-1 = active SOURCE region. HA replica also emits service_request_count under aws-us-west-2, so this dropdown lists both \u2014 keep Decision and Sync Request Health scoped to the single selected source region; do not aggregate across regions. Context replication lag is scoped by namespace only (its region label is the REPLICA/target). Twins: Sync Request Health latency/volume panels; Failover gate verdict; Latency breach table."
+      },
+      {
+        "name": "exp_ops",
+        "type": "constant",
+        "query": "StartWorkflowExecution|SignalWorkflowExecution|SignalWithStartWorkflowExecution",
+        "current": {
+          "text": "StartWorkflowExecution|SignalWorkflowExecution|SignalWithStartWorkflowExecution",
+          "value": "StartWorkflowExecution|SignalWorkflowExecution|SignalWithStartWorkflowExecution"
+        },
+        "hide": 2,
+        "description": "Regex for operation=~\"$exp_ops\". The three experience APIs the gate watches. Used by Sync Request Health volume panel, Failover gate verdict, and Latency breach table. Unitless regex \u2014 not a display value."
+      },
+      {
+        "name": "lat_ceiling_s",
+        "type": "textbox",
+        "query": "0.2",
+        "current": {
+          "text": "0.2",
+          "value": "0.2"
+        },
+        "options": [
+          {
+            "text": "0.2",
+            "value": "0.2",
+            "selected": true
+          }
+        ],
+        "hide": 0,
+        "label": "Latency ceiling (s)",
+        "description": "Unit: seconds. Inherited customer calibration (1,190-account scan); unvalidated on this surface. Default 0.2s \u2248 published p99 SLO. Changing this rescores the gate/table but does NOT move drawn threshold lines \u2014 update the threshold step on StartWorkflowExecution latency, SignalWorkflowExecution latency, and SignalWithStartWorkflowExecution latency to match. Also twins: Failover gate verdict (breach compare), Latency breach table (multiple-of-ceiling)."
+      },
+      {
+        "name": "sustain_min",
+        "type": "textbox",
+        "query": "5",
+        "current": {
+          "text": "5",
+          "value": "5"
+        },
+        "options": [
+          {
+            "text": "5",
+            "value": "5",
+            "selected": true
+          }
+        ],
+        "hide": 0,
+        "label": "Sustained breach (min)",
+        "description": "Unit: minutes (honest samples) / also the numerator of the duty threshold ($sustain_min / $sustain_window_min). Sustained path fires when duty >= that ratio AND honest samples in the window >= $sustain_min. Inherited calibration. Twins: Failover gate verdict; Latency breach table colour steps on est. breach minutes (hardcoded - update by hand); any prose naming the 5-in-10 duty cycle."
+      },
+      {
+        "name": "sustain_window_min",
+        "type": "textbox",
+        "query": "10",
+        "current": {
+          "text": "10",
+          "value": "10"
+        },
+        "options": [
+          {
+            "text": "10",
+            "value": "10",
+            "selected": true
+          }
+        ],
+        "hide": 0,
+        "label": "Sustain window (min)",
+        "description": "Unit: minutes. Denominator of the duty threshold ($sustain_min / $sustain_window_min) and the window length for BREACH_STEPS / TOTAL_STEPS / HONEST_SAMPLES. Default 10 with sustain_min 5 => 50% duty. Twins: Failover gate verdict; Latency breach table windowed columns; Method prose naming the duty cycle."
+      },
+      {
+        "name": "eval_window_min",
+        "type": "textbox",
+        "query": "30",
+        "current": {
+          "text": "30",
+          "value": "30"
+        },
+        "options": [
+          {
+            "text": "30",
+            "value": "30",
+            "selected": true
+          }
+        ],
+        "hide": 0,
+        "label": "Eval window (min)",
+        "description": "Unit: minutes. Lookback for the Latency breach table's Peak gating (s) and Multiple of ceiling columns (max_over_time over this window). Does NOT scope the Failover gate verdict - that uses sustain_window_min / stale_grace_min / publication_lag_min. Twin: breach table peak columns."
+      },
+      {
+        "name": "stale_grace_min",
+        "type": "textbox",
+        "query": "7",
+        "current": {
+          "text": "7",
+          "value": "7"
+        },
+        "options": [
+          {
+            "text": "7",
+            "value": "7",
+            "selected": true
+          }
+        ],
+        "hide": 0,
+        "label": "Stale grace (min)",
+        "description": "Unit: minutes. Liveness lookback. Default 7 (measured publication lag ~209s / ~3.5 min; a 3-minute window is permanently empty here). Liveness is count_over_time(temporal_cloud_v1_service_request_count{temporal_namespace, region}[${stale_grace_min}m]) on the namespace's FULL request stream in the selected region \u2014 no operation filter. A quiet experience API is not a silent region (Correction 04: measured 0 p99 experience-API series vs 7 request_count series in the same 7-minute window). Splits TOO FEW REQUESTS (feed flowing) from NO DATA - FEED SILENT (nothing emitting). Twins: Failover gate verdict liveness fallthrough."
+      },
+      {
+        "name": "publication_lag_min",
+        "type": "textbox",
+        "query": "4",
+        "current": {
+          "text": "4",
+          "value": "4"
+        },
+        "options": [
+          {
+            "text": "4",
+            "value": "4",
+            "selected": true
+          }
+        ],
+        "hide": 0,
+        "label": "Publication lag (min)",
+        "description": "Unit: minutes. Offset for windowed breach/duty counts, honest-sample raw ranges, AND the lagged instant terms (WATCH_BOOL, SEVERITY_BOOL, gating-presence). Measured endpoint publication lag ~209s (~3.5 min). Default 4 clears that lag. Offset alone does not fix subquery carry-forward across mid-window gaps on gapped series \u2014 the sustained path uses duty cycle for that. Do NOT apply this offset to the liveness check (stale_grace_min). Twins: Failover gate sustained + lagged instant terms; Latency breach table duty/honest/est columns."
+      },
+      {
+        "name": "sev_multiple",
+        "type": "textbox",
+        "query": "25",
+        "current": {
+          "text": "25",
+          "value": "25"
+        },
+        "options": [
+          {
+            "text": "25",
+            "value": "25",
+            "selected": true
+          }
+        ],
+        "hide": 0,
+        "label": "Severity multiple",
+        "description": "Unit: multiple of lat_ceiling_s (unitless). Inherited calibration from the 1,190-account scan (default 25). Severity path fires when BOTH hold: (1) breadth \u2014 at least $breadth_min namespaces currently breaching the latency ceiling; (2) magnitude \u2014 the peak gating latency across ALL gating series in the selected region is >= sev_multiple * lat_ceiling_s. Breadth and magnitude are deliberately NOT coupled per-namespace (matches the reference design's region-wide-event signature). Consequence: one namespace at 25x plus one at 1.05x satisfies the path. Twin: Failover gate verdict only."
+      },
+      {
+        "name": "breadth_min",
+        "type": "textbox",
+        "query": "2",
+        "current": {
+          "text": "2",
+          "value": "2"
+        },
+        "options": [
+          {
+            "text": "2",
+            "value": "2",
+            "selected": true
+          }
+        ],
+        "hide": 0,
+        "label": "Severity breadth (namespaces)",
+        "description": "Unit: distinct namespaces. Minimum namespaces breaching in the SAME minute for the severity path. Failover is regional \u2014 one-namespace breach is a workload problem. Twin: Failover gate verdict only."
+      },
+      {
+        "name": "p99_min_requests",
+        "type": "textbox",
+        "query": "1000",
+        "current": {
+          "text": "1000",
+          "value": "1000"
+        },
+        "options": [
+          {
+            "text": "1000",
+            "value": "1000",
+            "selected": true
+          }
+        ],
+        "hide": 0,
+        "label": "p99 volume floor (req/5m)",
+        "description": "Unit: requests per 5 minutes (avg_over_time(request_count[5m])*300). At or above this volume, p99 gates. Between this and min_requests, p95 gates. Inherited; unvalidated here. Twins: Failover gate verdict volume band; Latency breach table volume-band column; Sync Request Health volume panel is the human-readable companion."
+      },
+      {
+        "name": "min_requests",
+        "type": "textbox",
+        "query": "100",
+        "current": {
+          "text": "100",
+          "value": "100"
+        },
+        "options": [
+          {
+            "text": "100",
+            "value": "100",
+            "selected": true
+          }
+        ],
+        "hide": 0,
+        "label": "Min volume to judge (req/5m)",
+        "description": "Unit: requests per 5 minutes. Below this \u2192 no gating series (not judged: grey / collapses to NO DATA when also outside stale_grace). Absence must not render as CLEAR. Inherited; unvalidated here. Twins: Failover gate verdict volume band; Latency breach table Volume band column; Sync Request Health volume panel."
+      }
+    ]
+  },
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "utc",
+  "title": "Temporal Cloud - Failover Readiness",
+  "uid": "temporal-failover-readiness",
+  "version": 20,
+  "weekStart": ""
+}

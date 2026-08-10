@@ -44,6 +44,10 @@ A second set — the **Temporal Critical Flows** folder — gives a drill-down v
 critical-path server operations on this local OSS + Postgres stack. See
 [Critical Flows dashboards](#temporal-critical-flows) below.
 
+A third set — the **Temporal Cloud Failover Readiness** folder — is a customer-shaped
+OpenMetrics-only failover gate. See
+[Failover Readiness](#temporal-cloud-failover-readiness) below.
+
 ---
 
 ## Two-pipeline model
@@ -295,6 +299,25 @@ explicit):
 > Every panel was confirmed returning live data under order load. To re-verify: `localhost:9090` isn't
 > published — query Prometheus through Grafana's datasource proxy
 > (`POST localhost:3000/api/datasources/proxy/uid/prometheus/api/v1/query`).
+
+---
+
+## Temporal Cloud Failover Readiness
+
+The **Temporal Cloud Failover Readiness** Grafana folder is a customer-shaped reference
+implementation of a failover-readiness board that uses **only** Temporal Cloud OpenMetrics
+(via `prometheus-kind`).
+It ports the decision design of an internal board; the SQL does not port.
+
+Files: `compose/observability/grafana/dashboards-failover/`, provisioned via `failover.yaml`.
+
+| Dashboard | What it shows |
+|---|---|
+| **Temporal Cloud - Failover Readiness** | Decision gate (duty-cycle sustained path + severity + liveness states), per-operation experience-API latency, request volume, replication lag as context. |
+
+Customer-facing, platform-agnostic instructions (metric series, unit rules, publication-lag
+consequences, subquery traps, replica-region label trap, what cannot be built on this surface)
+live in [`docs/failover-readiness-board.md`](docs/failover-readiness-board.md).
 
 ---
 

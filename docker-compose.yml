@@ -107,6 +107,11 @@ services:
       # own critical-flows / server-internals.
       - ./compose/observability/grafana/provisioning/dashboards/platform.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/platform.yaml:ro
       - ./compose/observability/grafana/dashboards-platform:/var/lib/grafana/dashboards/platform:ro
+      # Customer-shaped Temporal Cloud failover-readiness board (OpenMetrics /
+      # prometheus-kind only — no ClickHouse SQL). Own folder so it sits next to
+      # critical-flows / platform without mixing scopes.
+      - ./compose/observability/grafana/provisioning/dashboards/failover.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/failover.yaml:ro
+      - ./compose/observability/grafana/dashboards-failover:/var/lib/grafana/dashboards/failover:ro
       - ./compose/observability/grafana/provisioning/datasources/clickhouse.yaml:/otel-lgtm/grafana/conf/provisioning/datasources/clickhouse.yaml:ro
       # Host metrics store datasource (kind run mode — ADR-0021). The in-cluster
       # Prometheus remote_writes to prometheus-store; Grafana reads it here.
