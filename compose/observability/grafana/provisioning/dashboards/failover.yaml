@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: failover-readiness
+    folder: Temporal Cloud Failover Readiness
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards/failover
