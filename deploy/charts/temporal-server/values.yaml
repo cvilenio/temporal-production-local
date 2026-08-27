@@ -146,16 +146,39 @@ temporal:
       - name: frontend-tls
         mountPath: /etc/temporal/tls/frontend
         readOnly: true
-    # NOTE: the upstream chart already emits prometheus.io/scrape|port|path on each
-    # server-role pod (per-role metrics.annotations.enabled, default true) pointing at
-    # the metrics listenAddress :9090 — do NOT re-add them here (duplicate map keys).
-    # The cluster layer's temporal-oss scrape job (observability) relies on them.
+    # NOTE: prometheus.io/scrape annotations are deliberately OFF on every
+    # metrics-serving server role (per-role metrics.annotations.enabled: false below).
+    # The upstream template resolves the flag with dig, which reads the per-role value
+    # first and only falls back to server.metrics.annotations.enabled — upstream defaults
+    # true at both levels, so the per-role block is authoritative; a global-only false
+    # would not suppress anything. The upstream defaults cause the community Prometheus
+    # chart's kubernetes-pods and kubernetes-service-endpoints jobs to triple-scrape
+    # alongside our temporal-oss job. temporal-oss selects on chart labels instead.
+    frontend:
+      metrics:
+        annotations:
+          enabled: false
+    history:
+      metrics:
+        annotations:
+          enabled: false
+    matching:
+      metrics:
+        annotations:
+          enabled: false
+    worker:
+      metrics:
+        annotations:
+          enabled: false
 
     # Internal system traffic (the internal worker → frontend) rides this non-mTLS
     # in-cluster endpoint (port 7236), so external-frontend client-auth is isolated.
     # Key uses the upstream dash form; nested under server.
     internal-frontend:
       enabled: true
+      metrics:
+        annotations:
+          enabled: false
 
     # Schema management is per-datastore above (manageSchema: true); createDatabase
     # is false there (CNPG owns DB creation). server.replicaCount (1) covers every

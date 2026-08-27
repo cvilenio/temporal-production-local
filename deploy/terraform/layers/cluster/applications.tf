@@ -166,10 +166,16 @@ locals {
   # Backend-specific Prometheus scrape wiring (kept OUT of the committed
   # prometheus.yaml so it stays secret-free + backend-neutral). Cloud scrapes the
   # OpenMetrics endpoint with a Bearer token (honor_timestamps; never rate()); OSS
-  # scrapes the in-cluster server's raw :9090 per-service endpoints (annotation
-  # discovery scoped to the temporal namespace, with a stable job=temporal-oss label
-  # the self-hosted-internals dashboards key on). $1/$2 are Prometheus relabel refs
-  # (literal to Terraform — only $${ } would interpolate).
+  # scrapes the in-cluster server's raw :9090 per-service endpoints via chart labels
+  # (app.kubernetes.io/part-of + component), not prometheus.io/* annotations, so this
+  # job stays correct when those annotations are removed to stop the community chart's
+  # default jobs from triple-scraping. Keeps the five server roles that expose :9090
+  # (frontend, history, matching, worker, internal-frontend); admintools, web, and
+  # schema/db pods are excluded. :9090 is pinned in the relabel because the port
+  # annotation is gone; it must stay in lockstep with the listener at
+  # temporal.server.config.metrics.prometheus.listenAddress in the temporal-server
+  # chart's values.yaml (upstream hardcodes the same 9090 in its own annotation).
+  # $1 is a Prometheus relabel ref (literal to Terraform; only $${ } would interpolate).
   scrape_oss = <<-EOT
     - job_name: temporal-oss
       kubernetes_sd_configs:
@@ -177,15 +183,18 @@ locals {
           namespaces:
             names: ['${var.temporal_k8s_namespace}']
       relabel_configs:
-        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_part_of]
           action: keep
-          regex: "true"
-        - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+          regex: temporal
+        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+          action: keep
+          regex: frontend|history|matching|worker|internal-frontend
+        - source_labels: [__address__]
           action: replace
-          regex: ([^:]+)(?::\d+)?;(\d+)
-          replacement: $1:$2
+          regex: ([^:]+)(?::\d+)?
+          replacement: $1:9090
           target_label: __address__
-        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
           target_label: temporal_service
   EOT
 
@@ -203,7 +212,17 @@ locals {
         - targets: ['metrics.temporal.io']
   EOT
 
-  prometheus_scrape_configs = local.is_oss ? local.scrape_oss : local.scrape_cloud
+  # Keyed on where each target actually EXISTS, not on the backend the workers talk to:
+  # the OSS server's lifecycle is gated on oss_server_enabled (decoupled from
+  # temporal_backend; see the temporal-server Application below), and
+  # oss_server_enabled=true with backend=cloud is a supported combination. Emitting
+  # scrape_oss only on the OSS backend would leave that server unscraped and the
+  # self-hosted-internals dashboards silently dark now that the community chart's
+  # annotation-discovered default jobs no longer cover it.
+  prometheus_scrape_configs = join("", concat(
+    var.oss_server_enabled ? [local.scrape_oss] : [],
+    local.is_oss ? [] : [local.scrape_cloud],
+  ))
 
   # Cloud mounts the OpenMetrics bearer-token Secret by file; OSS needs no mount.
   prometheus_server_extra = local.is_oss ? {} : {

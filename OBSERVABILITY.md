@@ -11,10 +11,14 @@
 >
 > **Backend swap (ADR-0003).** The Cloud OpenMetrics scrape + its `cloud-metrics-apikey`
 > mount are no longer committed in `prometheus.yaml`; the cluster layer injects the
-> backend-specific scrape by `temporal_backend`. On the **kind + OSS** backend the
-> `temporal-cloud` job is replaced by a **`temporal-oss`** job that scrapes the in-cluster
-> server's raw per-service Prometheus endpoints (frontend/history/matching/worker `:9090`,
-> annotation-discovered in the `temporal` namespace) — so the **self-hosted-internals**
+> backend-specific scrape per target. The Cloud OpenMetrics job is emitted when
+> `temporal_backend` is Cloud; a **`temporal-oss`** job is emitted whenever
+> `oss_server_enabled` is true (so an OSS server left up on the Cloud backend stays
+> scraped), and scrapes the in-cluster server's raw per-service Prometheus endpoints
+> (frontend/history/matching/worker/internal-frontend `:9090`, discovered by chart label,
+> `app.kubernetes.io/part-of` + `component`, in the `temporal` namespace; the
+> `prometheus.io/*` annotations are deliberately off on those roles so the community
+> chart's default jobs cannot triple-scrape them). So the **self-hosted-internals**
 > dashboards (`service_requests`, `persistence_latency_bucket`, `lock_latency_bucket`, …),
 > dark on Cloud, light up on OSS. The dual-sourced Critical Flows panels render on either
 > backend; the pure-Cloud `durable-execution-value` dashboard + the Cloud-only capacity/
