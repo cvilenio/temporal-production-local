@@ -47,7 +47,7 @@ variable "oss_server_enabled" {
 variable "temporal_server_chart_version" {
   description = "Published version of the temporal-server wrapper OCI chart (matches Chart.yaml / just chart-publish)."
   type        = string
-  default     = "0.1.5"
+  default     = "0.1.7"
 }
 
 variable "temporal_k8s_namespace" {
