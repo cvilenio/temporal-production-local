@@ -1,0 +1,2691 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [
+    {
+      "title": "Billable Actions (spend attribution)",
+      "tooltip": "Same namespace and time range, viewed as a spend question: which workflow and action types the bill comes from.",
+      "type": "link",
+      "url": "/d/temporal-cloud-billable-actions",
+      "icon": "external link",
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": [],
+      "includeVars": true,
+      "keepTime": true
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "row",
+      "title": "Capacity verdict",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1
+    },
+    {
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "id": 2,
+      "options": {
+        "mode": "markdown",
+        "content": "## Which ceiling binds first\n\nA Temporal Cloud namespace is rate-limited on **three independent ceilings**, and only one of them binds at a time. Sizing against Actions alone is the common mistake: a workflow with chatty pollers or heavy visibility writes hits **RPS** or **OPS** while APS utilization still looks comfortable.\n\n| Constraint | Usage metric | Limit | What drives it |\n| --- | --- | --- | --- |\n| **APS** actions/sec | `total_action_count` | `action_limit` | workflow, activity, signal, timer starts - the billable surface |\n| **RPS** requests/sec | `service_request_count` | `service_request_limit` | every gRPC call a worker or client makes, **polls included** |\n| **OPS** operations/sec | `operations_count` | `operations_limit` | internal work: transfer tasks, visibility writes, timeouts. Includes `is_background=\"true\"` |\n\n`*_on_demand_envelope_limit` is the ceiling the namespace **would** have under On-Demand mode. `provisioned_capacity_tru_count` is the TRUs currently provisioned - `0` means the namespace is on On-Demand and the two ceilings coincide.\n\nThe `*_throttled_count` metrics are **lagging confirmation**, not a leading signal: by the time they are non-zero the limit has already been exceeded and callers have already seen `ResourceExhausted`. Plan against utilization; use throttles to confirm.\n\n**Every constraint panel is scoped by NAMESPACE ONLY** and ignores the Region / Workflow type / Action type filters. Limit series carry no region, workflow, or action label, so a filtered numerator over a namespace-wide denominator would read as false headroom. The filters still drive the spend rows below.\n\n### Reading usage correctly\n\nUsage is plotted as ATTEMPT PRESSURE - admitted (`*_count`) plus rejected (`*_throttled_count`) - rather than admitted alone. READ IT BY REGIME. Below the limit, throttled is zero and the two are IDENTICAL, so this changes nothing. At or above the limit, admitted pins at the ceiling and renders exactly-at-cap and 30x-over-cap the same; attempt pressure is then the only term that still varies. The fix restores a signal where admitted-only goes flat - it does NOT measure demand better. Attempt pressure is NOT unique demand: SDK retries make one logical action appear first as throttled and later as performed, so the sum is demand convolved with retry policy, biased high by an unbounded amount. It is also NOT a breach detector, since both series remain minute averages. Use `*_throttled_count > 0` as the authoritative throttling signal.\n\nRESOLUTION FLOOR: Cloud publishes one sample per minute holding the per-second rate AVERAGED over that minute, so a burst is diluted by its duty cycle. A severe instantaneous breach can leave even attempt pressure below 100%: a 60,000-action one-second burst against a 2,000 APS limit publishes as roughly 1,000/s performed plus 967/s throttled, about 98% of limit. Sub-minute peaks are NOT recoverable from this endpoint and no arrangement of these panels will surface them. Read these rows for trend and sizing; read the throttle panels to answer whether a limit was hit. A reading below 100% is never proof of headroom.\n\nConsequence for detection: a non-zero `*_throttled_count` is the ONLY authoritative answer to \"did we hit the limit\". The utilization rows - including the attempt-pressure version - are average metrics and can sit well under 100% through a severe sub-minute breach. Alert on `temporal_cloud_v1_total_action_throttled_count > 0`; use the charts for trend and sizing, not detection.\n\nNote also that throttle counts are REJECTION EVENTS, not distinct actions denied. A retried action that is rejected three times contributes three events, so the total measures pressure on the limiter rather than lost work.\n\n### Sizing TRUs from these panels\n\nYou cannot analytically derive a required APS from these metrics once a namespace is throttling. Admitted rate is clipped at the ceiling and tells you only that demand was *at least* the limit; attempt pressure is inflated by retries by an amount that moves with SDK retry config rather than with workload. Neither is demand.\n\nThe working loop: size off the sustained admitted rate during NON-throttled windows, treat sustained non-zero throttling as the trigger that the namespace is under-provisioned, raise TRUs, and confirm throttling stops. Iterative, not a calculation.\n"
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "Peak utilization by rate constraint (selected range)",
+      "description": "Peak ATTEMPTED demand over the range as a percentage of each namespace's limit, per constraint. The tallest bar is the binding constraint - the ceiling to plan against, whatever the others say. Peak, not mean, because a limit is breached by peaks. Usage is plotted as ATTEMPT PRESSURE - admitted (`*_count`) plus rejected (`*_throttled_count`) - rather than admitted alone. READ IT BY REGIME. Below the limit, throttled is zero and the two are IDENTICAL, so this changes nothing. At or above the limit, admitted pins at the ceiling and renders exactly-at-cap and 30x-over-cap the same; attempt pressure is then the only term that still varies. The fix restores a signal where admitted-only goes flat - it does NOT measure demand better. Attempt pressure is NOT unique demand: SDK retries make one logical action appear first as throttled and later as performed, so the sum is demand convolved with retry policy, biased high by an unbounded amount. It is also NOT a breach detector, since both series remain minute averages. Use `*_throttled_count > 0` as the authoritative throttling signal. Amber 60 / red 80; the gauge is uncapped so a breach renders above 100 rather than clamping to the value that hides it. RESOLUTION FLOOR: Cloud publishes one sample per minute holding the per-second rate AVERAGED over that minute, so a burst is diluted by its duty cycle. A severe instantaneous breach can leave even attempt pressure below 100%: a 60,000-action one-second burst against a 2,000 APS limit publishes as roughly 1,000/s performed plus 967/s throttled, about 98% of limit. Sub-minute peaks are NOT recoverable from this endpoint and no arrangement of these panels will surface them. Read these rows for trend and sizing; read the throttle panels to answer whether a limit was hit. A reading below 100% is never proof of headroom.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 10
+      },
+      "id": 3,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "min": 0,
+          "max": null,
+          "noValue": "no samples in range",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 60
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "lcd",
+        "orientation": "horizontal",
+        "showUnfilled": true,
+        "valueMode": "color",
+        "minVizWidth": 8,
+        "minVizHeight": 16,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "100 * (max_over_time((sum by (temporal_namespace) (temporal_cloud_v1_total_action_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\"} or temporal_cloud_v1_total_action_throttled_count{temporal_namespace=~\"$namespace\"}))[$__range:1m]) / max by (temporal_namespace) (temporal_cloud_v1_action_limit{temporal_namespace=~\"$namespace\"}))",
+          "legendFormat": "APS - {{temporal_namespace}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "100 * (max_over_time((sum by (temporal_namespace) (temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\"} or temporal_cloud_v1_service_request_throttled_count{temporal_namespace=~\"$namespace\"}))[$__range:1m]) / max by (temporal_namespace) (temporal_cloud_v1_service_request_limit{temporal_namespace=~\"$namespace\"}))",
+          "legendFormat": "RPS - {{temporal_namespace}}"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "100 * (max_over_time((sum by (temporal_namespace) (temporal_cloud_v1_operations_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\"} or temporal_cloud_v1_operations_throttled_count{temporal_namespace=~\"$namespace\"}))[$__range:1m]) / max by (temporal_namespace) (temporal_cloud_v1_operations_limit{temporal_namespace=~\"$namespace\"}))",
+          "legendFormat": "OPS - {{temporal_namespace}}"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Capacity mode",
+      "description": "Derived from provisioned_capacity_tru_count: 0 provisioned TRUs means the namespace runs On-Demand and its limits equal its on-demand envelope. Above 0 means Provisioned, where the limits are a function of the TRUs bought and the envelope shows what On-Demand would give instead.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 12,
+        "y": 10
+      },
+      "id": 4,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "ON-DEMAND",
+                  "color": "blue",
+                  "index": 0
+                },
+                "1": {
+                  "text": "PROVISIONED",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "noValue": "unknown"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "clamp_max(max(temporal_cloud_v1_provisioned_capacity_tru_count{temporal_namespace=~\"$namespace\"}), 1)",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Provisioned TRUs",
+      "description": "temporal_cloud_v1_provisioned_capacity_tru_count - Temporal Resource Units currently provisioned for the namespace. This is the dial that moves the APS / RPS / OPS limits together; it is the number to change when a constraint above is binding and the workload is not the thing to fix.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 16,
+        "y": 10
+      },
+      "id": 5,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [],
+          "noValue": "not reported"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (temporal_namespace) (temporal_cloud_v1_provisioned_capacity_tru_count{temporal_namespace=~\"$namespace\"})",
+          "legendFormat": "{{temporal_namespace}}",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Throttled in range (rate-limit rejections)",
+      "description": "Total throttled actions + operations + requests over the range, across every *_throttled_count series the store holds. Non-zero means a limit was ALREADY exceeded and callers already saw ResourceExhausted. 'none observed' means no throttle series exists for the selected namespace - Cloud only publishes them once a throttle occurs, so absence is the healthy reading rather than a broken query. Treat a non-zero value here as authoritative even when the utilization panels read below 100%: a sub-minute breach is diluted out of a minute-averaged usage series but is fully counted here.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 20,
+        "y": 10
+      },
+      "id": 6,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [],
+          "noValue": "none observed"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(sum_over_time({__name__=~\"temporal_cloud_v1_(total_action|operations|service_request)_throttled_count\", temporal_namespace=~\"$namespace\"}[$__range])) * 60",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Rate constraints - APS / RPS / OPS",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "id": 7
+    },
+    {
+      "type": "table",
+      "title": "Constraint matrix - current, peak, ceiling, envelope",
+      "description": "One row per namespace x constraint, on ATTEMPTED demand. Current is the mean over published minutes in the range; Peak is the highest published minute. Limit is the enforced ceiling; On-demand envelope is what that ceiling would be under On-Demand mode - equal to Limit means the namespace is already On-Demand, higher means switching would buy headroom, lower means provisioning is currently buying more. Sorted by Peak utilization descending, so the top row is the binding constraint. All rates are per SECOND. Usage is plotted as ATTEMPT PRESSURE - admitted (`*_count`) plus rejected (`*_throttled_count`) - rather than admitted alone. READ IT BY REGIME. Below the limit, throttled is zero and the two are IDENTICAL, so this changes nothing. At or above the limit, admitted pins at the ceiling and renders exactly-at-cap and 30x-over-cap the same; attempt pressure is then the only term that still varies. The fix restores a signal where admitted-only goes flat - it does NOT measure demand better. Attempt pressure is NOT unique demand: SDK retries make one logical action appear first as throttled and later as performed, so the sum is demand convolved with retry policy, biased high by an unbounded amount. It is also NOT a breach detector, since both series remain minute averages. Use `*_throttled_count > 0` as the authoritative throttling signal. Limit and envelope are read at the END of the range while Peak is the highest minute WITHIN it, so if capacity changed mid-range the utilization column measures an old peak against the new ceiling - check the TRU panel before trusting it across a provisioning change.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      },
+      "id": 8,
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "fields": ""
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true,
+            "inspect": false
+          },
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "no samples in range"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Peak utilization"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "custom.width",
+                "value": 150
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 60
+                    },
+                    {
+                      "color": "red",
+                      "value": 80
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Limit /s"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "On-demand envelope /s"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Constraint"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "label_replace(avg_over_time((sum by (temporal_namespace) (temporal_cloud_v1_total_action_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\"} or temporal_cloud_v1_total_action_throttled_count{temporal_namespace=~\"$namespace\"}))[$__range:1m]), \"constraint\", \"APS\", \"\", \"\") or label_replace(avg_over_time((sum by (temporal_namespace) (temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\"} or temporal_cloud_v1_service_request_throttled_count{temporal_namespace=~\"$namespace\"}))[$__range:1m]), \"constraint\", \"RPS\", \"\", \"\") or label_replace(avg_over_time((sum by (temporal_namespace) (temporal_cloud_v1_operations_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\"} or temporal_cloud_v1_operations_throttled_count{temporal_namespace=~\"$namespace\"}))[$__range:1m]), \"constraint\", \"OPS\", \"\", \"\")",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "label_replace(max_over_time((sum by (temporal_namespace) (temporal_cloud_v1_total_action_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\"} or temporal_cloud_v1_total_action_throttled_count{temporal_namespace=~\"$namespace\"}))[$__range:1m]), \"constraint\", \"APS\", \"\", \"\") or label_replace(max_over_time((sum by (temporal_namespace) (temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\"} or temporal_cloud_v1_service_request_throttled_count{temporal_namespace=~\"$namespace\"}))[$__range:1m]), \"constraint\", \"RPS\", \"\", \"\") or label_replace(max_over_time((sum by (temporal_namespace) (temporal_cloud_v1_operations_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\"} or temporal_cloud_v1_operations_throttled_count{temporal_namespace=~\"$namespace\"}))[$__range:1m]), \"constraint\", \"OPS\", \"\", \"\")",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "label_replace(max by (temporal_namespace) (temporal_cloud_v1_action_limit{temporal_namespace=~\"$namespace\"}), \"constraint\", \"APS\", \"\", \"\") or label_replace(max by (temporal_namespace) (temporal_cloud_v1_service_request_limit{temporal_namespace=~\"$namespace\"}), \"constraint\", \"RPS\", \"\", \"\") or label_replace(max by (temporal_namespace) (temporal_cloud_v1_operations_limit{temporal_namespace=~\"$namespace\"}), \"constraint\", \"OPS\", \"\", \"\")",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "label_replace(max by (temporal_namespace) (temporal_cloud_v1_action_on_demand_envelope_limit{temporal_namespace=~\"$namespace\"}), \"constraint\", \"APS\", \"\", \"\") or label_replace(max by (temporal_namespace) (temporal_cloud_v1_service_request_on_demand_envelope_limit{temporal_namespace=~\"$namespace\"}), \"constraint\", \"RPS\", \"\", \"\") or label_replace(max by (temporal_namespace) (temporal_cloud_v1_operations_on_demand_envelope_limit{temporal_namespace=~\"$namespace\"}), \"constraint\", \"OPS\", \"\", \"\")",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "label_replace(100 * (max_over_time((sum by (temporal_namespace) (temporal_cloud_v1_total_action_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\"} or temporal_cloud_v1_total_action_throttled_count{temporal_namespace=~\"$namespace\"}))[$__range:1m]) / max by (temporal_namespace) (temporal_cloud_v1_action_limit{temporal_namespace=~\"$namespace\"})), \"constraint\", \"APS\", \"\", \"\") or label_replace(100 * (max_over_time((sum by (temporal_namespace) (temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\"} or temporal_cloud_v1_service_request_throttled_count{temporal_namespace=~\"$namespace\"}))[$__range:1m]) / max by (temporal_namespace) (temporal_cloud_v1_service_request_limit{temporal_namespace=~\"$namespace\"})), \"constraint\", \"RPS\", \"\", \"\") or label_replace(100 * (max_over_time((sum by (temporal_namespace) (temporal_cloud_v1_operations_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\"} or temporal_cloud_v1_operations_throttled_count{temporal_namespace=~\"$namespace\"}))[$__range:1m]) / max by (temporal_namespace) (temporal_cloud_v1_operations_limit{temporal_namespace=~\"$namespace\"})), \"constraint\", \"OPS\", \"\", \"\")",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "temporal_namespace": "Namespace",
+              "constraint": "Constraint",
+              "Value #A": "Current /s",
+              "Value #B": "Peak /s",
+              "Value #C": "Limit /s",
+              "Value #D": "On-demand envelope /s",
+              "Value #E": "Peak utilization"
+            },
+            "indexByName": {
+              "Namespace": 0,
+              "Constraint": 1,
+              "Current /s": 2,
+              "Peak /s": 3,
+              "Limit /s": 4,
+              "On-demand envelope /s": 5,
+              "Peak utilization": 6
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Peak utilization",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Utilization of all three constraints",
+      "description": "Every constraint on one 0-100% axis - the panel that answers 'what actually binds'. A line climbing here while the others stay flat is the ceiling to plan against. Percentages are of the ENFORCED limit, not the on-demand envelope, and lines may exceed 100% during a breach. Usage is plotted as ATTEMPT PRESSURE - admitted (`*_count`) plus rejected (`*_throttled_count`) - rather than admitted alone. READ IT BY REGIME. Below the limit, throttled is zero and the two are IDENTICAL, so this changes nothing. At or above the limit, admitted pins at the ceiling and renders exactly-at-cap and 30x-over-cap the same; attempt pressure is then the only term that still varies. The fix restores a signal where admitted-only goes flat - it does NOT measure demand better. Attempt pressure is NOT unique demand: SDK retries make one logical action appear first as throttled and later as performed, so the sum is demand convolved with retry policy, biased high by an unbounded amount. It is also NOT a breach detector, since both series remain minute averages. Use `*_throttled_count > 0` as the authoritative throttling signal. Uses max_over_time at a 1m subquery step so wide time ranges do not average a breach away - at 7d an interval-mean reducer dilutes a short spike by roughly the ratio of spike duration to interval. RESOLUTION FLOOR: Cloud publishes one sample per minute holding the per-second rate AVERAGED over that minute, so a burst is diluted by its duty cycle. A severe instantaneous breach can leave even attempt pressure below 100%: a 60,000-action one-second burst against a 2,000 APS limit publishes as roughly 1,000/s performed plus 967/s throttled, about 98% of limit. Sub-minute peaks are NOT recoverable from this endpoint and no arrangement of these panels will surface them. Read these rows for trend and sizing; read the throttle panels to answer whether a limit was hit. A reading below 100% is never proof of headroom.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 29
+      },
+      "id": 9,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "axisLabel": "% of limit",
+            "lineInterpolation": "stepAfter",
+            "axisSoftMax": 100,
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 60
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "100 * (max_over_time((sum by (temporal_namespace) (temporal_cloud_v1_total_action_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\"} or temporal_cloud_v1_total_action_throttled_count{temporal_namespace=~\"$namespace\"}))[$__interval:1m]) / max by (temporal_namespace) (temporal_cloud_v1_action_limit{temporal_namespace=~\"$namespace\"}))",
+          "legendFormat": "APS - {{temporal_namespace}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "100 * (max_over_time((sum by (temporal_namespace) (temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\"} or temporal_cloud_v1_service_request_throttled_count{temporal_namespace=~\"$namespace\"}))[$__interval:1m]) / max by (temporal_namespace) (temporal_cloud_v1_service_request_limit{temporal_namespace=~\"$namespace\"}))",
+          "legendFormat": "RPS - {{temporal_namespace}}"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "100 * (max_over_time((sum by (temporal_namespace) (temporal_cloud_v1_operations_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\"} or temporal_cloud_v1_operations_throttled_count{temporal_namespace=~\"$namespace\"}))[$__interval:1m]) / max by (temporal_namespace) (temporal_cloud_v1_operations_limit{temporal_namespace=~\"$namespace\"}))",
+          "legendFormat": "OPS - {{temporal_namespace}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "APS - usage vs limit vs on-demand envelope",
+      "description": "Actions per second (attempted) against the limit. This is the same surface the spend rows below bill on, so an APS ceiling and a cost problem are usually the same conversation. Usage is the per-minute peak of attempted demand, so it may cross the limit line during a breach. Usage is plotted as ATTEMPT PRESSURE - admitted (`*_count`) plus rejected (`*_throttled_count`) - rather than admitted alone. READ IT BY REGIME. Below the limit, throttled is zero and the two are IDENTICAL, so this changes nothing. At or above the limit, admitted pins at the ceiling and renders exactly-at-cap and 30x-over-cap the same; attempt pressure is then the only term that still varies. The fix restores a signal where admitted-only goes flat - it does NOT measure demand better. Attempt pressure is NOT unique demand: SDK retries make one logical action appear first as throttled and later as performed, so the sum is demand convolved with retry policy, biased high by an unbounded amount. It is also NOT a breach detector, since both series remain minute averages. Use `*_throttled_count > 0` as the authoritative throttling signal. Limit and envelope are namespace-scoped values, read raw. When the two dashed lines coincide the namespace is already On-Demand. RESOLUTION FLOOR: Cloud publishes one sample per minute holding the per-second rate AVERAGED over that minute, so a burst is diluted by its duty cycle. A severe instantaneous breach can leave even attempt pressure below 100%: a 60,000-action one-second burst against a 2,000 APS limit publishes as roughly 1,000/s performed plus 967/s throttled, about 98% of limit. Sub-minute peaks are NOT recoverable from this endpoint and no arrangement of these panels will surface them. Read these rows for trend and sizing; read the throttle panels to answer whether a limit was hit. A reading below 100% is never proof of headroom.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 38
+      },
+      "id": 10,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "axisLabel": "APS (per second)",
+            "lineInterpolation": "stepAfter"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*- limit"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*on-demand envelope"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    4,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max_over_time((sum by (temporal_namespace) (temporal_cloud_v1_total_action_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\"} or temporal_cloud_v1_total_action_throttled_count{temporal_namespace=~\"$namespace\"}))[$__interval:1m])",
+          "legendFormat": "{{temporal_namespace}} - usage"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (temporal_namespace) (temporal_cloud_v1_action_limit{temporal_namespace=~\"$namespace\"})",
+          "legendFormat": "{{temporal_namespace}} - limit"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (temporal_namespace) (temporal_cloud_v1_action_on_demand_envelope_limit{temporal_namespace=~\"$namespace\"})",
+          "legendFormat": "{{temporal_namespace}} - on-demand envelope"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "RPS - usage vs limit vs on-demand envelope",
+      "description": "gRPC requests per second (attempted) against the limit. Dominated by long-poll traffic on most workloads, which means RPS scales with WORKER COUNT and poller settings rather than with business volume - the one constraint a customer can breach while doing no more work. Usage is the per-minute peak of attempted demand, so it may cross the limit line during a breach. Usage is plotted as ATTEMPT PRESSURE - admitted (`*_count`) plus rejected (`*_throttled_count`) - rather than admitted alone. READ IT BY REGIME. Below the limit, throttled is zero and the two are IDENTICAL, so this changes nothing. At or above the limit, admitted pins at the ceiling and renders exactly-at-cap and 30x-over-cap the same; attempt pressure is then the only term that still varies. The fix restores a signal where admitted-only goes flat - it does NOT measure demand better. Attempt pressure is NOT unique demand: SDK retries make one logical action appear first as throttled and later as performed, so the sum is demand convolved with retry policy, biased high by an unbounded amount. It is also NOT a breach detector, since both series remain minute averages. Use `*_throttled_count > 0` as the authoritative throttling signal. Limit and envelope are namespace-scoped values, read raw. When the two dashed lines coincide the namespace is already On-Demand. RESOLUTION FLOOR: Cloud publishes one sample per minute holding the per-second rate AVERAGED over that minute, so a burst is diluted by its duty cycle. A severe instantaneous breach can leave even attempt pressure below 100%: a 60,000-action one-second burst against a 2,000 APS limit publishes as roughly 1,000/s performed plus 967/s throttled, about 98% of limit. Sub-minute peaks are NOT recoverable from this endpoint and no arrangement of these panels will surface them. Read these rows for trend and sizing; read the throttle panels to answer whether a limit was hit. A reading below 100% is never proof of headroom.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 38
+      },
+      "id": 11,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "axisLabel": "RPS (per second)",
+            "lineInterpolation": "stepAfter"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*- limit"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*on-demand envelope"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    4,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max_over_time((sum by (temporal_namespace) (temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\"} or temporal_cloud_v1_service_request_throttled_count{temporal_namespace=~\"$namespace\"}))[$__interval:1m])",
+          "legendFormat": "{{temporal_namespace}} - usage"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (temporal_namespace) (temporal_cloud_v1_service_request_limit{temporal_namespace=~\"$namespace\"})",
+          "legendFormat": "{{temporal_namespace}} - limit"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (temporal_namespace) (temporal_cloud_v1_service_request_on_demand_envelope_limit{temporal_namespace=~\"$namespace\"})",
+          "legendFormat": "{{temporal_namespace}} - on-demand envelope"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "OPS - usage vs limit vs on-demand envelope",
+      "description": "Operations per second (attempted) against the limit. Counts internal work - transfer tasks, visibility writes, timer fires - including is_background=\"true\" series. Heavy search-attribute upserts and short activity timeouts show up here first. Usage is the per-minute peak of attempted demand, so it may cross the limit line during a breach. Usage is plotted as ATTEMPT PRESSURE - admitted (`*_count`) plus rejected (`*_throttled_count`) - rather than admitted alone. READ IT BY REGIME. Below the limit, throttled is zero and the two are IDENTICAL, so this changes nothing. At or above the limit, admitted pins at the ceiling and renders exactly-at-cap and 30x-over-cap the same; attempt pressure is then the only term that still varies. The fix restores a signal where admitted-only goes flat - it does NOT measure demand better. Attempt pressure is NOT unique demand: SDK retries make one logical action appear first as throttled and later as performed, so the sum is demand convolved with retry policy, biased high by an unbounded amount. It is also NOT a breach detector, since both series remain minute averages. Use `*_throttled_count > 0` as the authoritative throttling signal. Limit and envelope are namespace-scoped values, read raw. When the two dashed lines coincide the namespace is already On-Demand. RESOLUTION FLOOR: Cloud publishes one sample per minute holding the per-second rate AVERAGED over that minute, so a burst is diluted by its duty cycle. A severe instantaneous breach can leave even attempt pressure below 100%: a 60,000-action one-second burst against a 2,000 APS limit publishes as roughly 1,000/s performed plus 967/s throttled, about 98% of limit. Sub-minute peaks are NOT recoverable from this endpoint and no arrangement of these panels will surface them. Read these rows for trend and sizing; read the throttle panels to answer whether a limit was hit. A reading below 100% is never proof of headroom.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 38
+      },
+      "id": 12,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "axisLabel": "OPS (per second)",
+            "lineInterpolation": "stepAfter"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*- limit"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*on-demand envelope"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    4,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max_over_time((sum by (temporal_namespace) (temporal_cloud_v1_operations_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\"} or temporal_cloud_v1_operations_throttled_count{temporal_namespace=~\"$namespace\"}))[$__interval:1m])",
+          "legendFormat": "{{temporal_namespace}} - usage"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (temporal_namespace) (temporal_cloud_v1_operations_limit{temporal_namespace=~\"$namespace\"})",
+          "legendFormat": "{{temporal_namespace}} - limit"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (temporal_namespace) (temporal_cloud_v1_operations_on_demand_envelope_limit{temporal_namespace=~\"$namespace\"})",
+          "legendFormat": "{{temporal_namespace}} - on-demand envelope"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Throttling and hot operations",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 46
+      },
+      "id": 13
+    },
+    {
+      "type": "timeseries",
+      "title": "Throttled actions / operations / requests (primary breach detector)",
+      "description": "Every *_throttled_count series the store holds, as events per minute, broken out by metric. A line here means the corresponding ceiling in the row above was already exceeded and callers saw ResourceExhausted. Cloud publishes these series only once a throttle has occurred, so an empty panel means no throttling has ever been recorded for the selected namespace - absence is the healthy reading, not a broken query. THIS IS THE PRIMARY DETECTOR, not merely lagging confirmation: because published usage is a minute average clipped at the ceiling, a sub-minute breach can leave the utilization lines well under 100% while this panel carries its full magnitude. Alert on this being non-zero; read the utilization rows for trend.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 47
+      },
+      "id": 14,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "axisLabel": "throttled / min",
+            "lineInterpolation": "stepAfter"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (__name__) (avg_over_time({__name__=~\"temporal_cloud_v1_(total_action|operations|service_request)_throttled_count\", temporal_namespace=~\"$namespace\"}[$__interval])) * 60",
+          "legendFormat": "{{__name__}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Top operations by OPS contribution",
+      "description": "The ten operations consuming the most OPS. When the OPS ceiling binds, this names what to attack. is_background=\"true\" rows are internal work the application never called directly - transfer tasks, visibility writes, timer fires - and they are usually the surprise. topk is re-evaluated per step, so series can enter and leave the legend mid-range; that is the panel working, not a gap in data.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 47
+      },
+      "id": 15,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "axisLabel": "operations / sec",
+            "lineInterpolation": "stepAfter"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "topk(10, sum by (operation, is_background) (avg_over_time(temporal_cloud_v1_operations_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\"}[$__interval])))",
+          "legendFormat": "{{operation}} (bg={{is_background}})"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Top operations by RPS contribution",
+      "description": "The ten gRPC operations consuming the most RPS. Expect PollWorkflowTaskQueue and PollActivityTaskQueue to dominate on any healthy fleet - that is long polling, not waste. RPS pressure is therefore usually solved by worker count and poller configuration, not by reducing business throughput.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 47
+      },
+      "id": 16,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "axisLabel": "requests / sec",
+            "lineInterpolation": "stepAfter"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "topk(10, sum by (operation) (avg_over_time(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\"}[$__interval])))",
+          "legendFormat": "{{operation}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "id": 35,
+      "title": "Rate limit vs other Resource Exhausted (runbook discriminator)",
+      "description": "THE BRANCH POINT for a ResourceExhausted investigation. Both series are errors per second, read raw - the published metrics are already per-second rates, so no conversion is applied.\n\n`*_throttled_count` (blue) counts rejections from the NAMESPACE rate limits - APS, RPS, OPS. These are the ceilings the rows above plot, and they move with TRUs.\n\n`resource_exhausted_error_count` (red/orange, split by operation) is documented as explicitly EXCLUDING namespace-limit throttling. It therefore captures every OTHER cause: per-workflow lock contention (BusyWorkflow, typically duplicate starts against one Workflow ID), API-specific limits (Visibility ~30 RPS, Worker Deployment ~50 RPS), and concurrent Update limits. None of these are fixed by raising TRUs or by adding workers.\n\nREAD IT AS A BRANCH. Throttle series non-zero -> a namespace ceiling bound; go to the capacity rows and the TRU decision. Throttle series near zero while this one is high -> NOT a capacity problem; the `operation` breakdown names where to look, and StartWorkflowExecution here points at duplicate Workflow IDs. Both non-zero -> two independent problems, handle separately.\n\nCloud publishes either series only after the corresponding error has occurred, so an empty panel is the healthy reading rather than a broken query.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 55
+      },
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "axisLabel": "errors / sec",
+            "lineInterpolation": "stepAfter"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^Namespace rate limit.*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum({__name__=~\"temporal_cloud_v1_(total_action|operations|service_request)_throttled_count\", temporal_namespace=~\"$namespace\"})",
+          "legendFormat": "Namespace rate limit (APS/RPS/OPS) -> capacity path"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (operation) (temporal_cloud_v1_resource_exhausted_error_count{temporal_namespace=~\"$namespace\"})",
+          "legendFormat": "Other RE: {{operation}} -> application path"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Provisioned capacity",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 64
+      },
+      "id": 17
+    },
+    {
+      "type": "timeseries",
+      "title": "Provisioned TRUs over time",
+      "description": "temporal_cloud_v1_provisioned_capacity_tru_count. A step in this line is a capacity change; correlate it with the limit lines above, which move with it. Flat at 0 means the namespace has never been provisioned and runs entirely On-Demand.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 65
+      },
+      "id": 18,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "axisLabel": "TRUs",
+            "lineInterpolation": "stepAfter"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (temporal_namespace) (temporal_cloud_v1_provisioned_capacity_tru_count{temporal_namespace=~\"$namespace\"})",
+          "legendFormat": "{{temporal_namespace}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "On-Demand envelope minus enforced limit (negative = provisioning buys more)",
+      "description": "SIGN IS THE WHOLE POINT. This is on_demand_envelope_limit minus the enforced limit, so it reads as 'what switching to On-Demand would do to this ceiling'. ZERO: the two coincide - the namespace is On-Demand, or provisioned to exactly the same ceiling. POSITIVE: On-Demand would RAISE that ceiling by this much. NEGATIVE: provisioning is currently buying more than On-Demand would, and dropping to On-Demand would LOWER the ceiling by this much - that is a healthy reading on a provisioned namespace, not an error. Provisioning does not move the three ceilings together or even in the same direction: on this namespace 2 TRUs raised APS and RPS while CUTTING OPS, so read each line separately. The axis is centred on zero so the sign is visible at a glance.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 65
+      },
+      "id": 19,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "axisLabel": "envelope - enforced limit (per second)",
+            "lineInterpolation": "stepAfter",
+            "axisCenteredZero": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(max by (temporal_namespace) (temporal_cloud_v1_action_on_demand_envelope_limit{temporal_namespace=~\"$namespace\"})) - (max by (temporal_namespace) (temporal_cloud_v1_action_limit{temporal_namespace=~\"$namespace\"}))",
+          "legendFormat": "APS - {{temporal_namespace}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(max by (temporal_namespace) (temporal_cloud_v1_service_request_on_demand_envelope_limit{temporal_namespace=~\"$namespace\"})) - (max by (temporal_namespace) (temporal_cloud_v1_service_request_limit{temporal_namespace=~\"$namespace\"}))",
+          "legendFormat": "RPS - {{temporal_namespace}}"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(max by (temporal_namespace) (temporal_cloud_v1_operations_on_demand_envelope_limit{temporal_namespace=~\"$namespace\"})) - (max by (temporal_namespace) (temporal_cloud_v1_operations_limit{temporal_namespace=~\"$namespace\"}))",
+          "legendFormat": "OPS - {{temporal_namespace}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Spend and attribution (billable actions)",
+      "collapsed": true,
+      "panels": [
+        {
+          "type": "stat",
+          "title": "Billable actions (selected range)",
+          "description": "Exact count over the dashboard time range: sum_over_time(billable[$__range]) * 60. Filtered by all five selectors. Minutes Cloud did not publish contribute zero - this undercounts across a scrape outage rather than inventing traffic.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 5,
+            "x": 0,
+            "y": 0
+          },
+          "id": 20,
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "mappings": [],
+              "noValue": "0"
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(sum_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", temporal_workflow_type=~\"$workflow_type\", action_type=~\"$action_type\"}[$__range])) * 60",
+              "instant": true,
+              "range": false
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "title": "Billable actions / min (avg over published minutes)",
+          "description": "Mean over the minutes Cloud actually published in the range, expressed per minute: sum(avg_over_time(billable[$__range])) * 60. Idle gaps are excluded from the mean, so this reads as 'rate while busy', not 'rate over wall clock'.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 5,
+            "x": 5,
+            "y": 0
+          },
+          "id": 21,
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "mappings": [],
+              "noValue": "no samples"
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(avg_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", temporal_workflow_type=~\"$workflow_type\", action_type=~\"$action_type\"}[$__range])) * 60",
+              "instant": true,
+              "range": false
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "title": "Projected ${projection_days}-day billable actions",
+          "description": "Straight-line extrapolation of the published-minute mean: sum(avg_over_time(billable[$__range])) * 86400 * $projection_days. Only meaningful when the selected range is representative of steady state - a range covering a burst projects that burst forever.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 5,
+            "x": 10,
+            "y": 0
+          },
+          "id": 22,
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "mappings": [],
+              "noValue": "no samples"
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(avg_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", temporal_workflow_type=~\"$workflow_type\", action_type=~\"$action_type\"}[$__range])) * 86400 * $projection_days",
+              "instant": true,
+              "range": false
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "title": "Unattributed to a workflow type",
+          "description": "Share of billable actions in range whose temporal_workflow_type is the unattributed sentinel ($unattributed_re, which includes the empty string). These actions are billed but invisible to the Workflow type filter, so they vanish from every breakdown the moment a specific workflow type is selected. Deliberately IGNORES the Workflow type filter. The exact sentinel Cloud emits is unverified on this account - see Method.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 5,
+            "x": 15,
+            "y": 0
+          },
+          "id": 23,
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "decimals": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 1
+                  },
+                  {
+                    "color": "orange",
+                    "value": 10
+                  }
+                ]
+              },
+              "mappings": [],
+              "noValue": "no samples"
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "100 * (sum(sum_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", action_type=~\"$action_type\", temporal_workflow_type=~\"$unattributed_re\"}[$__range])) or vector(0)) / sum(sum_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", action_type=~\"$action_type\"}[$__range]))",
+              "instant": true,
+              "range": false
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "title": "Feed liveness (${stale_grace_min} min)",
+          "description": "Has ANY billable-action sample for the selected namespaces landed in the last $stale_grace_min minutes. The Cloud OpenMetrics endpoint publishes roughly 3.5 min behind wall clock on this account, so the grace window defaults to 7. FEED SILENT is not the same as zero actions: Cloud omits the series entirely when a namespace is idle, so a quiet namespace also reads silent.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 4,
+            "x": 20,
+            "y": 0
+          },
+          "id": 24,
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "1": {
+                      "text": "LIVE",
+                      "color": "green",
+                      "index": 0
+                    }
+                  }
+                }
+              ],
+              "noValue": "FEED SILENT / IDLE"
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "clamp_max(count(count_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\"}[${stale_grace_min}m])), 1)",
+              "instant": true,
+              "range": false
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Billable actions by action type",
+          "description": "Which kinds of action are being billed. action_type is the closest OpenMetrics analogue of the internal per-event action classification and needs no join to do it. Plotted as actions per minute: avg_over_time(...) * 60, since each published sample is a per-second rate covering one minute.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 5
+          },
+          "id": 25,
+          "interval": "1m",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "decimals": 2,
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "showPoints": "auto",
+                "pointSize": 4,
+                "spanNulls": false,
+                "axisLabel": "actions / min",
+                "lineInterpolation": "stepAfter"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": [
+                "mean",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (action_type) (avg_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", temporal_workflow_type=~\"$workflow_type\", action_type=~\"$action_type\"}[$__interval])) * 60",
+              "legendFormat": "{{action_type}}"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Billable actions by workflow type",
+          "description": "Cost attributed to the workflow that caused it. Actions carrying the unattributed sentinel are plotted here too - they are the series to chase before trusting a per-workflow cost split. Plotted as actions per minute: avg_over_time(...) * 60, since each published sample is a per-second rate covering one minute.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 12,
+            "y": 5
+          },
+          "id": 26,
+          "interval": "1m",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "decimals": 2,
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "showPoints": "auto",
+                "pointSize": 4,
+                "spanNulls": false,
+                "axisLabel": "actions / min",
+                "lineInterpolation": "stepAfter"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": [
+                "mean",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (temporal_workflow_type) (avg_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", temporal_workflow_type=~\"$workflow_type\", action_type=~\"$action_type\"}[$__interval])) * 60",
+              "legendFormat": "{{temporal_workflow_type}}"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Billable actions by workflow type -> action type",
+          "description": "The full attribution cross-product, the customer-side equivalent of the internal board's headline panel. High cardinality by construction: narrow with the Workflow type / Action type filters before reading it on a busy namespace. Plotted as actions per minute: avg_over_time(...) * 60, since each published sample is a per-second rate covering one minute.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 24,
+            "x": 0,
+            "y": 14
+          },
+          "id": 27,
+          "interval": "1m",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "decimals": 2,
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "showPoints": "auto",
+                "pointSize": 4,
+                "spanNulls": false,
+                "axisLabel": "actions / min",
+                "lineInterpolation": "stepAfter"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": [
+                "mean",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (temporal_workflow_type, action_type) (avg_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", temporal_workflow_type=~\"$workflow_type\", action_type=~\"$action_type\"}[$__interval])) * 60",
+              "legendFormat": "{{temporal_workflow_type}} -> {{action_type}}"
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "title": "Cost attribution - workflow type x action type (selected range)",
+          "description": "One row per workflow type x action type over the dashboard range. Actions (range) is the exact gap-honest count; Actions / min is the mean over published minutes; % of selected is the row's share of the current selection, so it re-bases when you filter. Sorted by Actions (range) descending - the top rows are where the bill is.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 11,
+            "w": 24,
+            "x": 0,
+            "y": 23
+          },
+          "id": 28,
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": true,
+              "reducer": [
+                "sum"
+              ],
+              "fields": [
+                "Actions (range)"
+              ]
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto",
+                "filterable": true,
+                "inspect": false
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "transparent",
+                    "value": null
+                  }
+                ]
+              },
+              "noValue": "No billable actions in range"
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Actions (range)"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "short"
+                  },
+                  {
+                    "id": "decimals",
+                    "value": 0
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "gauge",
+                      "mode": "gradient"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Actions / min"
+                },
+                "properties": [
+                  {
+                    "id": "decimals",
+                    "value": 2
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 140
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "% of selected"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "percent"
+                  },
+                  {
+                    "id": "decimals",
+                    "value": 1
+                  },
+                  {
+                    "id": "custom.width",
+                    "value": 130
+                  }
+                ]
+              }
+            ]
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (temporal_workflow_type, action_type) (sum_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", temporal_workflow_type=~\"$workflow_type\", action_type=~\"$action_type\"}[$__range])) * 60",
+              "instant": true,
+              "range": false,
+              "format": "table"
+            },
+            {
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (temporal_workflow_type, action_type) (avg_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", temporal_workflow_type=~\"$workflow_type\", action_type=~\"$action_type\"}[$__range])) * 60",
+              "instant": true,
+              "range": false,
+              "format": "table"
+            },
+            {
+              "refId": "C",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "100 * sum by (temporal_workflow_type, action_type) (sum_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", temporal_workflow_type=~\"$workflow_type\", action_type=~\"$action_type\"}[$__range])) / scalar(sum(sum_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", temporal_workflow_type=~\"$workflow_type\", action_type=~\"$action_type\"}[$__range])))",
+              "instant": true,
+              "range": false,
+              "format": "table"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "merge",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "renameByName": {
+                  "temporal_workflow_type": "Workflow type",
+                  "action_type": "Action type",
+                  "Value #A": "Actions (range)",
+                  "Value #B": "Actions / min",
+                  "Value #C": "% of selected"
+                },
+                "indexByName": {
+                  "Workflow type": 0,
+                  "Action type": 1,
+                  "Actions (range)": 2,
+                  "Actions / min": 3,
+                  "% of selected": 4
+                }
+              }
+            },
+            {
+              "id": "sortBy",
+              "options": {
+                "fields": {},
+                "sort": [
+                  {
+                    "field": "Actions (range)",
+                    "desc": true
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Billable actions by region (ignores the Region filter)",
+          "description": "Billable actions split by the Cloud region serving the namespace - the customer-visible stand-in for the internal board's data-plane cell split. Two regions carrying comparable volume over the same period means an in-flight failover or a replicated topology; a clean handover from one to the other means a migration. Deliberately IGNORES the Region filter. Plotted as actions per minute: avg_over_time(...) * 60, since each published sample is a per-second rate covering one minute.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 34
+          },
+          "id": 29,
+          "interval": "1m",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "decimals": 2,
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "showPoints": "auto",
+                "pointSize": 4,
+                "spanNulls": false,
+                "axisLabel": "actions / min",
+                "lineInterpolation": "stepAfter"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": [
+                "mean",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (region) (avg_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", temporal_workflow_type=~\"$workflow_type\", action_type=~\"$action_type\"}[$__interval])) * 60",
+              "legendFormat": "{{region}}"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Unattributed billable actions (no workflow type)",
+          "description": "The same sentinel series as the Spend stat, broken out by action type so you can see WHICH action kinds arrive without a workflow type. A non-zero reading explains the gap between the unfiltered totals and every per-workflow breakdown. Empty is the healthy reading. Plotted as actions per minute: avg_over_time(...) * 60, since each published sample is a per-second rate covering one minute.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 34
+          },
+          "id": 30,
+          "interval": "1m",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "decimals": 2,
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "showPoints": "auto",
+                "pointSize": 4,
+                "spanNulls": false,
+                "axisLabel": "actions / min",
+                "lineInterpolation": "stepAfter"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": [
+                "mean",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (action_type) (avg_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", action_type=~\"$action_type\", temporal_workflow_type=~\"$unattributed_re\"}[$__interval])) * 60",
+              "legendFormat": "{{action_type}}"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Billable vs total actions - reconciliation",
+          "description": "Billable actions are what you pay for; total actions are what the namespace performed, and total_action_count is also the APS numerator in the capacity rows above. Different label sets - total_action_count carries namespace_mode and is_background but NO region, workflow type, or action type - so both series here are scoped by NAMESPACE ONLY and ignore the region / workflow / action filters. On an HA namespace the standby line is replicated work and is not separately billed, so summing active + standby overstates the bill; a persistent gap between billable and total-active is background or non-billable work, which is the number worth explaining before a cost conversation. Plotted as actions per minute: avg_over_time(...) * 60, since each published sample is a per-second rate covering one minute.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 42
+          },
+          "id": 31,
+          "interval": "1m",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "decimals": 2,
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "showPoints": "auto",
+                "pointSize": 4,
+                "spanNulls": false,
+                "axisLabel": "actions / min",
+                "lineInterpolation": "stepAfter"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "total - standby (replicated)"
+                },
+                "properties": [
+                  {
+                    "id": "custom.lineStyle",
+                    "value": {
+                      "fill": "dash",
+                      "dash": [
+                        8,
+                        8
+                      ]
+                    }
+                  },
+                  {
+                    "id": "custom.fillOpacity",
+                    "value": 0
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "total - active, background"
+                },
+                "properties": [
+                  {
+                    "id": "custom.lineStyle",
+                    "value": {
+                      "fill": "dot",
+                      "dash": [
+                        2,
+                        6
+                      ]
+                    }
+                  },
+                  {
+                    "id": "custom.fillOpacity",
+                    "value": 0
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": [
+                "mean",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(avg_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\"}[$__interval])) * 60",
+              "legendFormat": "billable"
+            },
+            {
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(avg_over_time(temporal_cloud_v1_total_action_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\"}[$__interval])) * 60",
+              "legendFormat": "total - active"
+            },
+            {
+              "refId": "C",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(avg_over_time(temporal_cloud_v1_total_action_count{temporal_namespace=~\"$namespace\", namespace_mode=\"standby\"}[$__interval])) * 60",
+              "legendFormat": "total - standby (replicated)"
+            },
+            {
+              "refId": "D",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(avg_over_time(temporal_cloud_v1_total_action_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\", is_background=\"true\"}[$__interval])) * 60",
+              "legendFormat": "total - active, background"
+            }
+          ]
+        }
+      ],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 73
+      },
+      "id": 32
+    },
+    {
+      "type": "row",
+      "title": "Method / known limits",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 74
+      },
+      "id": 33
+    },
+    {
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "h": 30,
+        "w": 24,
+        "x": 0,
+        "y": 75
+      },
+      "id": 34,
+      "options": {
+        "mode": "markdown",
+        "content": "## Method / known limits\n\nTwo jobs on one board. The **capacity** rows answer \"which ceiling binds and when do we buy more\"; the collapsed **spend** rows answer \"what are we paying for and why\". They share a substrate - `total_action_count` is both the APS numerator and the denominator the billable share is measured against - which is why they belong together rather than on two boards that disagree.\n\nThe spend half is a **customer-shaped** port of an internal billable-actions design that reads a ClickHouse warehouse (`chronicle.global_metric_billable_action_count_agg_30s / _agg_5m`). No customer has that warehouse. **None of the SQL ports. Only the decision design does.**\n\n### The rate/counter trap - applies to every `_count` metric here\n\n`billable_action_count`, `total_action_count`, `service_request_count`, `operations_count` and the `*_throttled_count` family **are not counters**, despite the suffix. Each is a gauge carrying a per-second rate for a 1-minute aggregate, published with its own timestamp. Prometheus scrapes at 30s with `honor_timestamps: true`, so the duplicate is dropped and the store holds **exactly one sample per minute, aligned to `:00`** (verified). Consequences:\n\n- `rate()` / `increase()` produce garbage. The in-cluster scrape config says as much.\n- `avg_over_time(m[w]) * w_seconds` **overstates on a gapped series** - measured here as 7740 against a true 258 over the same 30 minutes, because the mean of the published minutes got extrapolated across the idle ones. Range totals use `sum_over_time * 60`, which is exact and errs low across a scrape outage.\n- `avg_over_time` is right for the **projection** stat and for the **Current /s** column, where the busy-minute mean is the intended reading.\n- Peaks use a `[$__range:1m]` subquery. The 1m step matches the publication cadence; carry-forward inside the subquery can repeat a value but cannot invent a higher one, so a peak stays a real peak.\n\n### Scoping rule the capacity rows depend on\n\nEvery limit series - `action_limit`, `service_request_limit`, `operations_limit`, `poller_limit`, both envelope limits, `provisioned_capacity_tru_count` - carries **only `temporal_namespace`**. No region, no operation, no workflow type. So all constraint numerators are summed **namespace-wide** and ignore the Region / Workflow type / Action type pickers. Filtering the numerator alone would read as false headroom. The pickers still drive the spend rows, where the labels exist.\n\nTwo asymmetries inside that rule, both verified on this store:\n\n- `total_action_count` carries **no `region`** but does carry `namespace_mode`, so APS is filtered to `namespace_mode=\"active\"`.\n- `operations_count` **does** carry `region` (the docs' common-label list is right here, the `total_action_count` exception is not universal), and also carries `namespace_mode`; OPS is likewise filtered to active. `service_request_count` carries `region` but no `namespace_mode`, so RPS sums every region.\n\n### What is unverified or absent here\n\n- **The throttle series are now observed.** A deliberate load test on 2026-09-11 drove `ziggymart.evvjb` past its 500 APS ceiling and produced ~9k `ApsLimit` rejections, so `total_action_throttled_count` has populated here and the throttle panels are confirmed working end to end. `resource_exhausted_error_count` has still **never appeared on this store** - no non-rate-limit exhaustion has occurred - so the discriminator panel's red series is untested against real data. The 60/80 utilization thresholds remain **inherited convention**, not calibrated against an observed throttle.\n- **The provisioned branch is now exercised, and it is not symmetric.** On **2026-09-09** this namespace was provisioned to **2 TRUs at 15:12 UTC and returned to On-Demand at 15:57 UTC** - a 45-minute episode, currently back at 0 TRUs. The three ceilings did not move together across it: APS went 500 -> 1000 and RPS 2000 -> 3000, but **OPS went 20000 -> 8000**, a 60% cut, while every on-demand envelope stayed put. Both transitions were exact mirrors. So provisioning traded OPS headroom for APS and RPS headroom. Nothing on this board assumes the ceilings move in step, but a reader might, and on a namespace whose binding constraint is OPS this trade would be a regression bought by mistake. Re-read the constraint matrix after any TRU change rather than assuming more TRUs means more of everything.\n- **The unattributed sentinel.** `$unattributed_re` defaults to `unknown|_unknown_|` (the trailing alternation matches the empty string). Which of those Cloud actually emits has **not** been observed here; this namespace has only ever produced `OrderWorkflow`-attributed actions. Confirm on a busy namespace and narrow the regex.\n- **`$stale_grace_min` defaults to 7**, inherited from the failover-readiness board where the ~209s publication lag on this same endpoint *was* measured. Not re-measured for these metrics.\n- **`poller_limit` (20000 here) has no usage counterpart** on the OpenMetrics surface - there is no published poller count to divide by - so no poller-utilization panel is drawn. Poller pressure has to be read from the worker SDK metrics instead.\n\n### What did not survive the port from the internal board\n\n- **The three resolution rows (30s / 1m / 1h) are gone.** They existed because the warehouse holds both a 30s and a 5m rollup, so re-aggregating was free and the operator picked the grain. Cloud publishes **one 1-minute aggregate, full stop**. Rendering one source at three grains would dress a single fidelity up as three. The time picker and `$__interval` do that job honestly.\n- **Sub-minute burst detection is unrecoverable.** A burst shorter than a minute is averaged into its minute at the source. This matters most for the capacity rows: limits are enforced **per second**, but the finest evidence available is a per-minute mean, so a minute reading 80% of limit has near-certainly touched 100% within that minute. That gap is the reason the amber threshold sits at 60 rather than 90.\n- **`account` is a label, not a dimension.** A Metrics Read-Only key is account-scoped, so every series already carries one `temporal_account`. There is no cross-account picker because there is no cross-account data.\n\n### Reading it on an idle namespace\n\nCloud **omits** a rate series entirely when there is nothing to report rather than publishing a zero. On a quiet namespace the stats read `0` / `no samples` and Feed liveness reads `FEED SILENT / IDLE` - the board cannot separate \"no traffic\" from \"feed broken\" on these metrics alone. The limit and TRU series keep publishing regardless, so a board showing limits but no usage is idle, and a board showing nothing at all is disconnected.\n"
+      }
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": [
+    "temporal",
+    "temporal-cloud",
+    "capacity",
+    "billable-actions",
+    "cost"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "text": "Prometheus (kind metrics)",
+          "value": "prometheus-kind"
+        },
+        "hide": 0,
+        "refresh": 1,
+        "regex": "",
+        "options": [],
+        "includeAll": false,
+        "multi": false,
+        "description": "Prometheus datasource. Default uid prometheus-kind (host metrics store). All panels use ${datasource}."
+      },
+      {
+        "name": "namespace",
+        "type": "query",
+        "label": "Namespace",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(temporal_cloud_v1_action_limit, temporal_namespace)",
+        "query": {
+          "query": "label_values(temporal_cloud_v1_action_limit, temporal_namespace)",
+          "refId": "var-namespace"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "hide": 0,
+        "description": "Sourced from action_limit, not from a usage metric: limit series publish continuously for every namespace, whereas the usage series disappear while a namespace is idle and would empty this picker. Drives every panel on the board."
+      },
+      {
+        "name": "region",
+        "type": "query",
+        "label": "Region",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\"}, region)",
+        "query": {
+          "query": "label_values(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\"}, region)",
+          "refId": "var-region"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "hide": 0,
+        "description": "SPEND ROWS ONLY. The capacity rows ignore this: limit series carry no region label, so a region-filtered numerator over a namespace-wide limit would read as false headroom."
+      },
+      {
+        "name": "workflow_type",
+        "type": "query",
+        "label": "Workflow type",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\"}, temporal_workflow_type)",
+        "query": {
+          "query": "label_values(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\"}, temporal_workflow_type)",
+          "refId": "var-workflow-type"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "hide": 0,
+        "description": "SPEND ROWS ONLY. Selecting a specific workflow type excludes every unattributed action - watch the unattributed stat to know how much that hides."
+      },
+      {
+        "name": "action_type",
+        "type": "query",
+        "label": "Action type",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\"}, action_type)",
+        "query": {
+          "query": "label_values(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\"}, action_type)",
+          "refId": "var-action-type"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "hide": 0,
+        "description": "SPEND ROWS ONLY."
+      },
+      {
+        "name": "projection_days",
+        "type": "textbox",
+        "label": "Projection days",
+        "query": "30",
+        "current": {
+          "text": "30",
+          "value": "30"
+        },
+        "options": [],
+        "hide": 0,
+        "description": "Horizon for the straight-line spend projection."
+      },
+      {
+        "name": "stale_grace_min",
+        "type": "textbox",
+        "label": "Liveness grace (min)",
+        "query": "7",
+        "current": {
+          "text": "7",
+          "value": "7"
+        },
+        "options": [],
+        "hide": 0,
+        "description": "Freshness window for the Feed liveness stat. 7 clears the ~3.5 min publication lag measured on this endpoint by the failover-readiness board."
+      },
+      {
+        "name": "unattributed_re",
+        "type": "constant",
+        "label": "Unattributed sentinel",
+        "query": "unknown|_unknown_|",
+        "current": {
+          "text": "unknown|_unknown_|",
+          "value": "unknown|_unknown_|"
+        },
+        "hide": 2,
+        "options": [],
+        "description": "Fully-anchored Prometheus regex for a workflow type carrying no attribution. The trailing empty alternation matches the empty label. UNVERIFIED on this account - see Method."
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Temporal Cloud - Capacity and Actions",
+  "uid": "temporal-cloud-capacity",
+  "version": 1,
+  "weekStart": ""
+}
