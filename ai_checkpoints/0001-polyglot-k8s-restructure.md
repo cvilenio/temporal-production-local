@@ -7,8 +7,9 @@
 
 ## Done this session
 
-- **Cleanup:** removed leaked `Untitled` Cloud JWT; kept `guts.<account-id>.txt` (real Cloud key,
-  gitignored); tightened `.gitignore` (caches, TF state, key/pem/apikey).
+- **Cleanup:** removed a stray credential artifact from the tree; kept
+  `<namespace>.<account-id>.txt` (gitignored API-key path); tightened `.gitignore`
+  (caches, TF state, key/pem/apikey).
 - **Shared-kernel migration (43 git renames, history preserved):**
   `kernels/python/orders/` (workflows, activities, clients, db, shared, services,
   `config.py`, `containers.py`, `resources.py`, `api.py`, `worker.py`). uv workspace package.

@@ -26,5 +26,5 @@ contract; `TemporalService` is now a thin domain wrapper over an already-connect
 
 - Backend switch is an env/profile change; no code edits, no rebuild.
 - mTLS and API-key auth are both supported (API key is the simpler Cloud path).
-- The active credential file (`guts.<account-id>.txt`) and any `*.key`/`*.pem` are excluded from
+- The active credential file (`<namespace>.<account-id>.txt`) and any `*.key`/`*.pem` are excluded from
   git.

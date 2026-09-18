@@ -91,7 +91,7 @@ Do NOT flag obvious PLACEHOLDER or redaction tokens, even when they sit exactly 
 secret would go. Treat these as already-redacted, never as leaks:
 - angle-bracket placeholders: <account-id>, <your-account>, <namespace-id>, <token>, <region>
 - template/example tokens: REDACTED, CHANGEME, xxxx/******, your-*, my-*, example.com, foo/bar
-A line like "TEMPORAL_NAMESPACE=ziggymart.<account-id>" or "guts.<account-id>.txt" is SAFE — the
+A line like "TEMPORAL_NAMESPACE=ziggymart.<account-id>" or "my-namespace.<account-id>.txt" is SAFE — the
 real value is not present. Judge only the literal text given; do not imagine the real value
 behind a placeholder, and ignore removed/old content (you only receive added lines).
 Respond with EXACTLY one line that is either "VERDICT: CLEAN" or "VERDICT: BLOCK". If BLOCK, add
