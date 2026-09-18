@@ -1,0 +1,1451 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [
+    {
+      "title": "Capacity and Actions (APS / RPS / OPS ceilings)",
+      "tooltip": "Same namespace and time range, viewed as a capacity question: which rate ceiling binds first.",
+      "type": "link",
+      "url": "/d/temporal-cloud-capacity",
+      "icon": "external link",
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": [],
+      "includeVars": true,
+      "keepTime": true
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "row",
+      "title": "Spend",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1
+    },
+    {
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "id": 2,
+      "options": {
+        "mode": "markdown",
+        "content": "## Billable actions, from the customer side\n\nEvery panel reads `temporal_cloud_v1_billable_action_count` on the **Temporal Cloud OpenMetrics** endpoint (`prometheus-kind`) - the surface a customer actually has. This is the metric Temporal bills on.\n\n**The series is a per-second rate, published once per minute. It is not a counter - never `rate()` or `increase()` it.** A sample of `2.433` means 2.433 billable actions/sec averaged over that minute, i.e. ~146 actions in that minute.\n\n- **Actions in a window** = `sum_over_time(m[w]) * 60`. Exact, and gap-honest: a minute Cloud never published contributes nothing rather than being interpolated.\n- **Actions / min** on the graphs = `sum_over_time(m[$__interval]) * 3600 / $__interval_s`, so the graph buckets sum back to the same total.\n- **Projection** deliberately uses `avg_over_time` (mean of *published* minutes, extrapolated) - the one place where ignoring idle gaps is the intent.\n"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Billable actions (selected range)",
+      "description": "Exact count over the dashboard time range: sum_over_time(billable[$__range]) * 60. Filtered by all five selectors. Minutes Cloud did not publish contribute zero - this undercounts across a scrape outage rather than inventing traffic.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 0,
+        "y": 7
+      },
+      "id": 3,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [],
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(sum_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", temporal_workflow_type=~\"$workflow_type\", action_type=~\"$action_type\"}[$__range])) * 60",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Billable actions / min (avg over published minutes)",
+      "description": "Mean over the minutes Cloud actually published in the range, expressed per minute: sum(avg_over_time(billable[$__range])) * 60. Idle gaps are excluded from the mean, so this reads as 'rate while busy', not 'rate over wall clock'.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 5,
+        "y": 7
+      },
+      "id": 4,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [],
+          "noValue": "no samples"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(avg_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", temporal_workflow_type=~\"$workflow_type\", action_type=~\"$action_type\"}[$__range])) * 60",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Projected ${projection_days}-day billable actions",
+      "description": "Straight-line extrapolation of the published-minute mean: sum(avg_over_time(billable[$__range])) * 86400 * $projection_days. Only meaningful when the selected range is representative of steady state - a range covering a burst projects that burst forever.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 10,
+        "y": 7
+      },
+      "id": 5,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [],
+          "noValue": "no samples"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(avg_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", temporal_workflow_type=~\"$workflow_type\", action_type=~\"$action_type\"}[$__range])) * 86400 * $projection_days",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Unattributed to a workflow type",
+      "description": "Share of billable actions in range whose temporal_workflow_type is the unattributed sentinel ($unattributed_re, which includes the empty string). These actions are billed but invisible to the Workflow type filter, so they vanish from every breakdown the moment a specific workflow type is selected - which is what makes the totals above and the breakdowns below disagree. Deliberately IGNORES the Workflow type filter. The exact sentinel Cloud emits is unverified on this account (see Method).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 15,
+        "y": 7
+      },
+      "id": 6,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "orange",
+                "value": 10
+              }
+            ]
+          },
+          "mappings": [],
+          "noValue": "no samples"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "100 * (sum(sum_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", action_type=~\"$action_type\", temporal_workflow_type=~\"$unattributed_re\"}[$__range])) or vector(0)) / sum(sum_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", action_type=~\"$action_type\"}[$__range]))",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Feed liveness (${stale_grace_min} min)",
+      "description": "Has ANY billable-action sample for the selected namespaces landed in the last $stale_grace_min minutes. The Cloud OpenMetrics endpoint publishes roughly 3.5 min behind wall clock on this account, so the grace window defaults to 7 - a 3-minute window is permanently empty here. FEED SILENT is not the same as zero actions: Cloud omits the series entirely when a namespace is idle, so a quiet namespace also reads silent.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 20,
+        "y": 7
+      },
+      "id": 7,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "LIVE",
+                  "color": "green",
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "noValue": "FEED SILENT / IDLE"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "clamp_max(count(count_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\"}[${stale_grace_min}m])), 1)",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Attribution",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 12
+      },
+      "id": 8
+    },
+    {
+      "type": "timeseries",
+      "title": "Billable actions by action type",
+      "description": "Which kinds of action are being billed. action_type is the closest OpenMetrics analogue of the internal per-event action classification and needs no join to do it.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "id": 9,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "axisLabel": "actions / min",
+            "lineInterpolation": "stepAfter"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (action_type) (sum_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", temporal_workflow_type=~\"$workflow_type\", action_type=~\"$action_type\"}[$__interval])) * 3600 / ($__interval_ms / 1000)",
+          "legendFormat": "{{action_type}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Billable actions by workflow type",
+      "description": "Cost attributed to the workflow that caused it. Actions carrying the unattributed sentinel are plotted here too - they are the series to chase before trusting a per-workflow cost split.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "id": 10,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "axisLabel": "actions / min",
+            "lineInterpolation": "stepAfter"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (temporal_workflow_type) (sum_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", temporal_workflow_type=~\"$workflow_type\", action_type=~\"$action_type\"}[$__interval])) * 3600 / ($__interval_ms / 1000)",
+          "legendFormat": "{{temporal_workflow_type}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Billable actions by workflow type -> action type",
+      "description": "The full attribution cross-product, the customer-side equivalent of the internal board's headline panel. High cardinality by construction: narrow with the Workflow type / Action type filters before reading it on a busy namespace.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "id": 11,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "axisLabel": "actions / min",
+            "lineInterpolation": "stepAfter"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (temporal_workflow_type, action_type) (sum_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", temporal_workflow_type=~\"$workflow_type\", action_type=~\"$action_type\"}[$__interval])) * 3600 / ($__interval_ms / 1000)",
+          "legendFormat": "{{temporal_workflow_type}} -> {{action_type}}"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Cost attribution - workflow type x action type (selected range)",
+      "description": "One row per workflow type x action type over the dashboard range. Actions (range) is the exact gap-honest count; Actions / min is the mean over published minutes; % of selected is the row's share of the current selection, so it re-bases when you filter. Sorted by Actions (range) descending - the top rows are where the bill is.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "id": 12,
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": true,
+          "reducer": [
+            "sum"
+          ],
+          "fields": [
+            "Actions (range)"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true,
+            "inspect": false
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "No billable actions in range"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Actions (range)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "gradient"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Actions / min"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "custom.width",
+                "value": 140
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "% of selected"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (temporal_workflow_type, action_type) (sum_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", temporal_workflow_type=~\"$workflow_type\", action_type=~\"$action_type\"}[$__range])) * 60",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (temporal_workflow_type, action_type) (avg_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", temporal_workflow_type=~\"$workflow_type\", action_type=~\"$action_type\"}[$__range])) * 60",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "100 * sum by (temporal_workflow_type, action_type) (sum_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", temporal_workflow_type=~\"$workflow_type\", action_type=~\"$action_type\"}[$__range])) / scalar(sum(sum_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", temporal_workflow_type=~\"$workflow_type\", action_type=~\"$action_type\"}[$__range])))",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "temporal_workflow_type": "Workflow type",
+              "action_type": "Action type",
+              "Value #A": "Actions (range)",
+              "Value #B": "Actions / min",
+              "Value #C": "% of selected"
+            },
+            "indexByName": {
+              "Workflow type": 0,
+              "Action type": 1,
+              "Actions (range)": 2,
+              "Actions / min": 3,
+              "% of selected": 4
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Actions (range)",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Topology and data quality",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 42
+      },
+      "id": 13
+    },
+    {
+      "type": "timeseries",
+      "title": "Billable actions by region (ignores the Region filter)",
+      "description": "Billable actions split by the Cloud region serving the namespace - the customer-visible stand-in for the internal board's data-plane cell split. Two regions carrying comparable volume over the same period means an in-flight failover or a replicated topology; a clean handover from one to the other means a migration. Deliberately IGNORES the Region filter so the split stays visible whatever is selected.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 43
+      },
+      "id": 14,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "axisLabel": "actions / min",
+            "lineInterpolation": "stepAfter"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (region) (sum_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", temporal_workflow_type=~\"$workflow_type\", action_type=~\"$action_type\"}[$__interval])) * 3600 / ($__interval_ms / 1000)",
+          "legendFormat": "{{region}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Unattributed billable actions (no workflow type)",
+      "description": "The same sentinel series as the Spend stat, broken out by action type so you can see WHICH action kinds arrive without a workflow type. A non-zero reading explains the gap between the unfiltered totals and every per-workflow breakdown. Empty is the healthy reading.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 43
+      },
+      "id": 15,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "axisLabel": "actions / min",
+            "lineInterpolation": "stepAfter"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (action_type) (sum_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\", action_type=~\"$action_type\", temporal_workflow_type=~\"$unattributed_re\"}[$__interval])) * 3600 / ($__interval_ms / 1000)",
+          "legendFormat": "{{action_type}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Billable vs total actions - reconciliation",
+      "description": "Billable actions are what you pay for; total actions are what the namespace performed. They are different metrics with different label sets - temporal_cloud_v1_total_action_count carries namespace_mode and is_background but NO region, workflow type, or action type - so both series here are scoped by NAMESPACE ONLY and ignore the region / workflow / action filters. That is what makes them comparable. On an HA namespace the standby line is replicated work and is not separately billed, so summing active + standby overstates the bill; a persistent gap between billable and total-active is background or non-billable work, which is the number worth explaining before a cost conversation.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 51
+      },
+      "id": 16,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "axisLabel": "actions / min",
+            "lineInterpolation": "stepAfter"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "total - standby (replicated)"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    8,
+                    8
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "total - active, background"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dot",
+                  "dash": [
+                    2,
+                    6
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(sum_over_time(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\"}[$__interval])) * 3600 / ($__interval_ms / 1000)",
+          "legendFormat": "billable"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(sum_over_time(temporal_cloud_v1_total_action_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\"}[$__interval])) * 3600 / ($__interval_ms / 1000)",
+          "legendFormat": "total - active"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(sum_over_time(temporal_cloud_v1_total_action_count{temporal_namespace=~\"$namespace\", namespace_mode=\"standby\"}[$__interval])) * 3600 / ($__interval_ms / 1000)",
+          "legendFormat": "total - standby (replicated)"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(sum_over_time(temporal_cloud_v1_total_action_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\", is_background=\"true\"}[$__interval])) * 3600 / ($__interval_ms / 1000)",
+          "legendFormat": "total - active, background"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Limits and headroom",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 59
+      },
+      "id": 17
+    },
+    {
+      "type": "timeseries",
+      "title": "Actions/sec against the namespace APS limit",
+      "description": "Rate of total actions in the active region against temporal_cloud_v1_action_limit (the namespace actions-per-second ceiling) and temporal_cloud_v1_action_on_demand_envelope_limit. Plotted in actions/SEC, not per minute, because the limit is denominated per second - do not read this axis against the graphs above. Both limit series are namespace-scoped values, not rates, so they are read raw. Sustained approach to the limit is throttling risk, and throttled actions are the failure mode that shows up as latency in the application long before it shows up as cost.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 60
+      },
+      "id": 18,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "axisLabel": "actions / sec",
+            "lineInterpolation": "stepAfter"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*APS limit"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*on-demand envelope"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    4,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (temporal_namespace) (avg_over_time(temporal_cloud_v1_total_action_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\"}[$__interval]))",
+          "legendFormat": "{{temporal_namespace}} - actions/sec"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (temporal_namespace) (temporal_cloud_v1_action_limit{temporal_namespace=~\"$namespace\"})",
+          "legendFormat": "{{temporal_namespace}} - APS limit"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (temporal_namespace) (temporal_cloud_v1_action_on_demand_envelope_limit{temporal_namespace=~\"$namespace\"})",
+          "legendFormat": "{{temporal_namespace}} - on-demand envelope"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "APS headroom at range peak",
+      "description": "1 - (peak actions/sec in the range / APS limit), per namespace. Measured against the PEAK published minute rather than the mean, because a limit is breached by peaks. Green >= 40% headroom, orange >= 20%, red below. Empty when the namespace published no action samples in the range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 60
+      },
+      "id": 19,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 20
+              },
+              {
+                "color": "green",
+                "value": 40
+              }
+            ]
+          },
+          "mappings": [],
+          "noValue": "no samples in range"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "100 * (1 - (max by (temporal_namespace) (max_over_time(temporal_cloud_v1_total_action_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\"}[$__range])) / max by (temporal_namespace) (temporal_cloud_v1_action_limit{temporal_namespace=~\"$namespace\"})))",
+          "legendFormat": "{{temporal_namespace}}",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Method / known limits",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 68
+      },
+      "id": 20
+    },
+    {
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "h": 24,
+        "w": 24,
+        "x": 0,
+        "y": 69
+      },
+      "id": 21,
+      "options": {
+        "mode": "markdown",
+        "content": "## Method / known limits\n\nThis board is a **customer-shaped** port of an internal billable-actions design onto Temporal Cloud OpenMetrics. The internal original reads a ClickHouse warehouse (`chronicle.global_metric_billable_action_count_agg_30s / _agg_5m`) that no customer has. **None of the SQL ports. Only the decision design does.**\n\n### What survived the port, and what it became\n\n| Internal (ClickHouse) | Customer (OpenMetrics) |\n| --- | --- |\n| `sum(events_sum)` over a 30s/5m rollup table | `sum_over_time(temporal_cloud_v1_billable_action_count[w]) * 60` |\n| `account`, `namespace`, `workflow_type`, `action_type` | `temporal_account`, `temporal_namespace`, `temporal_workflow_type`, `action_type` - a near 1:1 label mapping |\n| `cluster` (data-plane cell) | `region` - coarser, but carries the same failover / migration signal |\n| `_unknown_` workflow-type data-quality panel | kept, on `$unattributed_re` |\n| separate 30s / 1m / 1h rollup rows | **dropped** - see below |\n\n### What did not survive, and why\n\n- **The three resolution rows are gone.** They existed because the warehouse holds a 30s rollup as well as a 5m one, so re-aggregating was free and the operator chose the grain. Cloud publishes **one 1-minute aggregate, full stop**: there is no sub-minute grain to expose and no coarser table to pick. Re-rendering the same series at 1m / 5m / 1h would be three views of one source dressed up as three fidelities. The time picker plus `$__interval` does that job honestly.\n- **Sub-minute burst detection is not recoverable.** A burst shorter than a minute is averaged into its minute at the source, before the customer ever sees it. Nothing in PromQL brings it back.\n- **`account` is a label here, not a dimension to pivot on.** A Metrics Read-Only key is account-scoped, so every series already carries one `temporal_account`. There is no cross-account picker because there is no cross-account data.\n\n### What the customer surface adds\n\n`temporal_cloud_v1_total_action_count` (with `namespace_mode` / `is_background`), `temporal_cloud_v1_action_limit`, and `temporal_cloud_v1_action_on_demand_envelope_limit` have no counterpart in the internal board. They turn a pure spend view into a **spend + throttling-risk** view, which is the more useful artifact in a production-readiness conversation.\n\n### The rate/counter trap\n\n`temporal_cloud_v1_billable_action_count` **is not a counter**, despite the `_count` suffix. It is a gauge carrying a per-second rate for a 1-minute aggregate, published with its own timestamp. Prometheus scrapes it at 30s with `honor_timestamps: true`, so the duplicate is dropped and the store holds **exactly one sample per minute, aligned to `:00`** (verified on this store). Consequences:\n\n- `rate()` / `increase()` produce garbage. The in-cluster scrape config says as much.\n- `avg_over_time(m[w]) * w_seconds` **overstates on a gapped series** - verified here: 7740 vs a true 258 over the same 30 minutes, because the mean of the published minutes was extrapolated across the idle ones. Totals on this board use `sum_over_time * 60` instead, which is exact and errs low across a scrape outage.\n- `avg_over_time` is still the right tool for the **projection** stat, where extrapolating the busy-minute mean is precisely the intent.\n\n### Unverified on this account\n\n- **The unattributed sentinel.** `$unattributed_re` defaults to `unknown|_unknown_|` (the trailing alternation matches the empty string). Which of those Cloud actually emits has **not** been observed here - this namespace has only ever produced `OrderWorkflow`-attributed actions. Confirm against a busy namespace before trusting the unattributed panels, and narrow the regex once you know.\n- **`temporal_cloud_v1_total_action_throttled_count` is absent** from this store, so no throttle panel is drawn. It is documented as a Cloud metric but appears only once a throttle has occurred; add the panel when you first see the series.\n- **`$stale_grace_min` defaults to 7**, inherited from the failover-readiness board where the ~209s publication lag on this same endpoint *was* measured. Not re-measured for this metric.\n\n### Reading it on an idle namespace\n\nCloud **omits** a billable-action series entirely when there is nothing to report, rather than publishing a zero. So on a quiet namespace the stats read `0` / `no samples` and Feed liveness reads `FEED SILENT / IDLE` - the board cannot distinguish \"no traffic\" from \"feed broken\" on this metric alone. Cross-check against the failover-readiness board's request-volume panels, which stay populated while workers are polling.\n"
+      }
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": [
+    "temporal",
+    "temporal-cloud",
+    "billable-actions",
+    "cost"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "text": "Prometheus (kind metrics)",
+          "value": "prometheus-kind"
+        },
+        "hide": 0,
+        "refresh": 1,
+        "regex": "",
+        "options": [],
+        "includeAll": false,
+        "multi": false,
+        "description": "Prometheus datasource. Default uid prometheus-kind (host metrics store). All panels use ${datasource}."
+      },
+      {
+        "name": "namespace",
+        "type": "query",
+        "label": "Namespace",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(temporal_cloud_v1_action_limit, temporal_namespace)",
+        "query": {
+          "query": "label_values(temporal_cloud_v1_action_limit, temporal_namespace)",
+          "refId": "var-namespace"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "hide": 0,
+        "description": "Sourced from action_limit, not from the billable metric: the limit series is published for every namespace continuously, whereas billable_action_count disappears while a namespace is idle and would empty this picker."
+      },
+      {
+        "name": "region",
+        "type": "query",
+        "label": "Region",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\"}, region)",
+        "query": {
+          "query": "label_values(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\"}, region)",
+          "refId": "var-region"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "hide": 0,
+        "description": "Cloud region serving the namespace. The by-region panel deliberately ignores this filter."
+      },
+      {
+        "name": "workflow_type",
+        "type": "query",
+        "label": "Workflow type",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\"}, temporal_workflow_type)",
+        "query": {
+          "query": "label_values(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\"}, temporal_workflow_type)",
+          "refId": "var-workflow-type"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "hide": 0,
+        "description": "Selecting a specific workflow type excludes every unattributed action - watch the unattributed stat to know how much that hides."
+      },
+      {
+        "name": "action_type",
+        "type": "query",
+        "label": "Action type",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\"}, action_type)",
+        "query": {
+          "query": "label_values(temporal_cloud_v1_billable_action_count{temporal_namespace=~\"$namespace\", region=~\"$region\"}, action_type)",
+          "refId": "var-action-type"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "hide": 0
+      },
+      {
+        "name": "projection_days",
+        "type": "textbox",
+        "label": "Projection days",
+        "query": "30",
+        "current": {
+          "text": "30",
+          "value": "30"
+        },
+        "options": [],
+        "hide": 0,
+        "description": "Horizon for the straight-line spend projection."
+      },
+      {
+        "name": "stale_grace_min",
+        "type": "textbox",
+        "label": "Liveness grace (min)",
+        "query": "7",
+        "current": {
+          "text": "7",
+          "value": "7"
+        },
+        "options": [],
+        "hide": 0,
+        "description": "Freshness window for the Feed liveness stat. 7 clears the ~3.5 min publication lag measured on this endpoint by the failover-readiness board."
+      },
+      {
+        "name": "unattributed_re",
+        "type": "constant",
+        "label": "Unattributed sentinel",
+        "query": "unknown|_unknown_|",
+        "current": {
+          "text": "unknown|_unknown_|",
+          "value": "unknown|_unknown_|"
+        },
+        "hide": 2,
+        "options": [],
+        "description": "Fully-anchored Prometheus regex for a workflow type that carries no attribution. The trailing empty alternation matches the empty label. UNVERIFIED on this account - see Method."
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Temporal Cloud - Billable Actions",
+  "uid": "temporal-cloud-billable-actions",
+  "version": 1,
+  "weekStart": ""
+}

@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: cloud-actions
+    folder: Temporal Cloud Actions
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards/actions

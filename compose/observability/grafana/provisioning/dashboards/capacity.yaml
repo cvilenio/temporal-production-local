@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: cloud-capacity
+    folder: Temporal Cloud Capacity
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards/capacity

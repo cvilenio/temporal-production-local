@@ -112,6 +112,20 @@ services:
       # critical-flows / platform without mixing scopes.
       - ./compose/observability/grafana/provisioning/dashboards/failover.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/failover.yaml:ro
       - ./compose/observability/grafana/dashboards-failover:/var/lib/grafana/dashboards/failover:ro
+      # Customer-shaped Temporal Cloud capacity-planning board (OpenMetrics only):
+      # the three rate ceilings (APS/RPS/OPS) against their limits + on-demand
+      # envelopes + provisioned TRUs, with the billable-actions spend rows collapsed
+      # beneath. The spend half is ported from an internal ClickHouse board whose SQL
+      # does not exist on the customer surface — see the board's Method panel.
+      - ./compose/observability/grafana/provisioning/dashboards/capacity.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/capacity.yaml:ro
+      - ./compose/observability/grafana/dashboards-capacity:/var/lib/grafana/dashboards/capacity:ro
+      # The spend half of that board again, standalone: billable actions sliced by
+      # namespace / region / workflow type / action type, which is the shape of the
+      # internal board this was ported from. Deliberately duplicated rather than
+      # cross-linked only — the capacity board answers "which ceiling binds", this one
+      # answers "what are we paying for", and they get opened by different questions.
+      - ./compose/observability/grafana/provisioning/dashboards/actions.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/actions.yaml:ro
+      - ./compose/observability/grafana/dashboards-actions:/var/lib/grafana/dashboards/actions:ro
       - ./compose/observability/grafana/provisioning/datasources/clickhouse.yaml:/otel-lgtm/grafana/conf/provisioning/datasources/clickhouse.yaml:ro
       # Host metrics store datasource (kind run mode — ADR-0021). The in-cluster
       # Prometheus remote_writes to prometheus-store; Grafana reads it here.
