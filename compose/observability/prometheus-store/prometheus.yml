@@ -13,8 +13,15 @@ global:
   evaluation_interval: 30s
 
 scrape_configs:
-  # Self-scrape only — store health. All workload + Cloud series arrive via
-  # remote_write from the in-cluster Prometheus, not by scraping from here.
+  # Store health. Workload + Cloud series normally arrive through remote_write
+  # from the in-cluster Prometheus.
   - job_name: prometheus-store
     static_configs:
       - targets: ['localhost:9090']
+
+  # Optional host-side SDK probe used by probe-dashboard-metrics.py signal-aps.
+  # The target is down when the probe is not running.
+  - job_name: dashboard-aps-probe-client
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['host.docker.internal:9465']
