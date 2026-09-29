@@ -126,6 +126,10 @@ services:
       # answers "what are we paying for", and they get opened by different questions.
       - ./compose/observability/grafana/provisioning/dashboards/actions.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/actions.yaml:ro
       - ./compose/observability/grafana/dashboards-actions:/var/lib/grafana/dashboards/actions:ro
+      # Portable Temporal health dashboard backed by selectable Temporal Cloud
+      # OpenMetrics and SDK metrics sources.
+      - ./compose/observability/grafana/provisioning/dashboards/cloud-health.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/cloud-health.yaml:ro
+      - ./compose/observability/grafana/dashboards-cloud-health:/var/lib/grafana/dashboards/cloud-health:ro
       - ./compose/observability/grafana/provisioning/datasources/clickhouse.yaml:/otel-lgtm/grafana/conf/provisioning/datasources/clickhouse.yaml:ro
       # Host metrics store datasource (kind run mode — ADR-0021). The in-cluster
       # Prometheus remote_writes to prometheus-store; Grafana reads it here.
@@ -223,6 +227,8 @@ services:
       - --storage.tsdb.retention.time=15d
     networks:
       - temporal-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       # Host 9009 → container 9090: remote_write target (host.docker.internal:9009
       # from kind pods) AND Grafana's "Prometheus (kind metrics)" datasource URL.

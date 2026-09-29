@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: cloud-health
+    folder: Temporal Cloud Health
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards/cloud-health
