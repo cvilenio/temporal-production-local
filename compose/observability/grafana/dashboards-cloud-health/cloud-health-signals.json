@@ -1,0 +1,1880 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "liveNow": false,
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": [
+    "temporal",
+    "temporal-cloud",
+    "health",
+    "openmetrics",
+    "sdk"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "cloud_datasource",
+        "type": "datasource",
+        "label": "Cloud metrics source",
+        "query": "prometheus",
+        "hide": 0,
+        "refresh": 1,
+        "regex": "",
+        "options": [],
+        "includeAll": false,
+        "multi": false,
+        "description": "Prometheus-compatible datasource containing temporal_cloud_v1_* metrics from the Temporal Cloud OpenMetrics endpoint."
+      },
+      {
+        "name": "sdk_datasource",
+        "type": "datasource",
+        "label": "SDK metrics source",
+        "query": "prometheus",
+        "hide": 0,
+        "refresh": 1,
+        "regex": "",
+        "options": [],
+        "includeAll": false,
+        "multi": false,
+        "description": "Prometheus-compatible datasource containing temporal_* metrics scraped from instrumented Temporal Workers and Clients. Select the Cloud source here too when both metric families share one store."
+      },
+      {
+        "name": "namespace",
+        "type": "query",
+        "label": "Namespace",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${cloud_datasource}"
+        },
+        "definition": "label_values(temporal_cloud_v1_action_limit, temporal_namespace)",
+        "query": {
+          "query": "label_values(temporal_cloud_v1_action_limit, temporal_namespace)",
+          "refId": "var-namespace"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": false,
+        "includeAll": false,
+        "options": [],
+        "hide": 0,
+        "description": "Sourced from action_limit because limit series publish continuously; usage series disappear while a Namespace is idle and would empty this picker."
+      },
+      {
+        "name": "task_queue",
+        "type": "query",
+        "label": "Task Queue",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${cloud_datasource}"
+        },
+        "definition": "label_values({__name__=~\"temporal_cloud_v1_(poll_success_count|approximate_backlog_count)\", temporal_namespace=~\"$namespace\"}, temporal_task_queue)",
+        "query": {
+          "query": "label_values({__name__=~\"temporal_cloud_v1_(poll_success_count|approximate_backlog_count)\", temporal_namespace=~\"$namespace\"}, temporal_task_queue)",
+          "refId": "var-task_queue"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "hide": 0,
+        "description": "Used by the sync match and backlog panels. Lists Task Queues present in either Cloud metric for the selected Namespace and time range."
+      },
+      {
+        "name": "latency_operation",
+        "type": "custom",
+        "label": "Latency operation",
+        "query": "StartWorkflowExecution,SignalWorkflowExecution,SignalWithStartWorkflowExecution",
+        "current": {
+          "text": "StartWorkflowExecution",
+          "value": "StartWorkflowExecution"
+        },
+        "options": [
+          {
+            "text": "StartWorkflowExecution",
+            "value": "StartWorkflowExecution",
+            "selected": true
+          },
+          {
+            "text": "SignalWorkflowExecution",
+            "value": "SignalWorkflowExecution",
+            "selected": false
+          },
+          {
+            "text": "SignalWithStartWorkflowExecution",
+            "value": "SignalWithStartWorkflowExecution",
+            "selected": false
+          }
+        ],
+        "multi": false,
+        "includeAll": false,
+        "hide": 0,
+        "description": "Latency panel only. Temporal Cloud publishes service latency percentiles for these three operations."
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Selected Temporal Metrics (9/28/2026)",
+  "uid": "temporal-cloud-health-signals",
+  "version": 1,
+  "weekStart": "",
+  "panels": [
+    {
+      "type": "row",
+      "title": "Board overview",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "panels": []
+    },
+    {
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "id": 2,
+      "options": {
+        "mode": "markdown",
+        "content": "Selected Temporal Cloud and SDK signals. The Cloud panels read only `temporal_cloud_v1_*` metrics ingested from the Temporal Cloud OpenMetrics endpoint. The panels marked **(SDK)** read only metrics exported by instrumented, running Workers and Clients into the selected SDK metrics source. Temporary Clients, Temporal CLI calls, and applications without SDK metrics are invisible to those panels.\n\n**Setup.** Choose a Cloud metrics source containing `temporal_cloud_v1_*` and an SDK metrics source containing `temporal_*`; both selectors may point to the same Prometheus-compatible store. Select one Namespace at a time. Use the optional Task Queue filter to narrow Task Queue-scoped panels; Namespace-wide panels remain unchanged.\n\n**Docs.** [Temporal Cloud OpenMetrics](https://docs.temporal.io/cloud/metrics/openmetrics) | [Temporal SDK metrics](https://docs.temporal.io/cloud/metrics/sdk-metrics-setup)"
+      }
+    },
+    {
+      "type": "row",
+      "title": "Worker polling and slot availability",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "id": 27,
+      "panels": []
+    },
+    {
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 7
+      },
+      "id": 33,
+      "options": {
+        "mode": "markdown",
+        "content": "**Metrics class:** Worker Polling & Execution Capacity\n\n**What is it?** These panels show how effectively Workers retrieve and execute Tasks for each Task Queue. Pollers by Task Queue shows the number of active pollers requesting Tasks. Poller busy ratio shows the percentage of completed polls that returned a Task rather than timing out without one. Slot utilization shows the percentage of Worker execution slots currently occupied. Pollers deliver Tasks; slots provide the capacity to execute them.\n\n**How to interpret it:** Read poller busy ratio and slot utilization together. A high poller busy ratio means most pollers are finding work, while high slot utilization means most execution capacity is occupied. If both remain high, especially with rising backlog, the Worker fleet is likely fully utilized and may need additional Workers, pollers, or slots. If poller busy ratio is high but slot utilization is low, Task retrieval may be the constraint and additional pollers could improve delivery throughput. If poller busy ratio is low but slot utilization is high, Tasks are likely occupying slots for longer and adding pollers will not provide more execution capacity. If both are low, the fleet likely has spare capacity or is overprovisioned for the current traffic."
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Poller count by Task Queue and poller type (SDK)",
+      "description": "Counts are summed across Worker processes and split by Task Queue and poller type. `No data` means no matching SDK metrics were scraped.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${sdk_datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 0,
+        "y": 15
+      },
+      "id": 28,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "lineInterpolation": "stepAfter",
+            "axisLabel": "pollers"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${sdk_datasource}"
+          },
+          "expr": "sum by (task_queue, poller_type) (temporal_num_pollers{namespace=~\"$namespace\", task_queue=~\"$task_queue\"})",
+          "legendFormat": "{{task_queue}} ({{poller_type}})",
+          "refId": "A",
+          "range": true
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Slot utilization by Task Queue and Worker type (SDK)",
+      "description": "Formula: used slots / (used + available slots), split by Task Queue and Worker type. Workflow, Activity, Local Activity, and Nexus Workers use separate slot pools.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${sdk_datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 16,
+        "y": 15
+      },
+      "id": 30,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "lineInterpolation": "stepAfter",
+            "axisLabel": "slot utilization",
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.7
+              },
+              {
+                "color": "red",
+                "value": 0.9
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${sdk_datasource}"
+          },
+          "expr": "sum by (task_queue, worker_type) (temporal_worker_task_slots_used{namespace=~\"$namespace\", task_queue=~\"$task_queue\"}) / (sum by (task_queue, worker_type) (temporal_worker_task_slots_used{namespace=~\"$namespace\", task_queue=~\"$task_queue\"}) + sum by (task_queue, worker_type) (temporal_worker_task_slots_available{namespace=~\"$namespace\", task_queue=~\"$task_queue\"}))",
+          "legendFormat": "{{task_queue}} ({{worker_type}})",
+          "refId": "A",
+          "range": true
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Poller busy ratio by Task Queue and Task type (Cloud)",
+      "description": "Formula: successful polls / (successful polls + timed-out polls), split by Task Queue and Task type. `No data` can mean no completed polls or missing Cloud telemetry.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${cloud_datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 8,
+        "y": 15
+      },
+      "id": 32,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "min": 0,
+          "max": 100,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "lineInterpolation": "stepAfter",
+            "axisLabel": "polls receiving Tasks",
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 90
+              },
+              {
+                "color": "green",
+                "value": 95
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${cloud_datasource}"
+          },
+          "expr": "100 * sum by (temporal_task_queue, task_type) (temporal_cloud_v1_poll_success_count{temporal_namespace=~\"$namespace\", temporal_task_queue=~\"$task_queue\"}) / (sum by (temporal_task_queue, task_type) (temporal_cloud_v1_poll_success_count{temporal_namespace=~\"$namespace\", temporal_task_queue=~\"$task_queue\"}) + sum by (temporal_task_queue, task_type) (temporal_cloud_v1_poll_timeout_count{temporal_namespace=~\"$namespace\", temporal_task_queue=~\"$task_queue\"}))",
+          "legendFormat": "{{temporal_task_queue}} ({{task_type}})",
+          "refId": "A",
+          "range": true
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Sync match rate",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "id": 3,
+      "panels": []
+    },
+    {
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 25
+      },
+      "id": 20,
+      "options": {
+        "mode": "markdown",
+        "content": "**Metrics class:** Worker Availability & Capacity\n\n**What is it?** Sync match rate is the percentage of Tasks that were delivered immediately to an available Worker. A high rate means a Worker was already polling when the Task arrived. A lower rate means more Tasks had to be placed in the Task Queue and delivered later.\n\n**How to interpret it:** Look for sustained drops during meaningful traffic, rather than brief dips or low-volume noise. A falling sync match rate can be an early sign that Workers are not keeping up. Confirm the impact by checking for a growing Task Queue backlog."
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Overall sync match rate (Cloud)",
+      "description": "Traffic-weighted Namespace aggregate: immediate deliveries / all successful polls across every Task Queue and Task type. Busy Task Queues contribute more. The Task Queue filter does not affect this panel.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${cloud_datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 30
+      },
+      "id": 17,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "lineInterpolation": "stepAfter",
+            "axisLabel": "sync matched",
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.8
+              },
+              {
+                "color": "green",
+                "value": 0.95
+              }
+            ]
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${cloud_datasource}"
+          },
+          "expr": "sum by (temporal_namespace) (temporal_cloud_v1_poll_success_sync_count{temporal_namespace=~\"$namespace\"}) / sum by (temporal_namespace) (temporal_cloud_v1_poll_success_count{temporal_namespace=~\"$namespace\"})",
+          "legendFormat": "{{temporal_namespace}}",
+          "refId": "A",
+          "range": true
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Sync match rate by Task Queue (Cloud)",
+      "description": "Calculated separately for each Task Queue and Task type: immediate deliveries / all successful polls.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${cloud_datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 30
+      },
+      "id": 4,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "lineInterpolation": "stepAfter",
+            "axisLabel": "sync matched",
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.8
+              },
+              {
+                "color": "green",
+                "value": 0.95
+              }
+            ]
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${cloud_datasource}"
+          },
+          "expr": "sum by (temporal_namespace, temporal_task_queue, task_type) (temporal_cloud_v1_poll_success_sync_count{temporal_namespace=~\"$namespace\", temporal_task_queue=~\"$task_queue\"}) / sum by (temporal_namespace, temporal_task_queue, task_type) (temporal_cloud_v1_poll_success_count{temporal_namespace=~\"$namespace\", temporal_task_queue=~\"$task_queue\"})",
+          "legendFormat": "{{temporal_task_queue}} ({{task_type}}) - {{temporal_namespace}}",
+          "refId": "A",
+          "range": true
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Backlog",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 39
+      },
+      "id": 18,
+      "panels": []
+    },
+    {
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "id": 21,
+      "options": {
+        "mode": "markdown",
+        "content": "**Metrics class:** Task Queue Health & Throughput\n\n**What is it?** Task Queue backlog is the number of Tasks waiting to be picked up by a Worker. It grows when Tasks arrive faster than Workers can process them and shrinks when Workers catch up.\n\n**How to interpret it:** Look for a backlog that grows continuously or remains elevated during meaningful traffic. Brief spikes can be normal. There is no universally unhealthy backlog count; the trend, wait time, and expected traffic pattern matter more than the absolute number."
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Approximate backlog by Task Queue (Cloud)",
+      "description": "Cloud estimate split by Task Queue and Task type, then summed across priorities. It can overcount and resets to zero when a Task Queue becomes idle.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${cloud_datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 45
+      },
+      "id": 19,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "lineInterpolation": "stepAfter",
+            "axisLabel": "Tasks"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${cloud_datasource}"
+          },
+          "expr": "sum by (temporal_namespace, temporal_task_queue, task_type) (temporal_cloud_v1_approximate_backlog_count{temporal_namespace=~\"$namespace\", temporal_task_queue=~\"$task_queue\"})",
+          "legendFormat": "{{temporal_task_queue}} ({{task_type}}) - {{temporal_namespace}}",
+          "refId": "A",
+          "range": true
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Start latency",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 54
+      },
+      "id": 5,
+      "panels": []
+    },
+    {
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 55
+      },
+      "id": 22,
+      "options": {
+        "mode": "markdown",
+        "content": "**Metrics class:** Temporal Cloud Service Health\n\n**What is it?** Start Workflow Execution latency measures how long Temporal Cloud takes to process a request to start a new Workflow Execution. It measures the latency of the StartWorkflowExecution service operation, not how long the Workflow takes to run or how long it waits for a Worker.\n\n**How to interpret it:** Focus on p99 latency during meaningful traffic. Brief spikes can be normal, but a sustained p99 above 200 milliseconds is a major warning sign that Temporal Cloud service health may be degraded. Evaluate each Namespace independently and investigate when the threshold is exceeded across multiple samples, for example, at least three out of five one-minute samples over a five-minute period. At low request volumes, percentiles can be noisy and should be interpreted cautiously."
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "$latency_operation latency (p50 / p95 / p99) (Cloud)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${cloud_datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 61
+      },
+      "id": 6,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "lineInterpolation": "stepAfter",
+            "axisLabel": "seconds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${cloud_datasource}"
+          },
+          "expr": "temporal_cloud_v1_service_latency_p50{temporal_namespace=~\"$namespace\", operation=\"$latency_operation\"}",
+          "legendFormat": "p50 - {{temporal_namespace}} {{region}}",
+          "refId": "A",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${cloud_datasource}"
+          },
+          "expr": "temporal_cloud_v1_service_latency_p95{temporal_namespace=~\"$namespace\", operation=\"$latency_operation\"}",
+          "legendFormat": "p95 - {{temporal_namespace}} {{region}}",
+          "refId": "B",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${cloud_datasource}"
+          },
+          "expr": "temporal_cloud_v1_service_latency_p99{temporal_namespace=~\"$namespace\", operation=\"$latency_operation\"}",
+          "legendFormat": "p99 - {{temporal_namespace}} {{region}}",
+          "refId": "C",
+          "range": true
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Namespace limits and throttling",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 70
+      },
+      "id": 11,
+      "panels": []
+    },
+    {
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 71
+      },
+      "id": 26,
+      "options": {
+        "mode": "markdown",
+        "content": "**Metrics class:** Namespace Capacity & Rate Limits\n\n**What is it?** These panels show whether a Namespace's workload is approaching or exceeding its Temporal Cloud rate limits. The usage-versus-limit panels show consumption and available headroom across Actions per Second (APS), Requests per Second (RPS), and Operations per Second (OPS). The Namespace throttling panel shows work that Temporal Cloud could not admit immediately because one of those limits was reached. The Schedule throttling panel isolates Scheduled Executions delayed by Schedule rate limiting.\n\n**How to interpret it:** Use usage versus limit to identify shrinking headroom and plan for expected growth or traffic bursts. OpenMetrics rate values are per-second rates averaged over one-minute aggregation windows, so they cannot reveal the true peak or shape of a sub-minute burst. As a result, usage may appear below 100% even when a brief burst triggered throttling; non-zero throttling is the definitive evidence that a limit was reached. Use historical one-minute demand plus workload-appropriate headroom for capacity planning, and investigate sustained or recurring throttling because it can introduce retries, latency, and slower Workflow progress."
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Namespace limit throttling (APS / OPS / RPS) (Cloud)",
+      "description": "SDK retries can produce multiple rejection events for one logical request.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${cloud_datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 78
+      },
+      "id": 12,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix:/s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "lineInterpolation": "stepAfter",
+            "axisLabel": "rejected / s",
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1e-06
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${cloud_datasource}"
+          },
+          "expr": "sum by (temporal_namespace) (temporal_cloud_v1_total_action_throttled_count{temporal_namespace=~\"$namespace\"}) or on() label_replace(vector(0), \"temporal_namespace\", \"$namespace\", \"\", \"\")",
+          "legendFormat": "Actions (APS) - {{temporal_namespace}}",
+          "refId": "A",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${cloud_datasource}"
+          },
+          "expr": "sum by (temporal_namespace) (temporal_cloud_v1_operations_throttled_count{temporal_namespace=~\"$namespace\"}) or on() label_replace(vector(0), \"temporal_namespace\", \"$namespace\", \"\", \"\")",
+          "legendFormat": "Operations (OPS) - {{temporal_namespace}}",
+          "refId": "B",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${cloud_datasource}"
+          },
+          "expr": "sum by (temporal_namespace) (temporal_cloud_v1_service_request_throttled_count{temporal_namespace=~\"$namespace\"}) or on() label_replace(vector(0), \"temporal_namespace\", \"$namespace\", \"\", \"\")",
+          "legendFormat": "Requests (RPS) - {{temporal_namespace}}",
+          "refId": "C",
+          "range": true
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Schedule throttling (Cloud)",
+      "description": "Scheduled Executions delayed by Schedule rate limiting. This remains useful for the current Schedule implementation even though Temporal has deprecated the metric. Expect it to remain relevant until the Schedule implementation changes around the end of 2026, when standard RPS rate-limit monitoring and dynamic scaling replace it. `No data` can mean the metric is unavailable.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${cloud_datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 96
+      },
+      "id": 36,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix:/s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "lineInterpolation": "stepAfter",
+            "axisLabel": "delayed / s",
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1e-06
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${cloud_datasource}"
+          },
+          "expr": "sum by (temporal_namespace) (temporal_cloud_v1_schedule_rate_limited_count{temporal_namespace=~\"$namespace\"})",
+          "legendFormat": "Schedule rate limited - {{temporal_namespace}}",
+          "refId": "A",
+          "range": true
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "APS - usage vs limit (Cloud)",
+      "description": "Attempt pressure = all admitted APS, including background Actions, + throttled APS. Retries can make it higher than unique demand. Use Namespace limit throttling to confirm a breach.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${cloud_datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 0,
+        "y": 87
+      },
+      "id": 23,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "axisLabel": "APS (per second)",
+            "lineInterpolation": "stepAfter"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*- limit"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${cloud_datasource}"
+          },
+          "expr": "max_over_time(((sum by (temporal_namespace) (temporal_cloud_v1_total_action_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\"})) + on (temporal_namespace) ((sum by (temporal_namespace) (temporal_cloud_v1_total_action_throttled_count{temporal_namespace=~\"$namespace\"})) or on (temporal_namespace) (0 * sum by (temporal_namespace) (temporal_cloud_v1_total_action_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\"}))))[$__interval:1m])",
+          "legendFormat": "{{temporal_namespace}} - usage",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${cloud_datasource}"
+          },
+          "expr": "max by (temporal_namespace) (temporal_cloud_v1_action_limit{temporal_namespace=~\"$namespace\"})",
+          "legendFormat": "{{temporal_namespace}} - limit",
+          "range": true
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "OPS - usage vs limit (Cloud)",
+      "description": "Attempt pressure = all admitted OPS, including background Operations, + throttled OPS. OPS includes internal work such as transfer Tasks, timer fires, and visibility writes. Use Namespace limit throttling to confirm a breach.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${cloud_datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 8,
+        "y": 87
+      },
+      "id": 24,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "axisLabel": "OPS (per second)",
+            "lineInterpolation": "stepAfter"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*- limit"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${cloud_datasource}"
+          },
+          "expr": "max_over_time(((sum by (temporal_namespace) (temporal_cloud_v1_operations_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\"})) + on (temporal_namespace) ((sum by (temporal_namespace) (temporal_cloud_v1_operations_throttled_count{temporal_namespace=~\"$namespace\"})) or on (temporal_namespace) (0 * sum by (temporal_namespace) (temporal_cloud_v1_operations_count{temporal_namespace=~\"$namespace\", namespace_mode=\"active\"}))))[$__interval:1m])",
+          "legendFormat": "{{temporal_namespace}} - usage",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${cloud_datasource}"
+          },
+          "expr": "max by (temporal_namespace) (temporal_cloud_v1_operations_limit{temporal_namespace=~\"$namespace\"})",
+          "legendFormat": "{{temporal_namespace}} - limit",
+          "range": true
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "RPS - usage vs limit (Cloud)",
+      "description": "Attempt pressure = admitted RPS + throttled RPS. Worker long polls can raise RPS independently of business traffic. Use Namespace limit throttling to confirm a breach.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${cloud_datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 16,
+        "y": 87
+      },
+      "id": 25,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "axisLabel": "RPS (per second)",
+            "lineInterpolation": "stepAfter"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*- limit"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${cloud_datasource}"
+          },
+          "expr": "max_over_time(((sum by (temporal_namespace) (temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\"})) + on (temporal_namespace) ((sum by (temporal_namespace) (temporal_cloud_v1_service_request_throttled_count{temporal_namespace=~\"$namespace\"})) or on (temporal_namespace) (0 * sum by (temporal_namespace) (temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\"}))))[$__interval:1m])",
+          "legendFormat": "{{temporal_namespace}} - usage",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${cloud_datasource}"
+          },
+          "expr": "max by (temporal_namespace) (temporal_cloud_v1_service_request_limit{temporal_namespace=~\"$namespace\"})",
+          "legendFormat": "{{temporal_namespace}} - limit",
+          "range": true
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Request errors",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 105
+      },
+      "id": 7,
+      "panels": []
+    },
+    {
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 106
+      },
+      "id": 35,
+      "options": {
+        "mode": "markdown",
+        "content": "**Metrics class:** Request Reliability & Error Health\n\n**What is it?** These panels show requests that Temporal Cloud or a Temporal SDK could not complete successfully, separated by likely cause and operational urgency. Cloud-Observed Request Errors provides a broad Cloud-side health signal. Service & Transport Failures captures stronger infrastructure or connectivity signals such as INTERNAL, UNAVAILABLE, and DATA_LOSS. Configuration & Security Errors identifies authentication, authorization, configuration, and Client-contract problems. Context-Dependent Errors contains statuses that may be expected or retriable depending on the operation, including NOT_FOUND, ALREADY_EXISTS, CANCELLED, DEADLINE_EXCEEDED, and RESOURCE_EXHAUSTED. SDK failures without a `status_code` label appear there as unclassified because they cannot be assigned to a category.\n\n**How to interpret it:** Look for errors that are sustained, occur at a high absolute rate, and represent a meaningful percentage of total requests. Brief spikes or errors that make up only a tiny fraction of traffic are usually less concerning. Use the status code and affected operation to determine the likely cause and owner."
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Cloud-Observed Request Errors (Cloud)",
+      "description": "Cloud reports these errors by operation without a status-code label. A separate series covers non-Namespace-limit `RESOURCE_EXHAUSTED`. `0` means Cloud request telemetry is present with no matching errors. `No data` means Cloud telemetry is missing.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${cloud_datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 113
+      },
+      "id": 8,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "lineInterpolation": "stepAfter",
+            "axisLabel": "errors / s"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*RESOURCE_EXHAUSTED.*"
+            },
+            "properties": [
+              {
+                "id": "custom.lineWidth",
+                "value": 3
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${cloud_datasource}"
+          },
+          "expr": "sum by (temporal_namespace, operation) (temporal_cloud_v1_service_error_count{temporal_namespace=~\"$namespace\"}) or on() label_replace((vector(0) and on() (count(temporal_cloud_v1_service_request_count{temporal_namespace=~\"$namespace\"}) > 0)), \"operation\", \"no errors\", \"\", \"\")",
+          "legendFormat": "service error - {{operation}}",
+          "refId": "A",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${cloud_datasource}"
+          },
+          "expr": "sum by (operation) (temporal_cloud_v1_resource_exhausted_error_count{temporal_namespace=~\"$namespace\"})",
+          "legendFormat": "RESOURCE_EXHAUSTED (non-Namespace-limit) - {{operation}}",
+          "refId": "B",
+          "range": true
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Service & Transport Failures (SDK)",
+      "description": "In scope: `INTERNAL`, `UNAVAILABLE`, `DATA_LOSS`, and `TRANSPORT_ERROR`. Standard RPC and long-poll failures are separate series in this chart. `0` means SDK telemetry is present with no matching classified errors. `No data` means SDK telemetry is missing.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${sdk_datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 113
+      },
+      "id": 9,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "lineInterpolation": "stepAfter",
+            "axisLabel": "failures / s"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^long poll.*"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    6,
+                    6
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${sdk_datasource}"
+          },
+          "expr": "sum by (operation, status_code) (rate({__name__=~\"temporal_request_failure(_total)?\", namespace=~\"$namespace\", status_code=~\"INTERNAL|UNAVAILABLE|DATA_LOSS|TRANSPORT_ERROR\"}[5m]))",
+          "legendFormat": "standard - {{status_code}} - {{operation}}",
+          "refId": "A",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${sdk_datasource}"
+          },
+          "expr": "sum by (operation, status_code) (rate({__name__=~\"temporal_long_request_failure(_total)?\", namespace=~\"$namespace\", status_code=~\"INTERNAL|UNAVAILABLE|DATA_LOSS|TRANSPORT_ERROR\"}[5m]))",
+          "legendFormat": "long poll - {{status_code}} - {{operation}}",
+          "refId": "B",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${sdk_datasource}"
+          },
+          "expr": "(vector(0) and on() (count({__name__=~\"temporal_(request|long_request|worker_task_slots_available)(_total)?\", namespace=~\"$namespace\"}) > 0)) unless on() (count({__name__=~\"temporal_(long_)?request_failure(_total)?\", namespace=~\"$namespace\", status_code=~\"INTERNAL|UNAVAILABLE|DATA_LOSS|TRANSPORT_ERROR\"}) > 0)",
+          "legendFormat": "no matching classified errors",
+          "refId": "C",
+          "range": true
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Configuration & Security Errors (SDK)",
+      "description": "In scope: `UNAUTHENTICATED`, `PERMISSION_DENIED`, `INVALID_ARGUMENT`, `FAILED_PRECONDITION`, and `UNIMPLEMENTED`. Standard RPC and long-poll failures are separate series in this chart. `0` means SDK telemetry is present with no matching classified errors. `No data` means SDK telemetry is missing.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${sdk_datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 122
+      },
+      "id": 10,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "lineInterpolation": "stepAfter",
+            "axisLabel": "failures / s"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^long poll.*"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    6,
+                    6
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${sdk_datasource}"
+          },
+          "expr": "sum by (operation, status_code) (rate({__name__=~\"temporal_request_failure(_total)?\", namespace=~\"$namespace\", status_code=~\"UNAUTHENTICATED|PERMISSION_DENIED|INVALID_ARGUMENT|FAILED_PRECONDITION|UNIMPLEMENTED\"}[5m]))",
+          "legendFormat": "standard - {{status_code}} - {{operation}}",
+          "refId": "A",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${sdk_datasource}"
+          },
+          "expr": "sum by (operation, status_code) (rate({__name__=~\"temporal_long_request_failure(_total)?\", namespace=~\"$namespace\", status_code=~\"UNAUTHENTICATED|PERMISSION_DENIED|INVALID_ARGUMENT|FAILED_PRECONDITION|UNIMPLEMENTED\"}[5m]))",
+          "legendFormat": "long poll - {{status_code}} - {{operation}}",
+          "refId": "B",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${sdk_datasource}"
+          },
+          "expr": "(vector(0) and on() (count({__name__=~\"temporal_(request|long_request|worker_task_slots_available)(_total)?\", namespace=~\"$namespace\"}) > 0)) unless on() (count({__name__=~\"temporal_(long_)?request_failure(_total)?\", namespace=~\"$namespace\", status_code=~\"UNAUTHENTICATED|PERMISSION_DENIED|INVALID_ARGUMENT|FAILED_PRECONDITION|UNIMPLEMENTED\"}) > 0)",
+          "legendFormat": "no matching classified errors",
+          "refId": "C",
+          "range": true
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Context-Dependent Errors (SDK)",
+      "description": "In scope: `NOT_FOUND`, `ALREADY_EXISTS`, `CANCELLED`, `DEADLINE_EXCEEDED`, and `RESOURCE_EXHAUSTED`. Standard RPC and long-poll failures are separate series in this chart. Failures without a `status_code` label appear as unclassified because they cannot be assigned to a category. Classify `RESOURCE_EXHAUSTED` with Namespace limit throttling and Cloud-Observed Request Errors. `0` means SDK telemetry is present with no matching classified errors. `No data` means SDK telemetry is missing.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${sdk_datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 122
+      },
+      "id": 34,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "lineInterpolation": "stepAfter",
+            "axisLabel": "failures / s"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^long poll.*"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    6,
+                    6
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*RESOURCE_EXHAUSTED.*"
+            },
+            "properties": [
+              {
+                "id": "custom.lineWidth",
+                "value": 3
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${sdk_datasource}"
+          },
+          "expr": "sum by (operation, status_code) (rate({__name__=~\"temporal_request_failure(_total)?\", namespace=~\"$namespace\", status_code=~\"NOT_FOUND|ALREADY_EXISTS|CANCELLED|DEADLINE_EXCEEDED|RESOURCE_EXHAUSTED\"}[5m]))",
+          "legendFormat": "standard - {{status_code}} - {{operation}}",
+          "refId": "A",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${sdk_datasource}"
+          },
+          "expr": "sum by (operation, status_code) (rate({__name__=~\"temporal_long_request_failure(_total)?\", namespace=~\"$namespace\", status_code=~\"NOT_FOUND|ALREADY_EXISTS|CANCELLED|DEADLINE_EXCEEDED|RESOURCE_EXHAUSTED\"}[5m]))",
+          "legendFormat": "long poll - {{status_code}} - {{operation}}",
+          "refId": "B",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${sdk_datasource}"
+          },
+          "expr": "sum by (operation) (rate({__name__=~\"temporal_request_failure(_total)?\", namespace=~\"$namespace\", status_code=\"\"}[5m]))",
+          "legendFormat": "standard - unclassified - {{operation}}",
+          "refId": "D",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${sdk_datasource}"
+          },
+          "expr": "sum by (operation) (rate({__name__=~\"temporal_long_request_failure(_total)?\", namespace=~\"$namespace\", status_code=\"\"}[5m]))",
+          "legendFormat": "long poll - unclassified - {{operation}}",
+          "refId": "E",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${sdk_datasource}"
+          },
+          "expr": "(vector(0) and on() (count({__name__=~\"temporal_(request|long_request|worker_task_slots_available)(_total)?\", namespace=~\"$namespace\"}) > 0)) unless on() (count({__name__=~\"temporal_(long_)?request_failure(_total)?\", namespace=~\"$namespace\", status_code=~\"NOT_FOUND|ALREADY_EXISTS|CANCELLED|DEADLINE_EXCEEDED|RESOURCE_EXHAUSTED\"}) > 0)",
+          "legendFormat": "no matching classified errors",
+          "refId": "C",
+          "range": true
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Replication lag",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 131
+      },
+      "id": 15,
+      "panels": []
+    },
+    {
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 132
+      },
+      "id": 31,
+      "options": {
+        "mode": "markdown",
+        "content": "**Metrics class:** Replication Health\n\n**What is it?** Replication lag measures the time between when a replication Task is created in a Namespace's active region and when that Task is successfully processed in its standby region. It indicates how far behind the standby region may be in receiving Workflow state. For example, p99 replication lag is the time within which 99% of replication Tasks were processed.\n\n**How to interpret it:** Low and stable replication lag means the standby region is closely synchronized with the active region. A sustained increase means replication is falling behind and may increase the amount of recent Workflow progress at risk of being re-executed if a forced failover occurs. Replication lag indicates how quickly the standby is receiving updates; it does not directly tell you whether the active region is unavailable or whether you should fail over."
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Replication lag into the replica (p50 / p95 / p99) (Cloud)",
+      "description": "`No data` is expected when the selected Namespace has no replica. Each series identifies its replica region.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${cloud_datasource}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 138
+      },
+      "id": 16,
+      "interval": "1m",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "spanNulls": false,
+            "lineInterpolation": "stepAfter",
+            "axisLabel": "seconds",
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 60
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${cloud_datasource}"
+          },
+          "expr": "temporal_cloud_v1_replication_lag_p50{temporal_namespace=~\"$namespace\"}",
+          "legendFormat": "p50 - {{temporal_namespace}} into {{region}}",
+          "refId": "A",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${cloud_datasource}"
+          },
+          "expr": "temporal_cloud_v1_replication_lag_p95{temporal_namespace=~\"$namespace\"}",
+          "legendFormat": "p95 - {{temporal_namespace}} into {{region}}",
+          "refId": "B",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${cloud_datasource}"
+          },
+          "expr": "temporal_cloud_v1_replication_lag_p99{temporal_namespace=~\"$namespace\"}",
+          "legendFormat": "p99 - {{temporal_namespace}} into {{region}}",
+          "refId": "C",
+          "range": true
+        }
+      ]
+    }
+  ]
+}
