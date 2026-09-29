@@ -1,0 +1,7 @@
+services:
+  mock-api:
+    environment:
+      - MOCK_SHIPPING_HANG_MS=50
+      - MOCK_INVENTORY_LATENCY_MS=10
+      - MOCK_SHIPPING_LATENCY_MS=10
+      - MOCK_PAYMENT_LATENCY_MS=10
